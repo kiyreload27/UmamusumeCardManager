@@ -15,3 +15,7 @@ venv
 *.log
 *.swp
 *.swo
+
+# Ignore build files
+.build
+
