@@ -18,4 +18,9 @@ venv
 
 # Ignore build files
 .build
+.toc
+.zip
+.pkg
+.txt
+.html
 
