@@ -10,6 +10,13 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from db.db_queries import get_hints, get_events, get_all_event_skills, get_card_by_id
+from gui.theme import (
+    BG_DARK, BG_MEDIUM, BG_LIGHT,
+    ACCENT_PRIMARY, ACCENT_SECONDARY, ACCENT_TERTIARY, ACCENT_SUCCESS,
+    TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
+    FONT_HEADER, FONT_SUBHEADER, FONT_BODY, FONT_BODY_BOLD, FONT_SMALL,
+    create_styled_text, create_card_frame
+)
 
 
 class HintsSkillsFrame(ttk.Frame):
@@ -25,58 +32,77 @@ class HintsSkillsFrame(ttk.Frame):
     def create_widgets(self):
         """Create the hints and skills interface"""
         # Header
-        header_frame = ttk.Frame(self)
-        header_frame.pack(fill=tk.X, padx=20, pady=10)
+        header_frame = tk.Frame(self, bg=BG_DARK)
+        header_frame.pack(fill=tk.X, padx=20, pady=15)
         
-        self.card_label = ttk.Label(header_frame, 
-                                    text="💡 Select a card from the Card List tab",
-                                    style='Header.TLabel')
+        self.card_label = tk.Label(header_frame, 
+                                   text="💡 Select a card from the Card List tab",
+                                   font=FONT_HEADER, bg=BG_DARK, fg=ACCENT_PRIMARY)
         self.card_label.pack(side=tk.LEFT)
         
         # Main content with two columns
-        content_frame = ttk.Frame(self)
-        content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        content_frame = tk.Frame(self, bg=BG_DARK)
+        content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 15))
         
         # Left column: Hints
-        hints_frame = ttk.LabelFrame(content_frame, text="🎯 Training Hints", padding=10)
-        hints_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
+        left_container = tk.Frame(content_frame, bg=BG_DARK)
+        left_container.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
         
-        self.hints_text = tk.Text(hints_frame, wrap=tk.WORD,
-                                  bg='#16213e', fg='#eaeaea',
-                                  font=('Segoe UI', 11),
-                                  padx=15, pady=15, relief=tk.FLAT)
-        self.hints_text.pack(fill=tk.BOTH, expand=True)
+        hints_header = tk.Frame(left_container, bg=BG_DARK)
+        hints_header.pack(fill=tk.X, pady=(0, 8))
+        tk.Label(hints_header, text="🎯 Training Hints", font=FONT_SUBHEADER,
+                 bg=BG_DARK, fg=TEXT_PRIMARY).pack(side=tk.LEFT)
+        
+        hints_frame = create_card_frame(left_container)
+        hints_frame.pack(fill=tk.BOTH, expand=True)
+        
+        self.hints_text = create_styled_text(hints_frame, height=18)
+        self.hints_text.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
         self.hints_text.config(state=tk.DISABLED)
         
-        # Add tag for styling
-        self.hints_text.tag_configure('header', font=('Segoe UI', 12, 'bold'), foreground='#e94560')
-        self.hints_text.tag_configure('skill', foreground='#4ecdc4')
+        # Configure tags for hints
+        self.hints_text.tag_configure('header', font=FONT_SUBHEADER, foreground=ACCENT_PRIMARY)
+        self.hints_text.tag_configure('skill', foreground=ACCENT_TERTIARY, font=FONT_BODY_BOLD)
+        self.hints_text.tag_configure('desc', foreground=TEXT_MUTED)
+        self.hints_text.tag_configure('number', foreground=ACCENT_SECONDARY)
         
         # Right column: Events and Skills
-        events_frame = ttk.LabelFrame(content_frame, text="📅 Training Events & Skills", padding=10)
-        events_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        right_container = tk.Frame(content_frame, bg=BG_DARK)
+        right_container.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        
+        events_header = tk.Frame(right_container, bg=BG_DARK)
+        events_header.pack(fill=tk.X, pady=(0, 8))
+        tk.Label(events_header, text="📅 Training Events & Skills", font=FONT_SUBHEADER,
+                 bg=BG_DARK, fg=TEXT_PRIMARY).pack(side=tk.LEFT)
+        
+        events_frame = create_card_frame(right_container)
+        events_frame.pack(fill=tk.BOTH, expand=True)
+        
+        tree_container = tk.Frame(events_frame, bg=BG_MEDIUM)
+        tree_container.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
         
         # Treeview for events
-        self.events_tree = ttk.Treeview(events_frame, columns=('event', 'skills'), show='tree headings')
-        self.events_tree.heading('#0', text='Type')
+        self.events_tree = ttk.Treeview(tree_container, columns=('event', 'skills'), show='tree headings')
+        self.events_tree.heading('#0', text='')
         self.events_tree.heading('event', text='Event/Skill')
         self.events_tree.heading('skills', text='Details')
         
-        self.events_tree.column('#0', width=30)
-        self.events_tree.column('event', width=250)
-        self.events_tree.column('skills', width=200)
+        self.events_tree.column('#0', width=35)
+        self.events_tree.column('event', width=240)
+        self.events_tree.column('skills', width=180)
         
-        scrollbar = ttk.Scrollbar(events_frame, orient=tk.VERTICAL, command=self.events_tree.yview)
+        scrollbar = ttk.Scrollbar(tree_container, orient=tk.VERTICAL, command=self.events_tree.yview)
         self.events_tree.configure(yscrollcommand=scrollbar.set)
         
         self.events_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
         # Summary section at bottom
-        summary_frame = ttk.Frame(self)
-        summary_frame.pack(fill=tk.X, padx=20, pady=10)
+        summary_frame = tk.Frame(self, bg=BG_MEDIUM, padx=15, pady=10)
+        summary_frame.pack(fill=tk.X, padx=20, pady=(0, 10))
         
-        self.summary_label = ttk.Label(summary_frame, text="", style='Subtitle.TLabel')
+        self.summary_label = tk.Label(summary_frame, text="", font=FONT_SMALL,
+                                      bg=BG_MEDIUM, fg=TEXT_SECONDARY)
         self.summary_label.pack()
     
     def set_card(self, card_id):
@@ -98,7 +124,8 @@ class HintsSkillsFrame(ttk.Frame):
         self.hints_text.delete('1.0', tk.END)
         
         if not self.current_card_id:
-            self.hints_text.insert(tk.END, "No card selected\n")
+            self.hints_text.insert(tk.END, "No card selected\n\n", 'desc')
+            self.hints_text.insert(tk.END, "Select a card from the Card List tab to view its hints.", 'desc')
             self.hints_text.config(state=tk.DISABLED)
             return
         
@@ -108,16 +135,16 @@ class HintsSkillsFrame(ttk.Frame):
         
         if hints:
             for i, (hint_name, hint_desc) in enumerate(hints, 1):
-                self.hints_text.insert(tk.END, f"  {i}. ", 'skill')
-                self.hints_text.insert(tk.END, f"{hint_name}\n")
+                self.hints_text.insert(tk.END, f"  {i}. ", 'number')
+                self.hints_text.insert(tk.END, f"{hint_name}\n", 'skill')
                 if hint_desc:
-                    self.hints_text.insert(tk.END, f"      {hint_desc}\n")
+                    self.hints_text.insert(tk.END, f"      {hint_desc}\n", 'desc')
                 self.hints_text.insert(tk.END, "\n")
         else:
-            self.hints_text.insert(tk.END, "  No hints/skills data available.\n\n")
-            self.hints_text.insert(tk.END, "  This may mean:\n")
-            self.hints_text.insert(tk.END, "  • Card hasn't been scraped yet\n")
-            self.hints_text.insert(tk.END, "  • Card has no trainable skills\n")
+            self.hints_text.insert(tk.END, "  No hints/skills data available.\n\n", 'desc')
+            self.hints_text.insert(tk.END, "  This may mean:\n", 'desc')
+            self.hints_text.insert(tk.END, "  • Card hasn't been scraped yet\n", 'desc')
+            self.hints_text.insert(tk.END, "  • Card has no trainable skills\n", 'desc')
         
         self.hints_text.config(state=tk.DISABLED)
     
@@ -149,5 +176,5 @@ class HintsSkillsFrame(ttk.Frame):
         event_count = len(events)
         
         self.summary_label.config(
-            text=f"📊 Summary: {hint_count} hints | {event_count} events"
+            text=f"📊 Summary: {hint_count} hints  │  {event_count} events"
         )

@@ -12,24 +12,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from db.db_queries import get_all_cards, get_card_by_id, get_effects_at_level, set_card_owned, is_card_owned, update_owned_card_level
 from utils import resolve_image_path
-
-# Rarity colors
-RARITY_COLORS = {
-    'SSR': '#FFD700',  # Gold
-    'SR': '#C0C0C0',   # Silver  
-    'R': '#CD7F32'     # Bronze
-}
-
-# Type emojis
-TYPE_ICONS = {
-    'Speed': '🏃',
-    'Stamina': '💚',
-    'Power': '💪',
-    'Guts': '🔥',
-    'Wisdom': '🧠',
-    'Friend': '💜',
-    'Group': '👥'
-}
+from gui.theme import (
+    BG_DARK, BG_MEDIUM, BG_LIGHT, BG_HIGHLIGHT,
+    ACCENT_PRIMARY, ACCENT_SECONDARY, ACCENT_SUCCESS,
+    TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
+    FONT_HEADER, FONT_SUBHEADER, FONT_BODY, FONT_BODY_BOLD, FONT_SMALL, FONT_MONO,
+    RARITY_COLORS, TYPE_COLORS, TYPE_ICONS,
+    create_styled_button, create_styled_text, create_card_frame,
+    get_rarity_color, get_type_color, get_type_icon
+)
 
 
 class CardListFrame(ttk.Frame):
@@ -54,7 +45,7 @@ class CardListFrame(ttk.Frame):
         main_pane.pack(fill=tk.BOTH, expand=True)
         
         # Left panel - Card list with filters
-        left_frame = ttk.Frame(main_pane, width=400)
+        left_frame = ttk.Frame(main_pane, width=420)
         main_pane.add(left_frame, weight=1)
         
         # Right panel - Card details
@@ -63,30 +54,32 @@ class CardListFrame(ttk.Frame):
         
         # === Left Panel Contents ===
         
-        # Search bar
-        search_frame = ttk.Frame(left_frame)
-        search_frame.pack(fill=tk.X, padx=5, pady=5)
+        # Search bar with modern styling
+        search_frame = tk.Frame(left_frame, bg=BG_DARK)
+        search_frame.pack(fill=tk.X, padx=10, pady=10)
         
-        ttk.Label(search_frame, text="🔍").pack(side=tk.LEFT)
+        search_icon = tk.Label(search_frame, text="🔍", font=FONT_BODY, bg=BG_DARK, fg=TEXT_MUTED)
+        search_icon.pack(side=tk.LEFT, padx=(0, 5))
+        
         self.search_var = tk.StringVar()
         self.search_var.trace('w', lambda *args: self.filter_cards())
-        self.search_entry = ttk.Entry(search_frame, textvariable=self.search_var, width=30)
-        self.search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        self.search_entry = ttk.Entry(search_frame, textvariable=self.search_var, width=35)
+        self.search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
         
         # Filter dropdowns
-        filter_frame = ttk.Frame(left_frame)
-        filter_frame.pack(fill=tk.X, padx=5, pady=5)
+        filter_frame = tk.Frame(left_frame, bg=BG_DARK)
+        filter_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
         
         # Rarity filter
-        ttk.Label(filter_frame, text="Rarity:").pack(side=tk.LEFT)
+        tk.Label(filter_frame, text="Rarity:", font=FONT_SMALL, bg=BG_DARK, fg=TEXT_MUTED).pack(side=tk.LEFT)
         self.rarity_var = tk.StringVar(value="All")
         rarity_combo = ttk.Combobox(filter_frame, textvariable=self.rarity_var,
-                                    values=["All", "SSR", "SR", "R"], width=8, state='readonly')
-        rarity_combo.pack(side=tk.LEFT, padx=5)
+                                    values=["All", "SSR", "SR", "R"], width=7, state='readonly')
+        rarity_combo.pack(side=tk.LEFT, padx=(5, 15))
         rarity_combo.bind('<<ComboboxSelected>>', lambda e: self.filter_cards())
         
         # Type filter
-        ttk.Label(filter_frame, text="Type:").pack(side=tk.LEFT, padx=(10, 0))
+        tk.Label(filter_frame, text="Type:", font=FONT_SMALL, bg=BG_DARK, fg=TEXT_MUTED).pack(side=tk.LEFT)
         self.type_var = tk.StringVar(value="All")
         type_combo = ttk.Combobox(filter_frame, textvariable=self.type_var,
                                   values=["All", "Speed", "Stamina", "Power", "Guts", "Wisdom", "Friend", "Group"],
@@ -98,33 +91,30 @@ class CardListFrame(ttk.Frame):
         self.owned_only_var = tk.BooleanVar(value=False)
         owned_check = ttk.Checkbutton(filter_frame, text="Owned Only", 
                                        variable=self.owned_only_var, command=self.filter_cards)
-        owned_check.pack(side=tk.LEFT, padx=10)
+        owned_check.pack(side=tk.LEFT, padx=15)
         
         # Reset Button
-        ttk.Button(filter_frame, text="Reset", command=self.reset_filters, width=6).pack(side=tk.LEFT, padx=5)
+        ttk.Button(filter_frame, text="Reset", command=self.reset_filters, 
+                   style='Small.TButton', width=7).pack(side=tk.LEFT, padx=5)
         
         # Shortcuts
         self.bind_all('<Control-f>', lambda e: self.search_entry.focus_set())
         
         # Card count label
-        self.count_label = ttk.Label(left_frame, text="0 cards", style='Subtitle.TLabel')
+        self.count_label = tk.Label(left_frame, text="0 cards", font=FONT_SMALL, 
+                                    bg=BG_DARK, fg=ACCENT_PRIMARY)
         self.count_label.pack(pady=5)
         
         # Card list (Treeview)
-        list_frame = ttk.Frame(left_frame)
-        list_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        # Treeview with scrollbar
-        # Configure style for taller rows
-        style = ttk.Style()
-        style.configure("CardList.Treeview", rowheight=40)
+        list_frame = tk.Frame(left_frame, bg=BG_DARK)
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
         
         self.tree = ttk.Treeview(list_frame, columns=('owned', 'name', 'rarity', 'type'), 
                                   show='tree headings', selectmode='browse',
                                   style="CardList.Treeview")
                                   
-        self.tree.heading('#0', text='Art')
-        self.tree.column('#0', width=50, anchor='center')
+        self.tree.heading('#0', text='')
+        self.tree.column('#0', width=45, anchor='center')
         
         self.tree.heading('owned', text='★', command=lambda: self.sort_column('owned', False))
         self.tree.heading('name', text='Name', anchor='w', command=lambda: self.sort_column('name', False))
@@ -133,8 +123,8 @@ class CardListFrame(ttk.Frame):
         
         self.tree.column('owned', width=30, anchor='center')
         self.tree.column('name', width=180, minwidth=150)
-        self.tree.column('rarity', width=50, anchor='center')
-        self.tree.column('type', width=80, anchor='center')
+        self.tree.column('rarity', width=55, anchor='center')
+        self.tree.column('type', width=90, anchor='center')
         
         scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.tree.yview)
         self.tree.configure(yscrollcommand=scrollbar.set)
@@ -145,65 +135,83 @@ class CardListFrame(ttk.Frame):
         self.tree.bind('<<TreeviewSelect>>', self.on_select)
         
         # Tag for owned cards
-        self.tree.tag_configure('owned', background='#2d4a3e')
+        self.tree.tag_configure('owned', background='#1a3a2e')
         
         # === Right Panel Contents (Details) ===
         self.create_details_panel()
     
     def create_details_panel(self):
         """Create the card details panel"""
-        # Image placeholder
-        self.image_label = ttk.Label(self.details_frame, text="")
-        self.image_label.pack(pady=5)
+        # Container with card-like appearance
+        details_container = tk.Frame(self.details_frame, bg=BG_DARK)
+        details_container.pack(fill=tk.BOTH, expand=True, padx=15, pady=10)
         
-        # Header
-        self.detail_name = ttk.Label(self.details_frame, text="Select a card", style='Header.TLabel')
-        self.detail_name.pack(pady=5)
+        # Image area with card frame
+        image_frame = create_card_frame(details_container, padx=10, pady=10)
+        image_frame.pack(pady=10)
         
-        self.detail_info = ttk.Label(self.details_frame, text="", style='Subtitle.TLabel')
+        self.image_label = tk.Label(image_frame, text="", bg=BG_MEDIUM)
+        self.image_label.pack(padx=5, pady=5)
+        
+        # Header with card name
+        self.detail_name = tk.Label(details_container, text="Select a card", 
+                                    font=FONT_HEADER, bg=BG_DARK, fg=ACCENT_PRIMARY)
+        self.detail_name.pack(pady=(10, 5))
+        
+        self.detail_info = tk.Label(details_container, text="", 
+                                    font=FONT_SMALL, bg=BG_DARK, fg=TEXT_MUTED)
         self.detail_info.pack()
         
-        # Owned checkbox
-        owned_frame = ttk.Frame(self.details_frame)
-        owned_frame.pack(pady=10)
+        # Owned checkbox with emphasis
+        owned_frame = tk.Frame(details_container, bg=BG_DARK)
+        owned_frame.pack(pady=15)
         
         self.owned_var = tk.BooleanVar(value=False)
-        self.owned_checkbox = ttk.Checkbutton(owned_frame, text="I Own This Card", 
+        self.owned_checkbox = ttk.Checkbutton(owned_frame, text="✨ I Own This Card", 
                                                variable=self.owned_var, 
                                                command=self.toggle_owned,
                                                style='Large.TCheckbutton')
         self.owned_checkbox.pack(side=tk.LEFT)
         
-        # Level selector
-        level_frame = ttk.Frame(self.details_frame)
-        level_frame.pack(fill=tk.X, padx=20, pady=10)
+        # Level selector with modern styling
+        level_frame = tk.Frame(details_container, bg=BG_DARK)
+        level_frame.pack(fill=tk.X, padx=30, pady=10)
         
-        ttk.Label(level_frame, text="View Level:").pack(side=tk.LEFT)
+        tk.Label(level_frame, text="View Level:", font=FONT_BODY, 
+                 bg=BG_DARK, fg=TEXT_SECONDARY).pack(side=tk.LEFT)
         
         self.level_var = tk.IntVar(value=50)
         self.level_scale = ttk.Scale(level_frame, from_=1, to=50, orient=tk.HORIZONTAL,
                                      variable=self.level_var, command=self.on_level_change)
-        self.level_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=10)
+        self.level_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=15)
         
-        self.level_label = ttk.Label(level_frame, text="50", width=4)
+        self.level_label = tk.Label(level_frame, text="50", width=4, font=FONT_HEADER,
+                                    bg=BG_DARK, fg=ACCENT_PRIMARY)
         self.level_label.pack(side=tk.LEFT)
         
         # Quick level buttons
-        btn_frame = ttk.Frame(self.details_frame)
-        btn_frame.pack(pady=5)
+        btn_frame = tk.Frame(details_container, bg=BG_DARK)
+        btn_frame.pack(pady=8)
         for lvl in [1, 25, 40, 50]:
-            ttk.Button(btn_frame, text=f"Lv{lvl}", width=6,
-                       command=lambda l=lvl: self.set_level(l)).pack(side=tk.LEFT, padx=2)
+            btn = create_styled_button(btn_frame, text=f"Lv{lvl}", 
+                                       command=lambda l=lvl: self.set_level(l),
+                                       style_type='default')
+            btn.config(width=6, padx=8, pady=4, font=FONT_SMALL)
+            btn.pack(side=tk.LEFT, padx=3)
         
-        # Effects display
-        effects_label = ttk.Label(self.details_frame, text="📊 Effects", style='Header.TLabel')
-        effects_label.pack(pady=(15, 5))
+        # Effects display header
+        effects_header = tk.Frame(details_container, bg=BG_DARK)
+        effects_header.pack(fill=tk.X, padx=20, pady=(20, 10))
         
-        # Effects text area
-        self.effects_text = tk.Text(self.details_frame, height=12, wrap=tk.WORD,
-                                    bg='#16213e', fg='#eaeaea', font=('Consolas', 11),
-                                    padx=10, pady=10, relief=tk.FLAT)
-        self.effects_text.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        tk.Label(effects_header, text="📊 Effects at Current Level", 
+                 font=FONT_SUBHEADER, bg=BG_DARK, fg=TEXT_PRIMARY).pack(side=tk.LEFT)
+        
+        # Effects text area with modern styling
+        effects_frame = create_card_frame(details_container)
+        effects_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 15))
+        
+        self.effects_text = create_styled_text(effects_frame, height=10)
+        self.effects_text.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
         self.effects_text.config(state=tk.DISABLED)
     
     def load_cards(self):
@@ -259,7 +267,7 @@ class CardListFrame(ttk.Frame):
         
         for card in cards:
             card_id, name, rarity, card_type, max_level, image_path, is_owned, owned_level = card
-            type_icon = TYPE_ICONS.get(card_type, '')
+            type_icon = get_type_icon(card_type)
             owned_mark = "★" if is_owned else ""
             tag = 'owned' if is_owned else ''
             
@@ -290,7 +298,7 @@ class CardListFrame(ttk.Frame):
                                values=(owned_mark, display_name, rarity, f"{type_icon} {card_type}"),
                                tags=(tag,))
         
-        self.count_label.config(text=f"{len(cards)} cards")
+        self.count_label.config(text=f"✨ {len(cards)} cards")
     
     def on_select(self, event):
         """Handle card selection"""
@@ -318,10 +326,13 @@ class CardListFrame(ttk.Frame):
             self.level_var.set(initial_level)
             self.level_label.config(text=str(initial_level))
             
-            # Update details display
-            type_icon = TYPE_ICONS.get(card_type, '')
-            self.detail_name.config(text=f"{type_icon} {name}")
-            self.detail_info.config(text=f"{rarity} | {card_type} | Max Level: {max_level}")
+            # Update details display with colors
+            type_icon = get_type_icon(card_type)
+            type_color = get_type_color(card_type)
+            rarity_color = get_rarity_color(rarity)
+            
+            self.detail_name.config(text=f"{type_icon} {name}", fg=ACCENT_PRIMARY)
+            self.detail_info.config(text=f"{rarity} │ {card_type} │ Max Level: {max_level}")
             
             # Load effects
             self.current_card_id = card_id
@@ -338,7 +349,7 @@ class CardListFrame(ttk.Frame):
         if resolved_path and os.path.exists(resolved_path):
             try:
                 img = Image.open(resolved_path)
-                img.thumbnail((120, 120))  # Resize
+                img.thumbnail((130, 130))  # Slightly larger
                 self.card_image = ImageTk.PhotoImage(img)
                 self.image_label.config(image=self.card_image)
             except Exception as e:
@@ -402,12 +413,30 @@ class CardListFrame(ttk.Frame):
         self.effects_text.config(state=tk.NORMAL)
         self.effects_text.delete('1.0', tk.END)
         
+        # Configure tags for styling
+        self.effects_text.tag_configure('header', font=FONT_SUBHEADER, foreground=ACCENT_PRIMARY)
+        self.effects_text.tag_configure('highlight', foreground=ACCENT_SUCCESS)
+        self.effects_text.tag_configure('effect_name', foreground=TEXT_SECONDARY)
+        self.effects_text.tag_configure('effect_value', foreground=TEXT_PRIMARY)
+        
         if effects:
-            self.effects_text.insert(tk.END, f"━━━ Level {level} Effects ━━━\n\n")
+            self.effects_text.insert(tk.END, f"━━━ Level {level} ━━━\n\n", 'header')
             for name, value in effects:
-                self.effects_text.insert(tk.END, f"  • {name}: {value}\n")
+                # Highlight high values
+                prefix = ""
+                if '%' in str(value):
+                    try:
+                        num = int(str(value).replace('%', '').replace('+', ''))
+                        if num >= 20:
+                            prefix = "★ "
+                    except:
+                        pass
+                if prefix:
+                    self.effects_text.insert(tk.END, prefix, 'highlight')
+                self.effects_text.insert(tk.END, f"{name}: ", 'effect_name')
+                self.effects_text.insert(tk.END, f"{value}\n", 'effect_value')
         else:
             self.effects_text.insert(tk.END, f"No effects data for Level {level}\n\n")
-            self.effects_text.insert(tk.END, "Available levels: 1, 25, 40, 50\n")
+            self.effects_text.insert(tk.END, "Available levels: 1, 25, 40, 50\n", 'effect_name')
         
         self.effects_text.config(state=tk.DISABLED)

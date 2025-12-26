@@ -14,6 +14,13 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from updater.update_checker import check_for_updates, download_update, apply_update, get_current_version
+from gui.theme import (
+    BG_DARK, BG_DARKEST, BG_MEDIUM, BG_LIGHT, BG_HIGHLIGHT,
+    ACCENT_PRIMARY, ACCENT_SECONDARY, ACCENT_SUCCESS, ACCENT_ERROR,
+    TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
+    FONT_HEADER, FONT_SUBHEADER, FONT_BODY, FONT_BODY_BOLD, FONT_SMALL,
+    create_styled_button
+)
 
 
 class UpdateDialog:
@@ -29,7 +36,7 @@ class UpdateDialog:
         # Create the dialog window
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("Check for Updates")
-        self.dialog.geometry("450x300")
+        self.dialog.geometry("480x320")
         self.dialog.resizable(False, False)
         self.dialog.transient(parent)
         self.dialog.grab_set()
@@ -37,15 +44,7 @@ class UpdateDialog:
         # Center on parent
         self.center_on_parent()
         
-        # Configure dark theme colors
-        self.bg_dark = '#1a1a2e'
-        self.bg_medium = '#16213e'
-        self.accent = '#e94560'
-        self.text_light = '#eaeaea'
-        self.text_muted = '#a0a0a0'
-        self.success = '#4ecca3'
-        
-        self.dialog.configure(bg=self.bg_dark)
+        self.dialog.configure(bg=BG_DARK)
         
         # Set up the UI
         self.setup_ui()
@@ -61,8 +60,8 @@ class UpdateDialog:
         parent_w = self.parent.winfo_width()
         parent_h = self.parent.winfo_height()
         
-        dialog_w = 450
-        dialog_h = 300
+        dialog_w = 480
+        dialog_h = 320
         
         x = parent_x + (parent_w - dialog_w) // 2
         y = parent_y + (parent_h - dialog_h) // 2
@@ -72,16 +71,16 @@ class UpdateDialog:
     def setup_ui(self):
         """Set up the dialog UI."""
         # Main container
-        main_frame = tk.Frame(self.dialog, bg=self.bg_dark, padx=20, pady=20)
+        main_frame = tk.Frame(self.dialog, bg=BG_DARK, padx=25, pady=25)
         main_frame.pack(fill=tk.BOTH, expand=True)
         
         # Title
         self.title_label = tk.Label(
             main_frame, 
             text="🔄 Checking for Updates...",
-            font=('Helvetica', 14, 'bold'),
-            bg=self.bg_dark,
-            fg=self.accent
+            font=FONT_HEADER,
+            bg=BG_DARK,
+            fg=ACCENT_PRIMARY
         )
         self.title_label.pack(pady=(0, 15))
         
@@ -89,89 +88,76 @@ class UpdateDialog:
         self.status_label = tk.Label(
             main_frame,
             text="Connecting to GitHub...",
-            font=('Helvetica', 10),
-            bg=self.bg_dark,
-            fg=self.text_muted,
-            wraplength=400
+            font=FONT_BODY,
+            bg=BG_DARK,
+            fg=TEXT_MUTED,
+            wraplength=420
         )
-        self.status_label.pack(pady=(0, 10))
+        self.status_label.pack(pady=(0, 12))
         
         # Version info frame
-        self.version_frame = tk.Frame(main_frame, bg=self.bg_medium, padx=15, pady=10)
+        self.version_frame = tk.Frame(main_frame, bg=BG_MEDIUM, padx=18, pady=12)
         self.version_frame.pack(fill=tk.X, pady=(0, 15))
         
         self.current_version_label = tk.Label(
             self.version_frame,
             text=f"Current Version: v{get_current_version()}",
-            font=('Helvetica', 10),
-            bg=self.bg_medium,
-            fg=self.text_light
+            font=FONT_BODY,
+            bg=BG_MEDIUM,
+            fg=TEXT_SECONDARY
         )
         self.current_version_label.pack(anchor='w')
         
         self.new_version_label = tk.Label(
             self.version_frame,
             text="Latest Version: Checking...",
-            font=('Helvetica', 10),
-            bg=self.bg_medium,
-            fg=self.text_light
+            font=FONT_BODY,
+            bg=BG_MEDIUM,
+            fg=TEXT_SECONDARY
         )
         self.new_version_label.pack(anchor='w')
         
         # Progress bar (hidden initially)
-        self.progress_frame = tk.Frame(main_frame, bg=self.bg_dark)
+        self.progress_frame = tk.Frame(main_frame, bg=BG_DARK)
         self.progress_frame.pack(fill=tk.X, pady=(0, 15))
         
         self.progress_label = tk.Label(
             self.progress_frame,
             text="",
-            font=('Helvetica', 9),
-            bg=self.bg_dark,
-            fg=self.text_muted
+            font=FONT_SMALL,
+            bg=BG_DARK,
+            fg=TEXT_MUTED
         )
-        self.progress_label.pack(anchor='w')
+        self.progress_label.pack(anchor='w', pady=(0, 5))
         
         self.progress_bar = ttk.Progressbar(
             self.progress_frame,
             mode='indeterminate',
-            length=400
+            length=420
         )
         self.progress_bar.pack(fill=tk.X)
         self.progress_bar.start(10)
         
         # Button frame
-        self.button_frame = tk.Frame(main_frame, bg=self.bg_dark)
-        self.button_frame.pack(side=tk.BOTTOM, fill=tk.X)
+        self.button_frame = tk.Frame(main_frame, bg=BG_DARK)
+        self.button_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(10, 0))
         
-        # Close button (shown initially)
-        self.close_button = tk.Button(
+        # Close button
+        self.close_button = create_styled_button(
             self.button_frame,
             text="Close",
             command=self.close,
-            bg=self.bg_medium,
-            fg=self.text_light,
-            font=('Helvetica', 10),
-            padx=20,
-            pady=5,
-            relief=tk.FLAT,
-            cursor='hand2'
+            style_type='default'
         )
         self.close_button.pack(side=tk.RIGHT)
         
         # Update button (hidden initially)
-        self.update_button = tk.Button(
+        self.update_button = create_styled_button(
             self.button_frame,
             text="⬇️ Download & Install",
             command=self.start_download,
-            bg=self.accent,
-            fg=self.text_light,
-            font=('Helvetica', 10, 'bold'),
-            padx=20,
-            pady=5,
-            relief=tk.FLAT,
-            cursor='hand2'
+            style_type='accent'
         )
-        
 
     
     def check_for_updates(self):
@@ -192,11 +178,11 @@ class UpdateDialog:
             self.title_label.config(text="🎉 Update Available!")
             self.status_label.config(
                 text="A new version is available. Click 'Download & Install' to update.",
-                fg=self.success
+                fg=ACCENT_SUCCESS
             )
             self.new_version_label.config(
                 text=f"Latest Version: {self.update_info['new_version']}",
-                fg=self.success
+                fg=ACCENT_SUCCESS
             )
             
             # Show update button
@@ -206,11 +192,11 @@ class UpdateDialog:
             self.title_label.config(text="✅ You're Up to Date!")
             self.status_label.config(
                 text=f"You are running the latest version (v{get_current_version()}).",
-                fg=self.success
+                fg=ACCENT_SUCCESS
             )
             self.new_version_label.config(
                 text=f"Latest Version: v{get_current_version()}",
-                fg=self.success
+                fg=ACCENT_SUCCESS
             )
             
             # Hide progress bar
@@ -226,7 +212,7 @@ class UpdateDialog:
         self.close_button.config(state=tk.DISABLED)
         
         self.title_label.config(text="⬇️ Downloading Update...")
-        self.status_label.config(text="Please wait while the update is downloaded...", fg=self.text_muted)
+        self.status_label.config(text="Please wait while the update is downloaded...", fg=TEXT_MUTED)
         
         # Configure progress bar for determinate mode
         self.progress_bar.config(mode='determinate', maximum=100)
@@ -259,7 +245,7 @@ class UpdateDialog:
             self.title_label.config(text="✅ Download Complete!")
             self.status_label.config(
                 text="The update has been downloaded. Click 'Install & Restart' to apply the update.",
-                fg=self.success
+                fg=ACCENT_SUCCESS
             )
             
             # Change button to install
@@ -273,7 +259,7 @@ class UpdateDialog:
             self.title_label.config(text="❌ Download Failed")
             self.status_label.config(
                 text="Failed to download the update. Please try again later or download manually from GitHub.",
-                fg='#ff6b6b'
+                fg=ACCENT_ERROR
             )
             self.update_button.config(state=tk.NORMAL, text="⬇️ Retry Download")
             self.close_button.config(state=tk.NORMAL)
@@ -281,7 +267,7 @@ class UpdateDialog:
     def install_update(self, download_path: str):
         """Install the downloaded update."""
         self.title_label.config(text="🔄 Installing Update...")
-        self.status_label.config(text="Applying update and restarting...", fg=self.text_muted)
+        self.status_label.config(text="Applying update and restarting...", fg=TEXT_MUTED)
         self.update_button.config(state=tk.DISABLED)
         self.close_button.config(state=tk.DISABLED)
         
@@ -297,7 +283,6 @@ class UpdateDialog:
                 parent=self.dialog
             )
             self.close()
-    
 
     
     def close(self):

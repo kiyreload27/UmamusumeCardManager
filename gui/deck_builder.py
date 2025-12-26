@@ -17,18 +17,20 @@ from db.db_queries import (
     get_effects_at_level
 )
 from utils import resolve_image_path
+from gui.theme import (
+    BG_DARK, BG_DARKEST, BG_MEDIUM, BG_LIGHT, BG_HIGHLIGHT,
+    ACCENT_PRIMARY, ACCENT_SECONDARY, ACCENT_SUCCESS, ACCENT_ERROR,
+    TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
+    FONT_HEADER, FONT_SUBHEADER, FONT_BODY, FONT_BODY_BOLD, FONT_SMALL, FONT_TINY,
+    TYPE_COLORS, get_type_color, get_type_icon,
+    create_styled_button, create_styled_text, create_card_frame
+)
 
-# Theme Colors (matching main_window.py)
-BG_DARK = '#1a1a2e'
-BG_MEDIUM = '#16213e'
-BG_LIGHT = '#0f3460'
-ACCENT = '#e94560'
-TEXT_MAIN = '#eaeaea'
 
 class CardSlot(tk.Frame):
     """Visual component for a single card slot"""
     def __init__(self, parent, index, remove_callback, level_callback):
-        super().__init__(parent, bg=BG_MEDIUM, highlightthickness=1, highlightbackground=BG_LIGHT)
+        super().__init__(parent, bg=BG_MEDIUM, highlightthickness=2, highlightbackground=BG_LIGHT)
         self.index = index
         self.remove_callback = remove_callback
         self.level_callback = level_callback
@@ -40,36 +42,44 @@ class CardSlot(tk.Frame):
         # Configure grid weight
         self.columnconfigure(1, weight=1)
         
+        # Slot number indicator
+        slot_label = tk.Label(self, text=f"#{self.index + 1}", font=FONT_TINY,
+                              bg=BG_LIGHT, fg=TEXT_MUTED, padx=4, pady=2)
+        slot_label.place(x=2, y=2)
+        
         # Image Area (Left)
-        self.image_label = tk.Label(self, bg=BG_MEDIUM, text="No Image", fg='gray',
-                                    width=10, height=5) # Approximate size characters
-        self.image_label.grid(row=0, column=0, rowspan=3, padx=5, pady=5)
+        self.image_label = tk.Label(self, bg=BG_MEDIUM, text="📭", fg=TEXT_MUTED,
+                                    font=('Segoe UI', 20))
+        self.image_label.grid(row=0, column=0, rowspan=3, padx=8, pady=8)
         
         # Details Area (Right)
-        self.name_label = tk.Label(self, text="Empty Slot", bg=BG_MEDIUM, fg=TEXT_MAIN,
-                                   font=('Segoe UI', 10, 'bold'), anchor='w', wraplength=120)
-        self.name_label.grid(row=0, column=1, sticky='w', padx=5, pady=(5,0))
+        self.name_label = tk.Label(self, text="Empty Slot", bg=BG_MEDIUM, fg=TEXT_MUTED,
+                                   font=FONT_BODY_BOLD, anchor='w', wraplength=130)
+        self.name_label.grid(row=0, column=1, sticky='w', padx=8, pady=(10, 0))
         
-        self.meta_label = tk.Label(self, text="", bg=BG_MEDIUM, fg='#aaaaaa',
-                                   font=('Segoe UI', 9), anchor='w')
-        self.meta_label.grid(row=1, column=1, sticky='w', padx=5)
+        self.meta_label = tk.Label(self, text="", bg=BG_MEDIUM, fg=TEXT_MUTED,
+                                   font=FONT_SMALL, anchor='w')
+        self.meta_label.grid(row=1, column=1, sticky='w', padx=8)
         
         # Controls (Bottom Right)
         ctrl_frame = tk.Frame(self, bg=BG_MEDIUM)
-        ctrl_frame.grid(row=2, column=1, sticky='ew', padx=5, pady=5)
+        ctrl_frame.grid(row=2, column=1, sticky='ew', padx=8, pady=8)
         
         # Level Selector
-        tk.Label(ctrl_frame, text="Lv:", bg=BG_MEDIUM, fg='#aaaaaa', font=('Segoe UI', 8)).pack(side=tk.LEFT)
+        tk.Label(ctrl_frame, text="Lv:", bg=BG_MEDIUM, fg=TEXT_MUTED, 
+                 font=FONT_SMALL).pack(side=tk.LEFT)
         
         self.level_var = tk.StringVar(value="50")
         self.level_combo = ttk.Combobox(ctrl_frame, textvariable=self.level_var, 
-                                        values=["50", "40", "25", "1"], width=3, state='readonly')
-        self.level_combo.pack(side=tk.LEFT, padx=2)
+                                        values=["50", "40", "25", "1"], width=4, state='readonly')
+        self.level_combo.pack(side=tk.LEFT, padx=4)
         self.level_combo.bind('<<ComboboxSelected>>', self._on_level_change)
         
         # Remove Button
-        self.remove_btn = tk.Button(ctrl_frame, text="✕", bg=BG_LIGHT, fg=TEXT_MAIN,
-                                    bd=0, activebackground=ACCENT, cursor='hand2',
+        self.remove_btn = tk.Button(ctrl_frame, text="✕", bg=BG_LIGHT, fg=ACCENT_ERROR,
+                                    bd=0, font=FONT_BODY_BOLD, width=2,
+                                    activebackground=ACCENT_ERROR, activeforeground=TEXT_PRIMARY,
+                                    cursor='hand2',
                                     command=lambda: self.remove_callback(self.index))
         self.remove_btn.pack(side=tk.RIGHT)
         
@@ -93,15 +103,16 @@ class CardSlot(tk.Frame):
         card_id, name, rarity, card_type, image_path, level = card_data
         
         # Update styling based on type
-        type_colors = {
-            'Speed': '#3498db', 'Stamina': '#e67e22', 'Power': '#f1c40f',
-            'Guts': '#e74c3c', 'Wisdom': '#2ecc71', 'Friend': '#9b59b6', 'Group': '#f39c12'
-        }
-        color = type_colors.get(card_type, TEXT_MAIN)
+        color = get_type_color(card_type)
+        type_icon = get_type_icon(card_type)
         
-        self.name_label.config(text=name, fg=TEXT_MAIN)
-        self.meta_label.config(text=f"{rarity} | {card_type}", fg=color)
+        self.name_label.config(text=name, fg=TEXT_PRIMARY)
+        self.meta_label.config(text=f"{type_icon} {rarity} │ {card_type}", fg=color)
         self.level_var.set(str(level))
+        
+        # Update border color based on rarity
+        rarity_borders = {'SSR': '#ffd700', 'SR': '#c0c0c0', 'R': '#cd853f'}
+        self.config(highlightbackground=rarity_borders.get(rarity, BG_LIGHT))
         
         # Load Image
         self._load_image(image_path)
@@ -109,9 +120,10 @@ class CardSlot(tk.Frame):
         self.toggle_controls(True)
         
     def reset(self):
-        self.name_label.config(text="Empty Slot", fg='gray')
-        self.meta_label.config(text="")
-        self.image_label.config(image='', text="Empty", width=10, height=5)
+        self.name_label.config(text="Empty Slot", fg=TEXT_MUTED)
+        self.meta_label.config(text="Click a card to add")
+        self.image_label.config(image='', text="📭", font=('Segoe UI', 20))
+        self.config(highlightbackground=BG_LIGHT)
         self.image_ref = None
         self.toggle_controls(False)
         
@@ -120,16 +132,14 @@ class CardSlot(tk.Frame):
         if resolved_path and os.path.exists(resolved_path):
             try:
                 pil_img = Image.open(resolved_path)
-                # Resize to thumbnail (maintain aspect ratio roughly, target height 80)
-                # Original is usually ~120x160 or similar
-                pil_img.thumbnail((70, 70), Image.Resampling.LANCZOS)
+                pil_img.thumbnail((65, 65), Image.Resampling.LANCZOS)
                 self.image_ref = ImageTk.PhotoImage(pil_img)
-                self.image_label.config(image=self.image_ref, width=0, height=0)
+                self.image_label.config(image=self.image_ref, text='')
             except Exception as e:
                 print(f"Failed to load image: {e}")
-                self.image_label.config(image='', text="Error")
+                self.image_label.config(image='', text="⚠️")
         else:
-            self.image_label.config(image='', text="No Img")
+            self.image_label.config(image='', text="🖼️")
 
     def _on_level_change(self, event):
         self.level_callback(self.index, int(self.level_var.get()))
@@ -146,13 +156,6 @@ class DeckBuilderFrame(ttk.Frame):
         self.refresh_decks()
     
     def setup_ui(self):
-        # Apply dark theme tweaks
-        style = ttk.Style()
-        # Create specific style for this treeview to allow larger rows (thumbnails)
-        style.configure("DeckList.Treeview", background=BG_MEDIUM, fieldbackground=BG_MEDIUM, 
-                        foreground=TEXT_MAIN, rowheight=40)
-        style.map('DeckList.Treeview', background=[('selected', ACCENT)])
-        
         # Main container with split view
         main_split = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
         main_split.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
@@ -161,131 +164,139 @@ class DeckBuilderFrame(ttk.Frame):
         left_panel = ttk.Frame(main_split)
         main_split.add(left_panel, weight=1)
         
-        ttk.Label(left_panel, text="Available Cards", font=('Segoe UI', 12, 'bold')).pack(pady=(0,5))
+        # Header
+        header = tk.Frame(left_panel, bg=BG_DARK)
+        header.pack(fill=tk.X, pady=(0, 10))
+        tk.Label(header, text="📋 Available Cards", font=FONT_SUBHEADER, 
+                 bg=BG_DARK, fg=TEXT_PRIMARY).pack(side=tk.LEFT)
         
         # Filters
-        filter_frame = ttk.Frame(left_panel)
-        filter_frame.pack(fill=tk.X, padx=2)
+        filter_frame = tk.Frame(left_panel, bg=BG_DARK)
+        filter_frame.pack(fill=tk.X, pady=(0, 8))
         
         self.search_var = tk.StringVar()
         self.search_var.trace('w', lambda *args: self.filter_cards())
-        ttk.Entry(filter_frame, textvariable=self.search_var, width=20).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0,5))
+        search_entry = ttk.Entry(filter_frame, textvariable=self.search_var, width=18)
+        search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
         
         self.type_var = tk.StringVar(value="All")
         types = ["All", "Speed", "Stamina", "Power", "Guts", "Wisdom", "Friend", "Group"]
-        type_combo = ttk.Combobox(filter_frame, textvariable=self.type_var, values=types, width=8, state='readonly')
+        type_combo = ttk.Combobox(filter_frame, textvariable=self.type_var, 
+                                  values=types, width=9, state='readonly')
         type_combo.pack(side=tk.LEFT)
         type_combo.bind('<<ComboboxSelected>>', lambda e: self.filter_cards())
         
         self.owned_only_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(filter_frame, text="Owned", variable=self.owned_only_var, command=self.filter_cards).pack(side=tk.LEFT, padx=5)
+        ttk.Checkbutton(filter_frame, text="Owned", variable=self.owned_only_var, 
+                        command=self.filter_cards).pack(side=tk.LEFT, padx=8)
         
         # Card List
-        # show='tree headings' to show icon column (#0)
-        self.card_tree = ttk.Treeview(left_panel, columns=('name', 'rarity', 'type'), 
+        list_frame = tk.Frame(left_panel, bg=BG_DARK)
+        list_frame.pack(fill=tk.BOTH, expand=True)
+        
+        self.card_tree = ttk.Treeview(list_frame, columns=('name', 'rarity', 'type'), 
                                       show='tree headings', style="DeckList.Treeview")
-        self.card_tree.heading('#0', text='Art')
-        self.card_tree.column('#0', width=50, anchor='center') # Icon column
+        self.card_tree.heading('#0', text='')
+        self.card_tree.column('#0', width=45, anchor='center')
         
         self.card_tree.heading('name', text='Name')
         self.card_tree.heading('rarity', text='Rarity')
         self.card_tree.heading('type', text='Type')
-        self.card_tree.column('name', width=120)
-        self.card_tree.column('rarity', width=40, anchor='center')
-        self.card_tree.column('type', width=60, anchor='center')
+        self.card_tree.column('name', width=130)
+        self.card_tree.column('rarity', width=45, anchor='center')
+        self.card_tree.column('type', width=65, anchor='center')
         
-        scrollbar = ttk.Scrollbar(left_panel, orient=tk.VERTICAL, command=self.card_tree.yview)
+        scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.card_tree.yview)
         self.card_tree.configure(yscrollcommand=scrollbar.set)
         
-        self.card_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=5)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y, pady=5)
+        self.card_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
         # Add Button
-        add_btn = tk.Button(left_panel, text="Add to Deck  >", bg=ACCENT, fg='white', 
-                          font=('Segoe UI', 10, 'bold'), activebackground=BG_LIGHT,
-                          command=self.add_selected_to_deck)
-        add_btn.pack(fill=tk.X, pady=5)
+        add_btn = create_styled_button(left_panel, text="➕ Add to Deck", 
+                                       command=self.add_selected_to_deck,
+                                       style_type='accent')
+        add_btn.pack(fill=tk.X, pady=10)
         
         # === Right Panel: Deck & Stats ===
         right_panel = ttk.Frame(main_split)
         main_split.add(right_panel, weight=2)
         
         # Deck Controls
-        deck_ctrl = ttk.Frame(right_panel)
-        deck_ctrl.pack(fill=tk.X, padx=10, pady=(0, 10))
+        deck_ctrl = tk.Frame(right_panel, bg=BG_DARK)
+        deck_ctrl.pack(fill=tk.X, pady=(0, 15))
         
-        ttk.Label(deck_ctrl, text="Current Deck:").pack(side=tk.LEFT)
+        tk.Label(deck_ctrl, text="🎴 Current Deck:", font=FONT_BODY, 
+                 bg=BG_DARK, fg=TEXT_SECONDARY).pack(side=tk.LEFT)
         self.deck_combo = ttk.Combobox(deck_ctrl, width=25, state='readonly')
-        self.deck_combo.pack(side=tk.LEFT, padx=5)
+        self.deck_combo.pack(side=tk.LEFT, padx=10)
         self.deck_combo.bind('<<ComboboxSelected>>', self.on_deck_selected)
         
-        ttk.Button(deck_ctrl, text="New", command=self.create_new_deck).pack(side=tk.LEFT, padx=5)
-        ttk.Button(deck_ctrl, text="Delete", command=self.delete_current_deck).pack(side=tk.LEFT)
+        ttk.Button(deck_ctrl, text="+ New", command=self.create_new_deck, 
+                   style='Small.TButton').pack(side=tk.LEFT, padx=5)
+        ttk.Button(deck_ctrl, text="🗑️ Delete", command=self.delete_current_deck,
+                   style='Small.TButton').pack(side=tk.LEFT)
         
         # Deck Grid (3x2)
-        self.slots_frame = ttk.Frame(right_panel)
-        self.slots_frame.pack(fill=tk.X, padx=10)
+        self.slots_frame = tk.Frame(right_panel, bg=BG_DARK)
+        self.slots_frame.pack(fill=tk.X)
         
         self.card_slots = []
         for i in range(6):
             slot = CardSlot(self.slots_frame, i, self.remove_from_slot, self.on_slot_level_changed)
-            # Grid: 2 rows of 3 columns
             r, c = divmod(i, 3)
-            slot.grid(row=r, column=c, padx=5, pady=5, sticky='nsew')
+            slot.grid(row=r, column=c, padx=6, pady=6, sticky='nsew')
             self.slots_frame.columnconfigure(c, weight=1)
             self.card_slots.append(slot)
             
         # Stats / Effects Area
-        ttk.Label(right_panel, text="Combined Effects Breakdown", font=('Segoe UI', 11, 'bold')).pack(anchor='w', padx=10, pady=(15, 5))
+        effects_header = tk.Frame(right_panel, bg=BG_DARK)
+        effects_header.pack(fill=tk.X, pady=(20, 10))
+        tk.Label(effects_header, text="📊 Combined Effects Breakdown", 
+                 font=FONT_SUBHEADER, bg=BG_DARK, fg=TEXT_PRIMARY).pack(side=tk.LEFT)
         
-        effects_frame = ttk.Frame(right_panel)
-        effects_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        effects_frame = create_card_frame(right_panel)
+        effects_frame.pack(fill=tk.BOTH, expand=True)
         
         self.effects_tree = ttk.Treeview(effects_frame, 
                                           columns=('effect', 'total', 'c1', 'c2', 'c3', 'c4', 'c5', 'c6'),
-                                          show='headings', height=10)
+                                          show='headings', height=8)
         
         self.effects_tree.heading('effect', text='Effect')
         self.effects_tree.heading('total', text='TOTAL')
-        self.effects_tree.column('effect', width=150)
+        self.effects_tree.column('effect', width=140)
         self.effects_tree.column('total', width=60, anchor='center')
         
         for i in range(1, 7):
             self.effects_tree.heading(f'c{i}', text=f'#{i}')
-            self.effects_tree.column(f'c{i}', width=40, anchor='center')
+            self.effects_tree.column(f'c{i}', width=45, anchor='center')
         
         vsb = ttk.Scrollbar(effects_frame, orient=tk.VERTICAL, command=self.effects_tree.yview)
         self.effects_tree.configure(yscrollcommand=vsb.set)
         
-        self.effects_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        self.effects_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=2, pady=2)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y, pady=2)
         
         # Unique Effects Area
-        ttk.Label(right_panel, text="Unique Effects Active:", font=('Segoe UI', 10, 'bold')).pack(anchor='w', padx=10, pady=(10, 0))
+        unique_header = tk.Frame(right_panel, bg=BG_DARK)
+        unique_header.pack(fill=tk.X, pady=(15, 8))
+        tk.Label(unique_header, text="✨ Unique Effects", font=FONT_BODY_BOLD, 
+                 bg=BG_DARK, fg=ACCENT_SECONDARY).pack(side=tk.LEFT)
         
-        unique_frame = ttk.Frame(right_panel)
-        unique_frame.pack(fill=tk.X, padx=10, pady=(2, 10))
+        unique_frame = create_card_frame(right_panel)
+        unique_frame.pack(fill=tk.X)
         
-        self.unique_text = tk.Text(unique_frame, height=8, bg=BG_MEDIUM, fg=TEXT_MAIN,
-                                   font=('Segoe UI', 9), wrap=tk.WORD, relief=tk.FLAT, padx=5, pady=5)
-        
-        unique_scroll = ttk.Scrollbar(unique_frame, orient=tk.VERTICAL, command=self.unique_text.yview)
-        self.unique_text.configure(yscrollcommand=unique_scroll.set)
-        
-        self.unique_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        unique_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        
+        self.unique_text = create_styled_text(unique_frame, height=5)
+        self.unique_text.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
         self.unique_text.config(state=tk.DISABLED)
         
-        self.icon_cache = {} # Cache for list icons
+        self.icon_cache = {}
         self.filter_cards()
-        
 
 
-    # --- Logic Methods (Similar to original but adapted) ---
+    # --- Logic Methods ---
     
     def filter_cards(self):
-        # Clear
         for item in self.card_tree.get_children():
             self.card_tree.delete(item)
             
@@ -311,11 +322,13 @@ class DeckBuilderFrame(ttk.Frame):
                 except:
                     pass
             
-            # Insert with image if available
+            type_icon = get_type_icon(card_type)
             if img:
-                self.card_tree.insert('', tk.END, text='', image=img, values=(name, rarity, card_type), iid=str(card_id))
+                self.card_tree.insert('', tk.END, text='', image=img, 
+                                      values=(name, rarity, f"{type_icon}"), iid=str(card_id))
             else:
-                self.card_tree.insert('', tk.END, text='?', values=(name, rarity, card_type), iid=str(card_id))
+                self.card_tree.insert('', tk.END, text='?', 
+                                      values=(name, rarity, f"{type_icon}"), iid=str(card_id))
 
     def refresh_decks(self):
         decks = get_all_decks()
@@ -340,13 +353,12 @@ class DeckBuilderFrame(ttk.Frame):
         self.deck_slots = [None] * 6
         
         # Load from DB
-        deck_cards = get_deck_cards(self.current_deck_id) # Returns (slot, level, id, name, rarity, type, img)
+        deck_cards = get_deck_cards(self.current_deck_id)
         
         for card in deck_cards:
             slot_pos, level, card_id, name, rarity, card_type, image_path = card
             if 0 <= slot_pos < 6:
                 self.deck_slots[slot_pos] = card_id
-                # Update Slot UI
                 self.card_slots[slot_pos].set_card((card_id, name, rarity, card_type, image_path, level))
         
         self.update_effects_breakdown()
@@ -362,7 +374,7 @@ class DeckBuilderFrame(ttk.Frame):
 
     def delete_current_deck(self):
         if self.current_deck_id:
-            if messagebox.askyesno("Delete Deck", "Are you sure?"):
+            if messagebox.askyesno("Delete Deck", "Are you sure you want to delete this deck?"):
                 delete_deck(self.current_deck_id)
                 self.current_deck_id = None
                 self.deck_combo.set('')
@@ -387,12 +399,11 @@ class DeckBuilderFrame(ttk.Frame):
         # Find empty slot
         for i in range(6):
             if self.deck_slots[i] is None:
-                # Add to DB (default level 50)
                 add_card_to_deck(self.current_deck_id, card_id, i, 50)
                 self.load_deck()
                 return
                 
-        messagebox.showinfo("Deck Full", "Remove a card first.")
+        messagebox.showinfo("Deck Full", "Remove a card first to add a new one.")
 
     def remove_from_slot(self, index):
         if self.current_deck_id and self.deck_slots[index]:
@@ -416,11 +427,12 @@ class DeckBuilderFrame(ttk.Frame):
         self.unique_text.delete('1.0', tk.END)
         
         if not self.current_deck_id:
+            self.unique_text.insert(tk.END, "No deck selected")
             self.unique_text.config(state=tk.DISABLED)
             return
 
         # Prepare data for calculation
-        card_info = [] # [(card_id, level, valid_bool)]
+        card_info = []
         for i in range(6):
             if self.deck_slots[i]:
                 level = int(self.card_slots[i].level_var.get())
@@ -435,7 +447,6 @@ class DeckBuilderFrame(ttk.Frame):
         for i, info in enumerate(card_info):
             if info:
                 card_id, level = info
-                # Get card name for unique effect listing
                 card_name = self.card_slots[i].name_label.cget("text")
                 
                 effects = get_effects_at_level(card_id, level)
@@ -448,11 +459,14 @@ class DeckBuilderFrame(ttk.Frame):
                         all_effects[name] = [''] * 6
                     all_effects[name][i] = value
         
+        # Configure tags
+        self.unique_text.tag_configure('card_name', foreground=ACCENT_PRIMARY)
+        
         # Fill Unique Effects
         if unique_effects_list:
             self.unique_text.insert(tk.END, "\n".join(unique_effects_list))
         else:
-            self.unique_text.insert(tk.END, "None")
+            self.unique_text.insert(tk.END, "No unique effects in this deck", 'card_name')
         self.unique_text.config(state=tk.DISABLED)
 
         # Sum totals
