@@ -192,7 +192,7 @@ class MainWindow:
         ttk.Label(status_frame, text="Data from gametora.com", 
                  style='Subtitle.TLabel').pack(side=tk.RIGHT)
 
-        ttk.Label(status_frame, text="Made by Kiyreload | ", 
+        ttk.Label(status_frame, text="Made by Kiyreloaded | ", 
                  style='Subtitle.TLabel').pack(side=tk.RIGHT)
     
     def on_card_selected(self, card_id, card_name):
