@@ -209,40 +209,47 @@ def apply_update(new_exe_path: str) -> bool:
         # Create a batch script to perform the update
         batch_script = os.path.join(tempfile.gettempdir(), f'{APP_NAME}_updater.bat')
         
-        # The batch script waits, replaces the exe, and restarts
+        # Simple batch script that just waits and applies the update
+        # We don't auto-restart because PyInstaller temp cleanup causes DLL errors
         script_content = f'''@echo off
-echo Updating {APP_NAME}...
+title {APP_NAME} Updater
+echo ========================================
+echo          {APP_NAME} Updater
+echo ========================================
+echo.
 echo Waiting for application to close...
+timeout /t 3 >nul
 
-:wait_loop
-timeout /t 1 /nobreak >nul
-tasklist /FI "PID eq {os.getpid()}" 2>nul | find /I /N "{os.getpid()}" >nul
-if "%ERRORLEVEL%"=="0" goto wait_loop
-
+echo.
 echo Applying update...
-copy /Y "{new_exe_path}" "{current_exe}"
+move /Y "{new_exe_path}" "{current_exe}"
 if errorlevel 1 (
-    echo Update failed! Could not replace the executable.
+    echo.
+    echo ERROR: Update failed!
+    echo Please close the application completely and try again.
     pause
     exit /b 1
 )
 
-echo Update complete! Starting new version...
-start "" "{current_exe}"
-
-echo Cleaning up...
-del "{new_exe_path}" 2>nul
-del "%~f0" 2>nul
+echo.
+echo ========================================
+echo       Update applied successfully!
+echo ========================================
+echo.
+echo Please start the application manually.
+echo This window will close in 5 seconds...
+timeout /t 5 >nul
+exit
 '''
         
         with open(batch_script, 'w') as f:
             f.write(script_content)
         
-        # Start the batch script and exit the current application
+        # Start the batch script with a visible window so user can see progress
+        CREATE_NEW_CONSOLE = 0x00000010
         subprocess.Popen(
             ['cmd', '/c', batch_script],
-            creationflags=subprocess.CREATE_NO_WINDOW,
-            close_fds=True
+            creationflags=CREATE_NEW_CONSOLE
         )
         
         return True

@@ -172,19 +172,7 @@ class UpdateDialog:
             cursor='hand2'
         )
         
-        # Release notes button (hidden initially)
-        self.notes_button = tk.Button(
-            self.button_frame,
-            text="📝 Release Notes",
-            command=self.open_release_notes,
-            bg=self.bg_medium,
-            fg=self.text_light,
-            font=('Helvetica', 10),
-            padx=10,
-            pady=5,
-            relief=tk.FLAT,
-            cursor='hand2'
-        )
+
     
     def check_for_updates(self):
         """Check for updates in a background thread."""
@@ -211,9 +199,8 @@ class UpdateDialog:
                 fg=self.success
             )
             
-            # Show update and notes buttons
+            # Show update button
             self.update_button.pack(side=tk.LEFT, padx=(0, 10))
-            self.notes_button.pack(side=tk.LEFT)
         else:
             # Up to date or error
             self.title_label.config(text="✅ You're Up to Date!")
@@ -237,7 +224,6 @@ class UpdateDialog:
         self.is_downloading = True
         self.update_button.config(state=tk.DISABLED, text="Downloading...")
         self.close_button.config(state=tk.DISABLED)
-        self.notes_button.config(state=tk.DISABLED)
         
         self.title_label.config(text="⬇️ Downloading Update...")
         self.status_label.config(text="Please wait while the update is downloaded...", fg=self.text_muted)
@@ -312,10 +298,7 @@ class UpdateDialog:
             )
             self.close()
     
-    def open_release_notes(self):
-        """Open the release notes in the browser."""
-        if self.update_info and self.update_info.get('html_url'):
-            webbrowser.open(self.update_info['html_url'])
+
     
     def close(self):
         """Close the dialog."""
