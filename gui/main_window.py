@@ -16,7 +16,9 @@ from gui.effects_view import EffectsFrame
 from gui.hints_skills_view import HintsSkillsFrame
 from gui.hints_skills_view import HintsSkillsFrame
 from gui.deck_builder import DeckBuilderFrame
+from gui.update_dialog import show_update_dialog
 from utils import resolve_image_path
+from version import VERSION
 
 
 class MainWindow:
@@ -111,16 +113,42 @@ class MainWindow:
         self.root.configure(bg=bg_dark)
     
     def create_header(self, parent):
-        """Create header with database statistics"""
+        """Create header with database statistics and update button"""
         header_frame = ttk.Frame(parent)
         header_frame.pack(fill=tk.X, padx=10, pady=10)
         
-        # Title
-        ttk.Label(header_frame, text="🏇 Umamusume Support Card Manager", 
+        # Left side: Title and version
+        title_frame = ttk.Frame(header_frame)
+        title_frame.pack(side=tk.LEFT)
+        
+        ttk.Label(title_frame, text="🏇 Umamusume Support Card Manager", 
                  style='Header.TLabel').pack(side=tk.LEFT)
         
+        # Version badge
+        ttk.Label(title_frame, text=f"  v{VERSION}", 
+                 style='Subtitle.TLabel').pack(side=tk.LEFT, padx=(5, 0))
+        
+        # Right side: Update button and stats
+        right_frame = ttk.Frame(header_frame)
+        right_frame.pack(side=tk.RIGHT)
+        
+        # Update button
+        self.update_button = tk.Button(
+            right_frame,
+            text="🔄 Check for Updates",
+            command=self.show_update_dialog,
+            bg='#16213e',
+            fg='#eaeaea',
+            font=('Helvetica', 9),
+            padx=10,
+            pady=3,
+            relief=tk.FLAT,
+            cursor='hand2'
+        )
+        self.update_button.pack(side=tk.RIGHT, padx=(10, 0))
+        
         # Stats panel
-        stats_frame = ttk.Frame(header_frame)
+        stats_frame = ttk.Frame(right_frame)
         stats_frame.pack(side=tk.RIGHT)
         
         stats = get_database_stats()
@@ -189,6 +217,10 @@ class MainWindow:
         stats_text += f"R: {stats.get('by_rarity', {}).get('R', 0)}"
         
         self.stats_label.config(text=stats_text)
+    
+    def show_update_dialog(self):
+        """Show the update dialog"""
+        show_update_dialog(self.root)
     
     def run(self):
         """Start the application"""
