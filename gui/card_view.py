@@ -27,9 +27,10 @@ from gui.theme import (
 class CardListFrame(ttk.Frame):
     """Frame containing card list with search/filter, ownership, and details panel"""
     
-    def __init__(self, parent, on_card_selected_callback=None):
+    def __init__(self, parent, on_card_selected_callback=None, on_stats_updated_callback=None):
         super().__init__(parent)
         self.on_card_selected = on_card_selected_callback
+        self.on_stats_updated = on_stats_updated_callback
         self.cards = []
         self.current_card_id = None
         self.card_image = None  # Keep reference to prevent garbage collection
@@ -38,6 +39,8 @@ class CardListFrame(ttk.Frame):
         # Create main layout
         self.create_widgets()
         self.load_cards()
+
+
     
     def create_widgets(self):
         """Create the card list interface"""
@@ -415,6 +418,10 @@ class CardListFrame(ttk.Frame):
             level = int(self.level_var.get())
             set_card_owned(self.current_card_id, owned, level)
             self.filter_cards()  # Refresh list to update owned markers
+            
+            # Notify parent to refresh stats
+            if self.on_stats_updated:
+                self.on_stats_updated()
     
     def update_level_buttons(self, rarity, max_level):
         """Update quick level buttons based on rarity/max level"""

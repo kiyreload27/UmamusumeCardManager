@@ -103,6 +103,9 @@ def check_for_updates():
             # Or just check inequality. If different, try to update.
             if db_version != VERSION:
                 sync_from_seed(bundled_seed_path)
+            
+            # Always ensure data integrity
+            cleanup_orphaned_data()
                 
         except Exception as e:
             print(f"Update check failed: {e}")
@@ -552,7 +555,12 @@ def get_owned_count():
     """Get count of owned cards"""
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) FROM owned_cards")
+    # Use JOIN to ensure only valid cards are counted
+    cur.execute("""
+        SELECT COUNT(*) 
+        FROM owned_cards oc
+        JOIN support_cards sc ON oc.card_id = sc.card_id
+    """)
     count = cur.fetchone()[0]
     conn.close()
     return count
@@ -692,7 +700,12 @@ def get_database_stats():
     cur.execute("SELECT COUNT(*) FROM support_effects")
     stats['total_effects'] = cur.fetchone()[0]
     
-    cur.execute("SELECT COUNT(*) FROM owned_cards")
+    # Use JOIN to ensure only valid cards are counted
+    cur.execute("""
+        SELECT COUNT(*) 
+        FROM owned_cards oc
+        JOIN support_cards sc ON oc.card_id = sc.card_id
+    """)
     stats['owned_cards'] = cur.fetchone()[0]
     
     cur.execute("SELECT COUNT(*) FROM user_decks")
@@ -700,6 +713,35 @@ def get_database_stats():
     
     conn.close()
     return stats
+
+def cleanup_orphaned_data():
+    """Remove references to non-existent cards in user data tables"""
+    print("Cleaning up orphaned database records...")
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    try:
+        # 1. Clean owned_cards
+        cur.execute("""
+            DELETE FROM owned_cards 
+            WHERE card_id NOT IN (SELECT card_id FROM support_cards)
+        """)
+        if cur.rowcount > 0:
+            print(f"Removed {cur.rowcount} orphaned owned card records.")
+            
+        # 2. Clean deck_slots
+        cur.execute("""
+            DELETE FROM deck_slots 
+            WHERE card_id NOT IN (SELECT card_id FROM support_cards)
+        """)
+        if cur.rowcount > 0:
+            print(f"Removed {cur.rowcount} orphaned deck slot records.")
+            
+        conn.commit()
+    except Exception as e:
+        print(f"Cleanup failed: {e}")
+    finally:
+        conn.close()
 
 # ============================================
 # Skill Search Queries

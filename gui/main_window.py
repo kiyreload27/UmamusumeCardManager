@@ -147,7 +147,9 @@ class MainWindow:
     def create_tabs(self):
         """Create all tab frames"""
         # Card List Tab
-        self.card_frame = CardListFrame(self.notebook, on_card_selected_callback=self.on_card_selected)
+        self.card_frame = CardListFrame(self.notebook, 
+                                        on_card_selected_callback=self.on_card_selected,
+                                        on_stats_updated_callback=self.refresh_stats)
         self.notebook.add(self.card_frame, text="  📋 Card List  ")
         
         # Effects Tab
