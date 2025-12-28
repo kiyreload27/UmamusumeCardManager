@@ -164,7 +164,7 @@ class MainWindow:
         
         # Training Sim Tab
         self.sim_frame = TrainingSimFrame(self.notebook)
-        self.notebook.add(self.sim_frame, text="  📈 Training Sim  ")
+        self.notebook.add(self.sim_frame, text="  📈 Training Sim (Beta)  ")
     
     def create_status_bar(self, parent):
         """Create status bar at bottom"""
