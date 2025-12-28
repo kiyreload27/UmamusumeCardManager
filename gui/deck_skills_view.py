@@ -138,11 +138,9 @@ class DeckSkillsFrame(ttk.Frame):
                 
             # 2. Event Skills
             events = get_all_event_skills(card_id)
-            for ev_name, skills in events.items():
-                summary = ", ".join(skills)
-                for s_name in skills:
-                    self.add_skill_row(parent_id, s_name, "Event", f"{ev_name} ({summary})")
-                    total_skills += 1
+            for event in events:
+                self.add_skill_row(parent_id, event['skill_name'], "Event", event['details'])
+                total_skills += 1
                     
         self.stats_label.config(text=f"Found {total_skills} total skill sources in deck")
 
@@ -205,10 +203,8 @@ class DeckSkillsFrame(ttk.Frame):
             
         # 2. Event Skills
         events = get_all_event_skills(card_id)
-        for ev_name, skills in events.items():
-            summary = ", ".join(skills)
-            for s_name in skills:
-                self.add_skill_row(parent_id, s_name, "Event", f"{ev_name} ({summary})")
-                total_skills += 1
+        for event in events:
+            self.add_skill_row(parent_id, event['skill_name'], "Event", event['details'])
+            total_skills += 1
                 
         self.stats_label.config(text=f"Showing {total_skills} skill sources for {name}")
