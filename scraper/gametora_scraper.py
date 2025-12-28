@@ -136,6 +136,11 @@ def download_card_image(page, card_id, card_name):
             safe_name = re.sub(r'[<>:"/\\|?*]', '_', card_name)
             file_path = os.path.join(IMAGES_PATH, f"{card_id}_{safe_name}.png")
             
+            # Skip if already exists
+            if os.path.exists(file_path):
+                # print(f"  Art already exists, skipping download")
+                return file_path
+                
             # Download image
             response = requests.get(img_url, timeout=10)
             if response.status_code == 200:
@@ -521,23 +526,23 @@ def scrape_events(page, card_id, cur):
             // Targeted search for event triggers based on section headers
             const getTriggers = () => {
                 const triggers = [];
+                const seenNames = new Set();
                 const headers = Array.from(document.querySelectorAll('div, h2, h3, span')).filter(el => 
                     el.innerText.includes('Chain Events') || el.innerText.includes('Random Events')
                 );
                 
                 headers.forEach(header => {
-                    // Look for buttons in the siblings or children of the parent container
                     const container = header.parentElement;
                     if (container) {
                         const buttons = Array.from(container.querySelectorAll('button'));
                         buttons.forEach(btn => {
                             const text = btn.innerText.trim();
-                            // Check visibility to avoid mobile/desktop duplicates
                             const style = window.getComputedStyle(btn);
                             const isVisible = style.display !== 'none' && style.visibility !== 'hidden' && btn.offsetWidth > 0;
                             
-                            if (isVisible && text && text.length > 5 && !text.includes('Events')) {
+                            if (isVisible && text && text.length > 5 && !text.includes('Events') && !seenNames.has(text)) {
                                 triggers.push(btn);
+                                seenNames.add(text);
                             }
                         });
                     }
