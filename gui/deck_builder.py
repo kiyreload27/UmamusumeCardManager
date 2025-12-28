@@ -453,7 +453,13 @@ class DeckBuilderFrame(ttk.Frame):
         # Find empty slot
         for i in range(6):
             if self.deck_slots[i] is None:
-                add_card_to_deck(self.current_deck_id, card_id, i, 50)
+                # Get the last selected level for this card from main window
+                level = 50
+                parent = self.winfo_toplevel()
+                if hasattr(parent, 'last_selected_levels'):
+                    level = parent.last_selected_levels.get(card_id, 50)
+                
+                add_card_to_deck(self.current_deck_id, card_id, i, level)
                 self.load_deck()
                 return
                 

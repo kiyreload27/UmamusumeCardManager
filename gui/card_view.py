@@ -33,7 +33,8 @@ class CardListFrame(ttk.Frame):
         self.on_stats_updated = on_stats_updated_callback
         self.cards = []
         self.current_card_id = None
-        self.card_image = None  # Keep reference to prevent garbage collection
+        self.selected_level = 50
+        self.card_image = None
         self.icon_cache = {}  # Cache for list icons
         
         # Create main layout
@@ -379,6 +380,7 @@ class CardListFrame(ttk.Frame):
             
             self.level_var.set(initial_level)
             self.level_label.config(text=str(initial_level))
+            self.selected_level = initial_level
             
             # Update details display with colors
             type_icon = get_type_icon(card_type)
@@ -394,7 +396,7 @@ class CardListFrame(ttk.Frame):
             
             # Notify parent window
             if self.on_card_selected:
-                self.on_card_selected(card_id, name)
+                self.on_card_selected(card_id, name, self.selected_level)
     
     def load_card_image(self, image_path):
         """Load and display card image"""
@@ -448,10 +450,18 @@ class CardListFrame(ttk.Frame):
             self.level_buttons[lvl] = btn
 
     def set_level(self, level):
-        """Set level from quick button"""
-        self.level_var.set(level)
-        self.level_label.config(text=str(level))
-        self.update_effects_display()
+        """Update selected level and notify callback"""
+        if self.current_card_id:
+            self.selected_level = level
+            self.level_var.set(level)
+            self.level_label.config(text=str(level))
+            self.update_effects_display()
+            
+            # Notify parent window about level change
+            if self.on_card_selected:
+                card = get_card_by_id(self.current_card_id)
+                if card:
+                    self.on_card_selected(self.current_card_id, card[1], self.selected_level)
         
         # Save level if owned
         if self.current_card_id and self.owned_var.get():

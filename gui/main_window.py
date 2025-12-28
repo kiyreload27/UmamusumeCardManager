@@ -53,6 +53,9 @@ class MainWindow:
         main_container = ttk.Frame(self.root)
         main_container.pack(fill=tk.BOTH, expand=True)
         
+        # State
+        self.last_selected_levels = {} # card_id -> level
+        
         # Header with stats
         self.create_header(main_container)
         
@@ -201,8 +204,13 @@ class MainWindow:
             fg=ACCENT_TERTIARY
         ).pack(side=tk.RIGHT)
     
-    def on_card_selected(self, card_id, card_name):
+    def on_card_selected(self, card_id, card_name, level=None):
         """Handle card selection from card list"""
+        # Store level if provided
+        if level is not None:
+            self.last_selected_levels[card_id] = level
+        self.selected_card_id = card_id # Update selected_card_id
+        
         # Update other tabs with selected card
         if hasattr(self, 'effects_frame'):
             self.effects_frame.set_card(card_id)

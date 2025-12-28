@@ -28,6 +28,7 @@ class SkillSearchFrame(ttk.Frame):
         super().__init__(parent)
         self.all_skills = []
         self.icon_cache = {}
+        self.current_skill = None
         
         self.create_widgets()
         self.load_skills()
@@ -79,10 +80,20 @@ class SkillSearchFrame(ttk.Frame):
         right_frame = tk.Frame(main_pane, bg=BG_DARK)
         main_pane.add(right_frame, weight=3)
         
-        # Result Header
-        self.result_header = tk.Label(right_frame, text="Select a skill to see who has it", 
-                                      font=FONT_HEADER, bg=BG_DARK, fg=ACCENT_TERTIARY)
-        self.result_header.pack(anchor='w', pady=(0, 15), padx=10)
+        # Search Row (Search + Filter)
+        search_frame = tk.Frame(right_frame, bg=BG_DARK)
+        search_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        self.result_header = tk.Label(search_frame, text="Select a skill to see cards", 
+                                       font=FONT_SUBHEADER, bg=BG_DARK, fg=ACCENT_PRIMARY)
+        self.result_header.pack(side=tk.LEFT)
+        
+        # Owned Filter
+        self.owned_only_var = tk.BooleanVar(value=False)
+        self.owned_check = ttk.Checkbutton(search_frame, text="Show Owned Only", 
+                                           variable=self.owned_only_var, 
+                                           command=self.on_filter_changed)
+        self.owned_check.pack(side=tk.RIGHT, padx=10)
         
         # Results Treeview
         tree_frame = create_card_frame(right_frame)
@@ -140,17 +151,24 @@ class SkillSearchFrame(ttk.Frame):
         filtered = [s for s in self.all_skills if search in s.lower()]
         self.update_listbox(filtered)
         
+    def on_filter_changed(self):
+        """Handle filter checkbox change"""
+        if self.current_skill:
+            self.show_cards_for_skill(self.current_skill)
+
     def on_skill_selected(self, event):
-        """Handle skill selection"""
+        """Handle skill selection from listbox"""
         selection = self.skill_listbox.curselection()
         if not selection:
             return
             
         skill_name = self.skill_listbox.get(selection[0])
+        self.current_skill = skill_name
         self.show_cards_for_skill(skill_name)
-        
+    
     def show_cards_for_skill(self, skill_name):
         """Fetch and display cards with the selected skill"""
+        self.current_skill = skill_name
         self.result_header.config(text=f"Cards with skill: {skill_name}")
         
         # Clear tree
@@ -159,7 +177,12 @@ class SkillSearchFrame(ttk.Frame):
             
         cards = get_cards_with_skill(skill_name)
         
+        owned_only = self.owned_only_var.get()
+        
         for card in cards:
+            if owned_only and not card.get('is_owned'):
+                continue
+                
             # Load Icon
             card_id = card['card_id']
             img = self.icon_cache.get(card_id)
