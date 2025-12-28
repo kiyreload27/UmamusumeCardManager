@@ -700,3 +700,102 @@ def get_database_stats():
     
     conn.close()
     return stats
+
+# ============================================
+# Skill Search Queries
+# ============================================
+
+def get_all_unique_skills():
+    """Get a sorted list of all unique skills from hints and events"""
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    # Get skills from hints
+    cur.execute("SELECT DISTINCT hint_name FROM support_hints")
+    hint_skills = {row[0] for row in cur.fetchall() if row[0]}
+    
+    # Get skills from events
+    cur.execute("SELECT DISTINCT skill_name FROM event_skills")
+    event_skills = {row[0] for row in cur.fetchall() if row[0]}
+    
+    # Combine and sort
+    all_skills = sorted(list(hint_skills.union(event_skills)))
+    
+    conn.close()
+    return all_skills
+
+def get_cards_with_skill(skill_name):
+    """
+    Find all cards that have a specific skill.
+    Returns list of dicts:
+    {
+        'card_id': int,
+        'name': str,
+        'rarity': str,
+        'type': str,
+        'image_path': str,
+        'source': str ('Hint' or 'Event: [Name]'),
+        'details': str (description or event name)
+    }
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    results = []
+    seen_entries = set() # To avoid duplicates if same skill in multiple events
+    
+    # 1. Check Hints
+    cur.execute("""
+        SELECT sc.card_id, sc.name, sc.rarity, sc.card_type, sc.image_path, sh.hint_description
+        FROM support_hints sh
+        JOIN support_cards sc ON sh.card_id = sc.card_id
+        WHERE sh.hint_name = ?
+    """, (skill_name,))
+    
+    for row in cur.fetchall():
+        entry_key = (row[0], 'Hint')
+        if entry_key not in seen_entries:
+            results.append({
+                'card_id': row[0],
+                'name': row[1],
+                'rarity': row[2],
+                'type': row[3],
+                'image_path': row[4],
+                'source': 'Training Hint',
+                'details': row[5] or "Random hint event"
+            })
+            seen_entries.add(entry_key)
+            
+    # 2. Check Event Skills
+    cur.execute("""
+        SELECT sc.card_id, sc.name, sc.rarity, sc.card_type, sc.image_path, se.event_name
+        FROM event_skills es
+        JOIN support_events se ON es.event_id = se.event_id
+        JOIN support_cards sc ON se.card_id = sc.card_id
+        WHERE es.skill_name = ?
+    """, (skill_name,))
+    
+    for row in cur.fetchall():
+        # Clean event name if it has newlines or excessive spaces
+        event_name = row[5].replace('\n', ' ').strip()
+        entry_key = (row[0], f'Event: {event_name}')
+        
+        if entry_key not in seen_entries:
+            results.append({
+                'card_id': row[0],
+                'name': row[1],
+                'rarity': row[2],
+                'type': row[3],
+                'image_path': row[4],
+                'source': 'Event',
+                'details': event_name
+            })
+            seen_entries.add(entry_key)
+    
+    conn.close()
+    
+    # Sort by Rarity (SSR first), then Name
+    rarity_map = {'SSR': 3, 'SR': 2, 'R': 1}
+    results.sort(key=lambda x: (rarity_map.get(x['rarity'], 0), x['name']), reverse=True)
+    
+    return results

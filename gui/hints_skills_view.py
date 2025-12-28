@@ -1,180 +1,200 @@
 """
-Hints and Skills View - Display support hints and event skills
+Skill Search View - Find cards by the skills they teach
 """
 
 import tkinter as tk
 from tkinter import ttk
 import sys
 import os
+from PIL import Image, ImageTk
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from db.db_queries import get_hints, get_events, get_all_event_skills, get_card_by_id
+from db.db_queries import get_all_unique_skills, get_cards_with_skill
+from utils import resolve_image_path
 from gui.theme import (
-    BG_DARK, BG_MEDIUM, BG_LIGHT,
-    ACCENT_PRIMARY, ACCENT_SECONDARY, ACCENT_TERTIARY, ACCENT_SUCCESS,
+    BG_DARK, BG_MEDIUM, BG_LIGHT, BG_HIGHLIGHT,
+    ACCENT_PRIMARY, ACCENT_SECONDARY, ACCENT_TERTIARY,
     TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
     FONT_HEADER, FONT_SUBHEADER, FONT_BODY, FONT_BODY_BOLD, FONT_SMALL,
-    create_styled_text, create_card_frame
+    create_card_frame, get_type_icon, create_styled_button
 )
 
 
-class HintsSkillsFrame(ttk.Frame):
-    """Frame for viewing support hints and event skills"""
+class SkillSearchFrame(ttk.Frame):
+    """Frame for searching skills and finding cards that have them"""
     
     def __init__(self, parent):
         super().__init__(parent)
-        self.current_card_id = None
-        self.current_card_name = None
+        self.all_skills = []
+        self.icon_cache = {}
         
         self.create_widgets()
+        self.load_skills()
     
     def create_widgets(self):
-        """Create the hints and skills interface"""
-        # Header
-        header_frame = tk.Frame(self, bg=BG_DARK)
-        header_frame.pack(fill=tk.X, padx=20, pady=15)
+        """Create the skill search interface"""
+        # Main split container
+        main_pane = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
+        main_pane.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        self.card_label = tk.Label(header_frame, 
-                                   text="💡 Select a card from the Card List tab",
-                                   font=FONT_HEADER, bg=BG_DARK, fg=ACCENT_PRIMARY)
-        self.card_label.pack(side=tk.LEFT)
+        # === Left Panel: Skill List ===
+        left_frame = tk.Frame(main_pane, bg=BG_DARK, width=300)
+        main_pane.add(left_frame, weight=1)
         
-        # Main content with two columns
-        content_frame = tk.Frame(self, bg=BG_DARK)
-        content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 15))
-        
-        # Left column: Hints
-        left_container = tk.Frame(content_frame, bg=BG_DARK)
-        left_container.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
-        
-        hints_header = tk.Frame(left_container, bg=BG_DARK)
-        hints_header.pack(fill=tk.X, pady=(0, 8))
-        tk.Label(hints_header, text="🎯 Training Hints", font=FONT_SUBHEADER,
+        # Search Header
+        header = tk.Frame(left_frame, bg=BG_DARK)
+        header.pack(fill=tk.X, pady=(0, 10))
+        tk.Label(header, text="🔍 Search Skills", font=FONT_HEADER, 
                  bg=BG_DARK, fg=TEXT_PRIMARY).pack(side=tk.LEFT)
         
-        hints_frame = create_card_frame(left_container)
-        hints_frame.pack(fill=tk.BOTH, expand=True)
+        # Search Entry
+        self.search_var = tk.StringVar()
+        self.search_var.trace('w', self.filter_skills)
         
-        self.hints_text = create_styled_text(hints_frame, height=18)
-        self.hints_text.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
-        self.hints_text.config(state=tk.DISABLED)
+        search_entry = ttk.Entry(left_frame, textvariable=self.search_var)
+        search_entry.pack(fill=tk.X, padx=(0, 5), pady=(0, 10))
         
-        # Configure tags for hints
-        self.hints_text.tag_configure('header', font=FONT_SUBHEADER, foreground=ACCENT_PRIMARY)
-        self.hints_text.tag_configure('skill', foreground=ACCENT_TERTIARY, font=FONT_BODY_BOLD)
-        self.hints_text.tag_configure('desc', foreground=TEXT_MUTED)
-        self.hints_text.tag_configure('number', foreground=ACCENT_SECONDARY)
+        # Skill Listbox
+        list_container = create_card_frame(left_frame)
+        list_container.pack(fill=tk.BOTH, expand=True)
         
-        # Right column: Events and Skills
-        right_container = tk.Frame(content_frame, bg=BG_DARK)
-        right_container.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        scrollbar = ttk.Scrollbar(list_container, orient=tk.VERTICAL)
+        self.skill_listbox = tk.Listbox(list_container, 
+                                        bg=BG_MEDIUM, fg=TEXT_SECONDARY,
+                                        selectbackground=ACCENT_PRIMARY,
+                                        selectforeground=TEXT_PRIMARY,
+                                        highlightthickness=0, bd=0,
+                                        font=FONT_BODY,
+                                        yscrollcommand=scrollbar.set)
         
-        events_header = tk.Frame(right_container, bg=BG_DARK)
-        events_header.pack(fill=tk.X, pady=(0, 8))
-        tk.Label(events_header, text="📅 Training Events & Skills", font=FONT_SUBHEADER,
-                 bg=BG_DARK, fg=TEXT_PRIMARY).pack(side=tk.LEFT)
+        scrollbar.config(command=self.skill_listbox.yview)
         
-        events_frame = create_card_frame(right_container)
-        events_frame.pack(fill=tk.BOTH, expand=True)
-        
-        tree_container = tk.Frame(events_frame, bg=BG_MEDIUM)
-        tree_container.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
-        
-        # Treeview for events
-        self.events_tree = ttk.Treeview(tree_container, columns=('event', 'skills'), show='tree headings')
-        self.events_tree.heading('#0', text='')
-        self.events_tree.heading('event', text='Event/Skill')
-        self.events_tree.heading('skills', text='Details')
-        
-        self.events_tree.column('#0', width=35)
-        self.events_tree.column('event', width=240)
-        self.events_tree.column('skills', width=180)
-        
-        scrollbar = ttk.Scrollbar(tree_container, orient=tk.VERTICAL, command=self.events_tree.yview)
-        self.events_tree.configure(yscrollcommand=scrollbar.set)
-        
-        self.events_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.skill_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=2, pady=2)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
-        # Summary section at bottom
-        summary_frame = tk.Frame(self, bg=BG_MEDIUM, padx=15, pady=10)
-        summary_frame.pack(fill=tk.X, padx=20, pady=(0, 10))
+        self.skill_listbox.bind('<<ListboxSelect>>', self.on_skill_selected)
         
-        self.summary_label = tk.Label(summary_frame, text="", font=FONT_SMALL,
-                                      bg=BG_MEDIUM, fg=TEXT_SECONDARY)
-        self.summary_label.pack()
-    
+        # === Right Panel: Results ===
+        right_frame = tk.Frame(main_pane, bg=BG_DARK)
+        main_pane.add(right_frame, weight=3)
+        
+        # Result Header
+        self.result_header = tk.Label(right_frame, text="Select a skill to see who has it", 
+                                      font=FONT_HEADER, bg=BG_DARK, fg=ACCENT_TERTIARY)
+        self.result_header.pack(anchor='w', pady=(0, 15), padx=10)
+        
+        # Results Treeview
+        tree_frame = create_card_frame(right_frame)
+        tree_frame.pack(fill=tk.BOTH, expand=True, padx=10)
+        
+        cols = ('name', 'rarity', 'type', 'source', 'details')
+        self.tree = ttk.Treeview(tree_frame, columns=cols, show='tree headings',
+                                 style="Treeview")
+        
+        self.tree.heading('#0', text='')
+        self.tree.heading('name', text='Card Name')
+        self.tree.heading('rarity', text='Rarity')
+        self.tree.heading('type', text='Type')
+        self.tree.heading('source', text='Source')
+        self.tree.heading('details', text='Details')
+        
+        self.tree.column('#0', width=50, anchor='center')
+        self.tree.column('name', width=180)
+        self.tree.column('rarity', width=50, anchor='center')
+        self.tree.column('type', width=80, anchor='center')
+        self.tree.column('source', width=100)
+        self.tree.column('details', width=250)
+        
+        vsb = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self.tree.yview)
+        self.tree.configure(yscrollcommand=vsb.set)
+        
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=2, pady=2)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y, pady=2)
+        
+        # Stats footer
+        self.stats_label = tk.Label(right_frame, text="", font=FONT_SMALL,
+                                   bg=BG_DARK, fg=TEXT_MUTED)
+        self.stats_label.pack(anchor='e', pady=5, padx=10)
+
+    def load_skills(self):
+        """Load all unique skills into listbox"""
+        self.all_skills = get_all_unique_skills()
+        self.update_listbox(self.all_skills)
+        
+    def update_listbox(self, items):
+        """Update listbox content"""
+        self.skill_listbox.delete(0, tk.END)
+        for item in items:
+            self.skill_listbox.insert(tk.END, item)
+            
+    def filter_skills(self, *args):
+        """Filter skills based on search text"""
+        search = self.search_var.get().lower()
+        if not search:
+            self.update_listbox(self.all_skills)
+            return
+            
+        filtered = [s for s in self.all_skills if search in s.lower()]
+        self.update_listbox(filtered)
+        
+    def on_skill_selected(self, event):
+        """Handle skill selection"""
+        selection = self.skill_listbox.curselection()
+        if not selection:
+            return
+            
+        skill_name = self.skill_listbox.get(selection[0])
+        self.show_cards_for_skill(skill_name)
+        
+    def show_cards_for_skill(self, skill_name):
+        """Fetch and display cards with the selected skill"""
+        self.result_header.config(text=f"Cards with skill: {skill_name}")
+        
+        # Clear tree
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+            
+        cards = get_cards_with_skill(skill_name)
+        
+        for card in cards:
+            # Load Icon
+            card_id = card['card_id']
+            img = self.icon_cache.get(card_id)
+            if not img:
+                resolved_path = resolve_image_path(card['image_path'])
+                if resolved_path and os.path.exists(resolved_path):
+                    try:
+                        pil_img = Image.open(resolved_path)
+                        pil_img.thumbnail((32, 32), Image.Resampling.LANCZOS)
+                        img = ImageTk.PhotoImage(pil_img)
+                        self.icon_cache[card_id] = img
+                    except:
+                        pass
+            
+            type_display = f"{get_type_icon(card['type'])} {card['type']}"
+            
+            values = (
+                card['name'],
+                card['rarity'],
+                type_display,
+                card['source'],
+                card['details']
+            )
+            
+            if img:
+                self.tree.insert('', tk.END, text='', image=img, values=values)
+            else:
+                self.tree.insert('', tk.END, text='?', values=values)
+                
+        self.stats_label.config(text=f"Found {len(cards)} cards")
+
     def set_card(self, card_id):
-        """Load a card's hints and skills"""
-        self.current_card_id = card_id
-        
-        # Get card info
-        card = get_card_by_id(card_id)
-        if card:
-             self.current_card_name = card[1]
-             self.card_label.config(text=f"💡 {self.current_card_name}")
-        
-        self.update_hints_display()
-        self.update_events_display()
-    
-    def update_hints_display(self):
-        """Update the hints display"""
-        self.hints_text.config(state=tk.NORMAL)
-        self.hints_text.delete('1.0', tk.END)
-        
-        if not self.current_card_id:
-            self.hints_text.insert(tk.END, "No card selected\n\n", 'desc')
-            self.hints_text.insert(tk.END, "Select a card from the Card List tab to view its hints.", 'desc')
-            self.hints_text.config(state=tk.DISABLED)
-            return
-        
-        hints = get_hints(self.current_card_id)
-        
-        self.hints_text.insert(tk.END, "Training Skills this card can teach:\n\n", 'header')
-        
-        if hints:
-            for i, (hint_name, hint_desc) in enumerate(hints, 1):
-                self.hints_text.insert(tk.END, f"  {i}. ", 'number')
-                self.hints_text.insert(tk.END, f"{hint_name}\n", 'skill')
-                if hint_desc:
-                    self.hints_text.insert(tk.END, f"      {hint_desc}\n", 'desc')
-                self.hints_text.insert(tk.END, "\n")
-        else:
-            self.hints_text.insert(tk.END, "  No hints/skills data available.\n\n", 'desc')
-            self.hints_text.insert(tk.END, "  This may mean:\n", 'desc')
-            self.hints_text.insert(tk.END, "  • Card hasn't been scraped yet\n", 'desc')
-            self.hints_text.insert(tk.END, "  • Card has no trainable skills\n", 'desc')
-        
-        self.hints_text.config(state=tk.DISABLED)
-    
-    def update_events_display(self):
-        """Update the events tree display"""
-        self.events_tree.delete(*self.events_tree.get_children())
-        
-        if not self.current_card_id:
-            return
-        
-        events = get_events(self.current_card_id)
-        events_with_skills = get_all_event_skills(self.current_card_id)
-        
-        # Add events as parent nodes
-        for event_id, event_name, event_type in events:
-            skills = events_with_skills.get(event_name, [])
-            skill_count = f"{len(skills)} skills" if skills else "No skills"
-            
-            event_node = self.events_tree.insert('', tk.END, text='📅',
-                                                  values=(event_name, skill_count))
-            
-            # Add skills as children
-            for skill in skills:
-                self.events_tree.insert(event_node, tk.END, text='⭐',
-                                        values=(skill, ''))
-        
-        # Update summary
-        hint_count = len(get_hints(self.current_card_id))
-        event_count = len(events)
-        
-        self.summary_label.config(
-            text=f"📊 Summary: {hint_count} hints  │  {event_count} events"
-        )
+        """
+        Legacy method compatibility for main window calls.
+        We don't need to do anything here since we are skill-centric now.
+        But main_window might call it when card is selected in tab 1.
+        We could potentially auto-search a skill from that card? 
+        For now, just ignore it.
+        """
+        pass

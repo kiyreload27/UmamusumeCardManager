@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from db.db_queries import get_database_stats, get_owned_count
 from gui.card_view import CardListFrame
 from gui.effects_view import EffectsFrame
-from gui.hints_skills_view import HintsSkillsFrame
+from gui.hints_skills_view import SkillSearchFrame
 from gui.deck_builder import DeckBuilderFrame
 from gui.update_dialog import show_update_dialog
 from gui.theme import (
@@ -33,7 +33,7 @@ class MainWindow:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("Umamusume Support Card Manager")
-        self.root.geometry("1350x800")
+        self.root.geometry("1400x850") # Slightly larger for new UI
         self.root.minsize(1350, 800)
         
         # Set icon
@@ -157,9 +157,9 @@ class MainWindow:
         self.deck_frame = DeckBuilderFrame(self.notebook)
         self.notebook.add(self.deck_frame, text="  🎴 Deck Builder  ")
         
-        # Hints & Skills Tab
-        self.hints_frame = HintsSkillsFrame(self.notebook)
-        self.notebook.add(self.hints_frame, text="  💡 Hints & Skills  ")
+        # Skill Search Tab (Replaces Hints & Skills)
+        self.hints_frame = SkillSearchFrame(self.notebook)
+        self.notebook.add(self.hints_frame, text="  🔍 Skill Search  ")
     
     def create_status_bar(self, parent):
         """Create status bar at bottom"""
