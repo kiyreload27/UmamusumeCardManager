@@ -475,40 +475,162 @@ def scrape_hints(page, card_id, cur):
         print(f"  Found {len(hints)} hints")
 
 def scrape_events(page, card_id, cur):
-    """Scrape training events"""
-    events = page.evaluate("""
+    """Scrape training events with detailed skill rewards (Gold/White/OR)"""
+    
+    # 1. First, build a map of skills from the 'Skills from events' summary section
+    # This helps us identify which skills are Rare (Gold)
+    skill_rarity_map = page.evaluate("""
         () => {
-            const events = [];
-            const text = document.body.innerText;
+            const map = {};
+            // Rare skills use a specific class (e.g., kkspcu) while normal use another (e.g., gImSzc)
+            // It's safer to find all skill containers in the summary section
+            const sections = Array.from(document.querySelectorAll('div')).filter(d => d.innerText.startsWith('Skills from events'));
+            if (sections.length === 0) return map;
             
-            const eventsMatch = text.match(/Training [Ee]vents([\\s\\S]*?)(?:$)/);
-            if (!eventsMatch) return events;
-            
-            const eventsSection = eventsMatch[1];
-            const lines = eventsSection.split('\\n');
-            
-            for (const line of lines) {
-                const trimmed = line.trim();
-                if (trimmed.length > 5 && trimmed.length < 80 && 
-                    !trimmed.includes('%') && !trimmed.includes('Energy') &&
-                    !trimmed.includes('bond') && !trimmed.includes('+') &&
-                    trimmed[0] === trimmed[0].toUpperCase()) {
-                    events.push({ name: trimmed, type: 'Event' });
+            const containers = sections[0].parentElement.querySelectorAll('div[class*="sc-"]');
+            containers.forEach(c => {
+                const nameNode = c.querySelector('div[font-weight="bold"], span[font-weight="bold"]');
+                const name = nameNode ? nameNode.innerText.trim() : c.innerText.split('\\n')[0].trim();
+                if (name && name.length > 2) {
+                    // Check if it has a gold-themed class or computed background color
+                    const isGold = c.className.includes('kkspcu') || window.getComputedStyle(c).backgroundColor.includes('rgb(255, 193, 7)');
+                    map[name] = isGold;
                 }
-            }
-            
-            return events.slice(0, 15);
+            });
+            return map;
         }
     """)
     
-    for event in events:
+    # Enable console logging for debugging
+    page.on("console", lambda msg: print(f"  [JS Console] {msg.text}"))
+    
+    # Scroll to the Events section specifically
+    print("  Ensuring events are loaded...")
+    page.evaluate("() => { const h = Array.from(document.querySelectorAll('h2, h1')).find(el => el.innerText.includes('Training Events')); if (h) h.scrollIntoView(); }")
+    page.wait_for_timeout(1000)
+    
+    # 2. Scrape the individual events and their popover rewards
+    events_data = page.evaluate("""
+        async () => {
+            console.log("Starting event scraping overhaul...");
+            const events = [];
+            
+            // Targeted search for event triggers based on section headers
+            const getTriggers = () => {
+                const triggers = [];
+                const headers = Array.from(document.querySelectorAll('div, h2, h3, span')).filter(el => 
+                    el.innerText.includes('Chain Events') || el.innerText.includes('Random Events')
+                );
+                
+                headers.forEach(header => {
+                    // Look for buttons in the siblings or children of the parent container
+                    const container = header.parentElement;
+                    if (container) {
+                        const buttons = Array.from(container.querySelectorAll('button'));
+                        buttons.forEach(btn => {
+                            const text = btn.innerText.trim();
+                            if (text && text.length > 5 && !text.includes('Events')) {
+                                triggers.push(btn);
+                            }
+                        });
+                    }
+                });
+                return triggers;
+            };
+
+            const buttons = getTriggers();
+            console.log(`Found ${buttons.length} candidate triggers: ${buttons.map(b => b.innerText.trim()).join(', ')}`);
+            
+            // Dedup targets by name
+            const seenNames = new Set();
+            
+            for (const btn of buttons) {
+                const eventName = btn.innerText.trim();
+                if (!eventName || seenNames.has(eventName)) continue;
+                seenNames.add(eventName);
+                
+                const eventType = eventName.includes('>') ? 'Chain' : 'Random';
+                console.log(`Processing event: ${eventName}`);
+                
+                try {
+                    // Click to open popover
+                    btn.scrollIntoViewIfNeeded ? btn.scrollIntoViewIfNeeded() : null;
+                    await new Promise(r => setTimeout(r, 100));
+                    btn.click();
+                    await new Promise(r => setTimeout(r, 600)); // Wait a bit more
+                    
+                    // Find popover - look for any dialogue/popover with the event name
+                    const popovers = Array.from(document.querySelectorAll('div')).filter(d => 
+                        d.innerText.includes(eventName) && 
+                        window.getComputedStyle(d).zIndex > 50 &&
+                        d.innerText.length < 2500
+                    );
+                    
+                    if (popovers.length > 0) {
+                        const pop = popovers[popovers.length - 1];
+                        console.log(`Found popover for ${eventName}`);
+                        const skills = [];
+                        
+                        // Look for 'OR' dividers
+                        const hasOrDivider = pop.querySelector('[class*="divider_or"]') !== null || 
+                                             pop.innerText.includes('Randomly either') ||
+                                             pop.innerText.includes(' or ');
+                        
+                        // Find all skill names
+                        const skillLinks = Array.from(pop.querySelectorAll('span, a')).filter(el => 
+                            el.innerText.length > 2 && 
+                            !el.innerText.includes('Energy') && 
+                            !el.innerText.includes('bond') &&
+                            (window.getComputedStyle(el).color === 'rgb(102, 107, 255)' || 
+                             el.className.includes('linkcolor'))
+                        );
+                        
+                        console.log(`Found ${skillLinks.length} potential skills in popover`);
+                        
+                        skillLinks.forEach(link => {
+                            const skillName = link.innerText.trim();
+                            if (skillName && skillName.length > 2 && !skills.some(s => s.name === skillName)) {
+                                // Check for inline ' or ' text nearby
+                                const textAround = link.parentElement ? link.parentElement.innerText : "";
+                                const isOr = hasOrDivider || textAround.toLowerCase().includes(' or ');
+                                skills.push({ name: skillName, is_or: isOr });
+                            }
+                        });
+                        
+                        events.push({ name: eventName, type: eventType, skills: skills });
+                        
+                        // Close popover
+                        document.body.click();
+                        await new Promise(r => setTimeout(r, 200));
+                    } else {
+                        console.log(`Popover NOT found for ${eventName}`);
+                        events.push({ name: eventName, type: eventType, skills: [] });
+                    }
+                } catch (err) {
+                    console.log(`Error clicking ${eventName}: ${err.message}`);
+                }
+            }
+            return events;
+        }
+    """)
+    
+    # 3. Store in database
+    for event in events_data:
         cur.execute("""
             INSERT INTO support_events (card_id, event_name, event_type)
             VALUES (?, ?, ?)
-        """, (card_id, event.get('name', ''), event.get('type', 'Unknown')))
-    
-    if events:
-        print(f"  Found {len(events)} events")
+        """, (card_id, event['name'], event['type']))
+        event_id = cur.lastrowid
+        
+        for skill in event['skills']:
+            is_gold = 1 if skill_rarity_map.get(skill['name']) else 0
+            cur.execute("""
+                INSERT INTO event_skills (event_id, skill_name, is_gold, is_or)
+                VALUES (?, ?, ?, ?)
+            """, (event_id, skill['name'], is_gold, 1 if skill['is_or'] else 0))
+            
+    if events_data:
+        print(f"  Processed {len(events_data)} events with {sum(len(e['skills']) for e in events_data)} skill rewards")
 
 def run_scraper():
     """Main scraper function"""

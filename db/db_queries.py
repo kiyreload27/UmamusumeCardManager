@@ -285,9 +285,21 @@ def init_database():
             skill_id INTEGER PRIMARY KEY AUTOINCREMENT,
             event_id INTEGER,
             skill_name TEXT,
+            is_gold INTEGER DEFAULT 0,
+            is_or INTEGER DEFAULT 0,
             FOREIGN KEY (event_id) REFERENCES support_events(event_id)
         )
     """)
+    
+    # Migration: Add columns to event_skills if they don't exist
+    try:
+        cur.execute("ALTER TABLE event_skills ADD COLUMN is_gold INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass # Column already exists
+    try:
+        cur.execute("ALTER TABLE event_skills ADD COLUMN is_or INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass # Column already exists
     
     # User tables
     cur.execute("""
@@ -479,26 +491,46 @@ def get_events(card_id):
     return rows
 
 def get_all_event_skills(card_id):
-    """Get all events and their skills for a card"""
+    """Get all skills from training events for a card"""
     conn = get_conn()
     cur = conn.cursor()
+    
     cur.execute("""
-        SELECT se.event_name, es.skill_name
+        SELECT se.event_name, es.skill_name, es.is_gold, es.is_or
         FROM support_events se
-        LEFT JOIN event_skills es ON se.event_id = es.event_id
+        JOIN event_skills es ON se.event_id = es.event_id
         WHERE se.card_id = ?
-        ORDER BY se.event_name, es.skill_name
     """, (card_id,))
     
-    result = {}
-    for event_name, skill_name in cur.fetchall():
-        if event_name not in result:
-            result[event_name] = []
-        if skill_name:
-            result[event_name].append(skill_name)
-    
+    # Group by event
+    events = {}
+    for event_name, skill_name, is_gold, is_or in cur.fetchall():
+        if event_name not in events:
+            events[event_name] = {'skills': [], 'or_skills': []}
+        
+        prefix = "✨ " if is_gold else ""
+        if is_or:
+            events[event_name]['or_skills'].append(f"{prefix}{skill_name}")
+        else:
+            events[event_name]['skills'].append(f"{prefix}{skill_name}")
+            
+    results = []
+    for event_name, data in events.items():
+        event_skills = []
+        if data['or_skills']:
+            event_skills.append(" (OR) ".join(data['or_skills']))
+        event_skills.extend(data['skills'])
+        
+        details = f"({', '.join(event_skills)})" if event_skills else ""
+        results.append({
+            'card_id': card_id,
+            'source': 'Event',
+            'skill_name': event_name,
+            'details': details
+        })
+        
     conn.close()
-    return result
+    return results
 
 # ============================================
 # Owned Cards (Collection) Queries
@@ -827,10 +859,32 @@ def get_cards_with_skill(skill_name):
         card_id, name, rarity, card_type, image_path, event_name, event_id, is_owned = row
         event_name = event_name.replace('\n', ' ').strip()
         
-        # Get ALL skills for this event to show in details
-        cur.execute("SELECT skill_name FROM event_skills WHERE event_id = ?", (event_id,))
-        other_skills = [r[0] for r in cur.fetchall()]
-        skills_summary = ", ".join(other_skills)
+        # Format event skills (handle OR groups and gold skills)
+        formatted_event_skills = []
+        cur.execute("""
+            SELECT skill_name, is_gold, is_or 
+            FROM event_skills 
+            WHERE event_id = ?
+        """, (event_id,))
+        
+        skills_data = cur.fetchall()
+        
+        or_group_skills = []
+        other_event_skills = []
+        
+        for s_name, s_is_gold, s_is_or in skills_data:
+            prefix = "✨ " if s_is_gold else ""
+            if s_is_or:
+                or_group_skills.append(f"{prefix}{s_name}")
+            else:
+                other_event_skills.append(f"{prefix}{s_name}")
+        
+        if or_group_skills:
+            formatted_event_skills.append(" (OR) ".join(or_group_skills))
+        formatted_event_skills.extend(other_event_skills)
+        
+        # Create a nice string like "Event Name (Skill1, Skill2)"
+        details = f"{event_name} ({', '.join(formatted_event_skills)})" if formatted_event_skills else event_name
         
         entry_key = (card_id, f'Event: {event_name}')
         
@@ -842,7 +896,7 @@ def get_cards_with_skill(skill_name):
                 'type': card_type,
                 'image_path': image_path,
                 'source': 'Event',
-                'details': f"{event_name} ({skills_summary})",
+                'details': details,
                 'is_owned': bool(is_owned)
             })
             seen_entries.add(entry_key)
