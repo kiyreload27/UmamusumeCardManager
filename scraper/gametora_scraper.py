@@ -477,6 +477,11 @@ def scrape_hints(page, card_id, cur):
 def scrape_events(page, card_id, cur):
     """Scrape training events with detailed skill rewards (Gold/White/OR)"""
     
+    # Use a flag to avoid adding multiple console listeners
+    if not hasattr(page, "_console_attached"):
+        page.on("console", lambda msg: print(f"  [JS Console] {msg.text}") if "scrapping" not in msg.text.lower() else None)
+        page._console_attached = True
+    
     # 1. First, build a map of skills from the 'Skills from events' summary section
     # This helps us identify which skills are Rare (Gold)
     skill_rarity_map = page.evaluate("""
@@ -501,8 +506,6 @@ def scrape_events(page, card_id, cur):
         }
     """)
     
-    # Enable console logging for debugging
-    page.on("console", lambda msg: print(f"  [JS Console] {msg.text}"))
     
     # Scroll to the Events section specifically
     print("  Ensuring events are loaded...")
@@ -529,7 +532,11 @@ def scrape_events(page, card_id, cur):
                         const buttons = Array.from(container.querySelectorAll('button'));
                         buttons.forEach(btn => {
                             const text = btn.innerText.trim();
-                            if (text && text.length > 5 && !text.includes('Events')) {
+                            // Check visibility to avoid mobile/desktop duplicates
+                            const style = window.getComputedStyle(btn);
+                            const isVisible = style.display !== 'none' && style.visibility !== 'hidden' && btn.offsetWidth > 0;
+                            
+                            if (isVisible && text && text.length > 5 && !text.includes('Events')) {
                                 triggers.push(btn);
                             }
                         });
