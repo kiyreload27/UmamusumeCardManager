@@ -14,6 +14,7 @@ from db.db_queries import get_database_stats, get_owned_count
 from gui.card_view import CardListFrame
 from gui.effects_view import EffectsFrame
 from gui.hints_skills_view import SkillSearchFrame
+from gui.deck_skills_view import DeckSkillsFrame
 from gui.deck_builder import DeckBuilderFrame
 from gui.update_dialog import show_update_dialog
 from gui.theme import (
@@ -161,7 +162,11 @@ class MainWindow:
         
         # Skill Search Tab
         self.hints_frame = SkillSearchFrame(self.notebook)
-        self.notebook.add(self.hints_frame, text="  🔍 Skill Search (Beta) ")
+        self.notebook.add(self.hints_frame, text="  🔍 Skill Search  ")
+        
+        # Deck Skills Tab
+        self.deck_skills_frame = DeckSkillsFrame(self.notebook)
+        self.notebook.add(self.deck_skills_frame, text="  📜 Deck Skills  ")
     
     def create_status_bar(self, parent):
         """Create status bar at bottom"""
@@ -201,8 +206,8 @@ class MainWindow:
         # Update other tabs with selected card
         if hasattr(self, 'effects_frame'):
             self.effects_frame.set_card(card_id)
-        if hasattr(self, 'hints_frame'):
-            self.hints_frame.set_card(card_id)
+        if hasattr(self, 'deck_skills_frame'):
+            self.deck_skills_frame.set_card(card_id)
         
         self.status_label.config(text=f"📌 Selected: {card_name}")
     
