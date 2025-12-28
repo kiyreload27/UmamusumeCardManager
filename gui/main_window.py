@@ -160,7 +160,7 @@ class MainWindow:
         
         # Skill Search Tab
         self.hints_frame = SkillSearchFrame(self.notebook)
-        self.notebook.add(self.hints_frame, text="  🔍 Skill Search  ")
+        self.notebook.add(self.hints_frame, text="  🔍 Skill Search (Beta) ")
         
         # Training Sim Tab
         self.sim_frame = TrainingSimFrame(self.notebook)
