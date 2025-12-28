@@ -61,25 +61,21 @@ class DeckSkillsFrame(ttk.Frame):
         tree_container = create_card_frame(self)
         tree_container.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 15))
         
-        cols = ('owned', 'skill', 'card', 'rarity', 'source', 'details')
+        cols = ('skill', 'rarity', 'source', 'details')
         self.tree = ttk.Treeview(tree_container, columns=cols, show='tree headings',
                                  style="Treeview")
         
-        self.tree.heading('#0', text='')
-        self.tree.heading('owned', text='★')
+        self.tree.heading('#0', text='★  Card / Skill')
         self.tree.heading('skill', text='Skill Name')
-        self.tree.heading('card', text='Provided By')
         self.tree.heading('rarity', text='Rarity')
         self.tree.heading('source', text='Source')
         self.tree.heading('details', text='Details / Other Event Skills')
         
-        self.tree.column('#0', width=45, anchor='center')
-        self.tree.column('owned', width=30, anchor='center')
+        self.tree.column('#0', width=250, anchor='w')
         self.tree.column('skill', width=150)
-        self.tree.column('card', width=180)
         self.tree.column('rarity', width=50, anchor='center')
         self.tree.column('source', width=100)
-        self.tree.column('details', width=400)
+        self.tree.column('details', width=450)
         
         scrollbar = ttk.Scrollbar(tree_container, orient=tk.VERTICAL, command=self.tree.yview)
         self.tree.configure(yscrollcommand=scrollbar.set)
@@ -125,20 +121,19 @@ class DeckSkillsFrame(ttk.Frame):
             
         total_skills = 0
         for card_row in deck_cards:
-            # card_row format: (slot_pos, level, card_id, name, rarity, type, image_path)
-            # But wait, get_deck_cards in db_queries has a specific return
-            # Let's re-verify: ds.slot_position, ds.level, sc.card_id, sc.name, sc.rarity, sc.card_type, sc.image_path
             slot_pos, level, card_id, name, rarity, card_type, image_path = card_row
             
-            # Since get_deck_cards doesn't return ownership (usually cards in deck ARE owned but maybe not)
-            # Let's get full card data for set_card logic consistency
             card_full = get_card_by_id(card_id)
             is_owned = bool(card_full[7]) if card_full else False
+            
+            # Create Parent Node for Card
+            owned_mark = "★ " if is_owned else "   "
+            parent_id = self.add_card_node(card_id, owned_mark, name, rarity, card_type, image_path)
             
             # 1. Hints
             hints = get_hints(card_id)
             for h_name, h_desc in hints:
-                self.add_skill_row(h_name, name, rarity, card_type, image_path, "Training Hint", h_desc, is_owned, card_id)
+                self.add_skill_row(parent_id, h_name, "Training Hint", h_desc)
                 total_skills += 1
                 
             # 2. Event Skills
@@ -146,14 +141,13 @@ class DeckSkillsFrame(ttk.Frame):
             for ev_name, skills in events.items():
                 summary = ", ".join(skills)
                 for s_name in skills:
-                    self.add_skill_row(s_name, name, rarity, card_type, image_path, "Event", f"{ev_name} ({summary})", is_owned, card_id)
+                    self.add_skill_row(parent_id, s_name, "Event", f"{ev_name} ({summary})")
                     total_skills += 1
                     
         self.stats_label.config(text=f"Found {total_skills} total skill sources in deck")
 
-    def add_skill_row(self, skill_name, card_name, rarity, card_type, image_path, source, details, is_owned, card_id):
-        """Add a single skill row to the tree"""
-        # Load Icon
+    def add_card_node(self, card_id, owned_mark, name, rarity, card_type, image_path):
+        """Add a parent node for a card"""
         img = self.icon_cache.get(card_id)
         if not img:
             resolved_path = resolve_image_path(image_path)
@@ -165,22 +159,23 @@ class DeckSkillsFrame(ttk.Frame):
                     self.icon_cache[card_id] = img
                 except: pass
         
-        owned_mark = "★" if is_owned else ""
-        type_display = f"{get_type_icon(card_type)} {card_type}"
+        type_icon = get_type_icon(card_type)
+        display_text = f"{owned_mark}{name}"
         
+        # Parent row only needs display text and rarity (optional)
+        iid = self.tree.insert('', tk.END, text=display_text, image=img, open=True,
+                               values=("", rarity, f"{type_icon} {card_type}", ""))
+        return iid
+
+    def add_skill_row(self, parent_id, skill_name, source, details):
+        """Add a child skill row to a card node"""
         values = (
-            owned_mark,
             skill_name,
-            card_name,
-            rarity,
+            "", # Rarity column empty for skills
             source,
             details
         )
-        
-        if img:
-            self.tree.insert('', tk.END, text='', image=img, values=values)
-        else:
-            self.tree.insert('', tk.END, text='?', values=values)
+        self.tree.insert(parent_id, tk.END, values=values)
 
     def set_card(self, card_id):
         """Show skills for a single card selection"""
@@ -198,10 +193,14 @@ class DeckSkillsFrame(ttk.Frame):
             
         total_skills = 0
         
+        # Create Parent Node
+        owned_mark = "★ " if is_owned else "   "
+        parent_id = self.add_card_node(card_id, owned_mark, name, rarity, card_type, image_path)
+        
         # 1. Hints
         hints = get_hints(card_id)
         for h_name, h_desc in hints:
-            self.add_skill_row(h_name, name, rarity, card_type, image_path, "Training Hint", h_desc, bool(is_owned), card_id)
+            self.add_skill_row(parent_id, h_name, "Training Hint", h_desc)
             total_skills += 1
             
         # 2. Event Skills
@@ -209,7 +208,7 @@ class DeckSkillsFrame(ttk.Frame):
         for ev_name, skills in events.items():
             summary = ", ".join(skills)
             for s_name in skills:
-                self.add_skill_row(s_name, name, rarity, card_type, image_path, "Event", f"{ev_name} ({summary})", bool(is_owned), card_id)
+                self.add_skill_row(parent_id, s_name, "Event", f"{ev_name} ({summary})")
                 total_skills += 1
                 
         self.stats_label.config(text=f"Showing {total_skills} skill sources for {name}")
