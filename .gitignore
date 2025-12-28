@@ -1,28 +1,38 @@
-# Ignore Windows executables
-*.exe
-
-# Ignore Python bytecode
-__pycache__
-*.pyc
-*.pyo
-
-# Ignore virtual environment
-venv
-.env
-
-# Ignore temporary files
-*.tmp
-*.log
+# General
+__pycache__/
+*.py[cod]
+*$py.class
 *.swp
 *.swo
+*.tmp
+*.log
+.DS_Store
+Thumbs.db
 
-# Ignore build files
+# Virtual Environment
+venv/
+.venv/
+env/
+.env
+
+# Build and Distribution
 build/
 dist/
-.build
-.toc
-.zip
-.pkg
-.txt
-.html
+*.spec
+# Exception: We want to keep our custom spec file
+!UmamusumeCardManager.spec
+*.exe
+*.zip
+*.pkg
 
+# Database
+# Ignore the running database, but keep the seed/template
+database/*.db
+!database/umamusume_seed.db
+
+# VS Code
+.vscode/
+
+# Project Specific
+# We are allowing .txt and .html now (removing previous blocks)
+# If there are specific large generated files, add them here.
