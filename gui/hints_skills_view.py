@@ -10,7 +10,7 @@ from PIL import Image, ImageTk
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from db.db_queries import get_all_unique_skills, get_cards_with_skill
+from db.db_queries import get_all_unique_skills, get_cards_with_skill, get_card_by_id, get_hints, get_all_event_skills
 from utils import resolve_image_path
 from gui.theme import (
     BG_DARK, BG_MEDIUM, BG_LIGHT, BG_HIGHLIGHT,
@@ -88,11 +88,12 @@ class SkillSearchFrame(ttk.Frame):
         tree_frame = create_card_frame(right_frame)
         tree_frame.pack(fill=tk.BOTH, expand=True, padx=10)
         
-        cols = ('name', 'rarity', 'type', 'source', 'details')
+        cols = ('owned', 'name', 'rarity', 'type', 'source', 'details')
         self.tree = ttk.Treeview(tree_frame, columns=cols, show='tree headings',
                                  style="Treeview")
         
         self.tree.heading('#0', text='')
+        self.tree.heading('owned', text='★')
         self.tree.heading('name', text='Card Name')
         self.tree.heading('rarity', text='Rarity')
         self.tree.heading('type', text='Type')
@@ -100,6 +101,7 @@ class SkillSearchFrame(ttk.Frame):
         self.tree.heading('details', text='Details')
         
         self.tree.column('#0', width=50, anchor='center')
+        self.tree.column('owned', width=30, anchor='center')
         self.tree.column('name', width=180)
         self.tree.column('rarity', width=50, anchor='center')
         self.tree.column('type', width=80, anchor='center')
@@ -173,8 +175,10 @@ class SkillSearchFrame(ttk.Frame):
                         pass
             
             type_display = f"{get_type_icon(card['type'])} {card['type']}"
+            owned_mark = "★" if card.get('is_owned') else ""
             
             values = (
+                owned_mark,
                 card['name'],
                 card['rarity'],
                 type_display,
@@ -191,10 +195,77 @@ class SkillSearchFrame(ttk.Frame):
 
     def set_card(self, card_id):
         """
-        Legacy method compatibility for main window calls.
-        We don't need to do anything here since we are skill-centric now.
-        But main_window might call it when card is selected in tab 1.
-        We could potentially auto-search a skill from that card? 
-        For now, just ignore it.
+        Show all skills (Hints and Events) for a specific card.
+        Called by main window when a card is selected in the list.
         """
-        pass
+        card = get_card_by_id(card_id)
+        if not card: return
+        
+        card_name = card[1]
+        self.result_header.config(text=f"Skills for: {card_name}")
+        
+        # Clear tree
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+            
+        all_skills = []
+        
+        # 1. Get Hints
+        hints = get_hints(card_id)
+        for h_name, h_desc in hints:
+            all_skills.append({
+                'card_id': card_id,
+                'name': card_name,
+                'rarity': card[2],
+                'type': card[3],
+                'image_path': card[6],
+                'source': 'Training Hint',
+                'details': f"{h_name}: {h_desc}",
+                'is_owned': bool(card[7])
+            })
+            
+        # 2. Get Event Skills
+        event_dict = get_all_event_skills(card_id)
+        for ev_name, skills in event_dict.items():
+            all_skills.append({
+                'card_id': card_id,
+                'name': card_name,
+                'rarity': card[2],
+                'type': card[3],
+                'image_path': card[6],
+                'source': 'Event',
+                'details': f"{ev_name} ({', '.join(skills)})",
+                'is_owned': bool(card[7])
+            })
+            
+        # Display them
+        for skill in all_skills:
+            img = self.icon_cache.get(skill['card_id'])
+            if not img:
+                resolved_path = resolve_image_path(skill['image_path'])
+                if resolved_path and os.path.exists(resolved_path):
+                    try:
+                        pil_img = Image.open(resolved_path)
+                        pil_img.thumbnail((32, 32), Image.Resampling.LANCZOS)
+                        img = ImageTk.PhotoImage(pil_img)
+                        self.icon_cache[skill['card_id']] = img
+                    except: pass
+            
+            type_display = f"{get_type_icon(skill['type'])} {skill['type']}"
+            owned_mark = "★" if skill.get('is_owned') else ""
+            
+            values = (
+                owned_mark,
+                skill['name'],
+                skill['rarity'],
+                type_display,
+                skill['source'],
+                skill['details']
+            )
+            
+            if img:
+                self.tree.insert('', tk.END, text='', image=img, values=values)
+            else:
+                self.tree.insert('', tk.END, text='?', values=values)
+                
+        self.stats_label.config(text=f"Showing {len(all_skills)} skill sources for {card_name}")

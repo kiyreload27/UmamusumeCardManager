@@ -14,7 +14,6 @@ from db.db_queries import get_database_stats, get_owned_count
 from gui.card_view import CardListFrame
 from gui.effects_view import EffectsFrame
 from gui.hints_skills_view import SkillSearchFrame
-from gui.training_sim import TrainingSimFrame
 from gui.deck_builder import DeckBuilderFrame
 from gui.update_dialog import show_update_dialog
 from gui.theme import (
@@ -163,10 +162,6 @@ class MainWindow:
         # Skill Search Tab
         self.hints_frame = SkillSearchFrame(self.notebook)
         self.notebook.add(self.hints_frame, text="  🔍 Skill Search (Beta) ")
-        
-        # Training Sim Tab
-        self.sim_frame = TrainingSimFrame(self.notebook)
-        self.notebook.add(self.sim_frame, text="  📈 Training Sim (Beta)  ")
     
     def create_status_bar(self, parent):
         """Create status bar at bottom"""

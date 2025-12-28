@@ -788,9 +788,11 @@ def get_cards_with_skill(skill_name):
     
     # 1. Check Hints
     cur.execute("""
-        SELECT sc.card_id, sc.name, sc.rarity, sc.card_type, sc.image_path, sh.hint_description
+        SELECT sc.card_id, sc.name, sc.rarity, sc.card_type, sc.image_path, sh.hint_description,
+               CASE WHEN oc.card_id IS NOT NULL THEN 1 ELSE 0 END as is_owned
         FROM support_hints sh
         JOIN support_cards sc ON sh.card_id = sc.card_id
+        LEFT JOIN owned_cards oc ON sc.card_id = oc.card_id
         WHERE sh.hint_name = ?
     """, (skill_name,))
     
@@ -804,33 +806,44 @@ def get_cards_with_skill(skill_name):
                 'type': row[3],
                 'image_path': row[4],
                 'source': 'Training Hint',
-                'details': row[5] or "Random hint event"
+                'details': row[5] or "Random hint event",
+                'is_owned': bool(row[6])
             })
             seen_entries.add(entry_key)
             
     # 2. Check Event Skills
     cur.execute("""
-        SELECT sc.card_id, sc.name, sc.rarity, sc.card_type, sc.image_path, se.event_name
+        SELECT sc.card_id, sc.name, sc.rarity, sc.card_type, sc.image_path, se.event_name, se.event_id,
+               CASE WHEN oc.card_id IS NOT NULL THEN 1 ELSE 0 END as is_owned
         FROM event_skills es
         JOIN support_events se ON es.event_id = se.event_id
         JOIN support_cards sc ON se.card_id = sc.card_id
+        LEFT JOIN owned_cards oc ON sc.card_id = oc.card_id
         WHERE es.skill_name = ?
     """, (skill_name,))
     
-    for row in cur.fetchall():
-        # Clean event name if it has newlines or excessive spaces
-        event_name = row[5].replace('\n', ' ').strip()
-        entry_key = (row[0], f'Event: {event_name}')
+    rows = cur.fetchall()
+    for row in rows:
+        card_id, name, rarity, card_type, image_path, event_name, event_id, is_owned = row
+        event_name = event_name.replace('\n', ' ').strip()
+        
+        # Get ALL skills for this event to show in details
+        cur.execute("SELECT skill_name FROM event_skills WHERE event_id = ?", (event_id,))
+        other_skills = [r[0] for r in cur.fetchall()]
+        skills_summary = ", ".join(other_skills)
+        
+        entry_key = (card_id, f'Event: {event_name}')
         
         if entry_key not in seen_entries:
             results.append({
-                'card_id': row[0],
-                'name': row[1],
-                'rarity': row[2],
-                'type': row[3],
-                'image_path': row[4],
+                'card_id': card_id,
+                'name': name,
+                'rarity': rarity,
+                'type': card_type,
+                'image_path': image_path,
                 'source': 'Event',
-                'details': event_name
+                'details': f"{event_name} ({skills_summary})",
+                'is_owned': bool(is_owned)
             })
             seen_entries.add(entry_key)
     
