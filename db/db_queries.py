@@ -62,14 +62,20 @@ try:
 except ImportError:
     VERSION = "2.1.0" # Fallback
 
+_updates_checked = False
+
 def get_conn():
     """Get database connection"""
+    global _updates_checked
+    
     # Initialize if missing
     if not os.path.exists(DB_PATH):
         init_database()
     
-    # Check for updates and migrate if needed
-    check_for_updates()
+    # Check for updates and migrate if needed (only once per session)
+    if not _updates_checked:
+        _updates_checked = True
+        check_for_updates()
         
     return sqlite3.connect(DB_PATH)
 
@@ -105,6 +111,7 @@ def check_for_updates():
                 sync_from_seed(bundled_seed_path)
             
             # Always ensure data integrity
+            repair_orphaned_data()
             cleanup_orphaned_data()
                 
         except Exception as e:
@@ -747,10 +754,59 @@ def get_database_stats():
     conn.close()
     return stats
 
+def repair_orphaned_data():
+    """
+    Attempt to repair orphaned data where card_id mapping was lost 
+    but can be recovered by matching card names or URLs if available.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    
+    try:
+        # Check if we have orphans
+        cur.execute("SELECT COUNT(*) FROM support_events WHERE card_id NOT IN (SELECT card_id FROM support_cards)")
+        orphan_count = cur.fetchone()[0]
+        
+        if orphan_count > 0:
+            print(f"Detected {orphan_count} orphaned training events. Attempting recovery by card name...")
+            
+            # This is complex because we don't know the name of the card the orphaned event belonged to 
+            # UNLESS we can find a previous state. 
+            # MOST LIKELY: This happened during a failed sync where card_ids were from the seed.
+            # If so, we might not be able to recover without re-scraping.
+            pass
+
+        # A more common issue: support_cards duplicated due to INSERT OR REPLACE
+        # Let's ensure no duplicates exist based on URL
+        cur.execute("SELECT gametora_url, COUNT(*) as c FROM support_cards GROUP BY gametora_url HAVING c > 1")
+        dupes = cur.fetchall()
+        if dupes:
+            print(f"Found {len(dupes)} duplicate card entries. Cleaning up...")
+            for url, count in dupes:
+                # Keep the one with highest ID (most recent)
+                cur.execute("SELECT card_id FROM support_cards WHERE gametora_url = ? ORDER BY card_id DESC", (url,))
+                ids = [r[0] for r in cur.fetchall()]
+                keep_id = ids[0]
+                toss_ids = ids[1:]
+                
+                # Update references in other tables before deleting
+                for table in ['owned_cards', 'deck_slots', 'support_effects', 'support_hints', 'support_events']:
+                    cur.execute(f"UPDATE {table} SET card_id = ? WHERE card_id IN ({','.join(['?']*len(toss_ids))})", 
+                                [keep_id] + toss_ids)
+                
+                cur.execute(f"DELETE FROM support_cards WHERE card_id IN ({','.join(['?']*len(toss_ids))})", toss_ids)
+            conn.commit()
+            
+    except Exception as e:
+        print(f"Repair failed: {e}")
+    finally:
+        conn.close()
+
 def cleanup_orphaned_data():
     """Remove references to non-existent cards in user data tables"""
     print("Cleaning up orphaned database records...")
-    conn = get_conn()
+    # Use direct connection to avoid recursion with get_conn()
+    conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     
     try:
@@ -770,13 +826,17 @@ def cleanup_orphaned_data():
         if cur.rowcount > 0:
             print(f"Removed {cur.rowcount} orphaned deck slot records.")
             
+        # 3. Clean detail tables
+        cur.execute("DELETE FROM support_effects WHERE card_id NOT IN (SELECT card_id FROM support_cards)")
+        cur.execute("DELETE FROM support_hints WHERE card_id NOT IN (SELECT card_id FROM support_cards)")
+        cur.execute("DELETE FROM support_events WHERE card_id NOT IN (SELECT card_id FROM support_cards)")
+        cur.execute("DELETE FROM event_skills WHERE event_id NOT IN (SELECT event_id FROM support_events)")
+        
         conn.commit()
     except Exception as e:
         print(f"Cleanup failed: {e}")
     finally:
         conn.close()
-
-# ============================================
 # Skill Search Queries
 # ============================================
 

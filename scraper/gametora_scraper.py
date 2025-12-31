@@ -258,10 +258,17 @@ def scrape_support_card(page, url, conn, max_retries=3):
             
             cur = conn.cursor()
             
-            # Insert card
+            # Insert card using OR IGNORE to keep the same card_id if it exists
             cur.execute("""
-                INSERT OR REPLACE INTO support_cards (name, rarity, card_type, max_level, gametora_url)
+                INSERT OR IGNORE INTO support_cards (name, rarity, card_type, max_level, gametora_url)
                 VALUES (?, ?, ?, ?, ?)
+            """, (name, rarity, card_type, max_level, url))
+            
+            # Update existing card to ensure data is fresh (without changing ID)
+            cur.execute("""
+                UPDATE support_cards 
+                SET name = ?, rarity = ?, card_type = ?, max_level = ?
+                WHERE gametora_url = ?
             """, (name, rarity, card_type, max_level, url))
             conn.commit()
             
@@ -554,29 +561,48 @@ def scrape_events(page, card_id, cur):
     skill_rarity_map = page.evaluate("""
         () => {
             const map = {};
-            // Rare skills use a specific class (e.g., kkspcu) while normal use another (e.g., gImSzc)
-            // It's safer to find all skill containers in the summary section
-            const sections = Array.from(document.querySelectorAll('div')).filter(d => d.innerText.startsWith('Skills from events'));
-            if (sections.length === 0) return map;
+            console.log("Building Skill Rarity Map...");
             
-            const containers = sections[0].parentElement.querySelectorAll('div[class*="sc-"]');
+            // 1. Find all skill containers. They usually have a name and a 'Details' button.
+            // In the "Skills from events" or "Support hints" sections.
+            const containers = Array.from(document.querySelectorAll('div')).filter(d => 
+                (d.innerText.includes('Details') || d.innerText.includes('Reward')) && d.innerText.length < 500
+            );
+            
             containers.forEach(c => {
-                const nameNode = c.querySelector('div[font-weight="bold"], span[font-weight="bold"]');
-                const name = nameNode ? nameNode.innerText.trim() : c.innerText.split('\\n')[0].trim();
+                // Try to extract the skill name. It's usually the first text node or a bold tag.
+                const nameNode = c.querySelector('b, span[font-weight="bold"], div[font-weight="bold"]');
+                let name = "";
+                if (nameNode) {
+                    name = nameNode.innerText.trim();
+                } else {
+                    // Fallback to text before 'Details'
+                    name = c.innerText.split('Details')[0].replace(/\\n/g, ' ').trim();
+                }
+                
                 if (name && name.length > 2) {
-                    // Check if it has a gold-themed class or computed background color
-                    const isGold = c.className.includes('kkspcu') || window.getComputedStyle(c).backgroundColor.includes('rgb(255, 193, 7)');
-                    map[name] = isGold;
+                    const style = window.getComputedStyle(c);
+                    const nameStyle = nameNode ? window.getComputedStyle(nameNode) : null;
+                    
+                    // Golden skills have a specific background
+                    const isGold = style.backgroundImage.includes('linear-gradient') || 
+                                   style.backgroundColor.includes('rgb(255, 193, 7)') ||
+                                   (nameStyle && nameStyle.color === 'rgb(255, 193, 7)') ||
+                                   c.className.includes('kkspcu') ||
+                                   c.innerHTML.includes('kkspcu');
+                    
+                    const normalized = name.toLowerCase().replace(/\\s+/g, ' ').replace(/[()（）-]/g, '').trim();
+                    map[normalized] = isGold;
+                    console.log(`Mapped Skill: "${name}" [${normalized}] -> Gold: ${isGold}`);
                 }
             });
             return map;
         }
     """)
     
-    
     # Scroll to the Events section specifically
     print("  Ensuring events are loaded...")
-    page.evaluate("() => { const h = Array.from(document.querySelectorAll('h2, h1')).find(el => el.innerText.includes('Training Events')); if (h) h.scrollIntoView(); }")
+    page.evaluate("() => { const h = Array.from(document.querySelectorAll('h2, h1, div')).find(el => el.innerText.toLowerCase().includes('training events')); if (h) h.scrollIntoView(); }")
     page.wait_for_timeout(1000)
     
     # 2. Scrape ONLY the LAST chain event (Golden Perk) with OR options
@@ -587,21 +613,30 @@ def scrape_events(page, card_id, cur):
             // Find all chain event buttons
             const getChainEventButtons = () => {
                 const buttons = [];
-                const headers = Array.from(document.querySelectorAll('div, h2, h3, span')).filter(el => 
-                    el.innerText.includes('Chain Events')
+                // Look for "Chain Events" text (case-insensitive substring)
+                const labels = Array.from(document.querySelectorAll('div, span, h2, h3, h4')).filter(el => 
+                    el.innerText.toLowerCase().includes('chain events') && el.innerText.trim().length < 20
                 );
                 
-                headers.forEach(header => {
-                    const container = header.parentElement;
+                labels.forEach(label => {
+                    // The buttons are usually in the same container or next container
+                    let container = label.parentElement;
+                    let attempts = 0;
+                    while (container && container.querySelectorAll('button').length === 0 && attempts < 5) {
+                        container = container.nextElementSibling || container.parentElement;
+                        attempts++;
+                        if (container && container.tagName === 'BODY') break;
+                    }
+                    
                     if (container) {
                         const btns = Array.from(container.querySelectorAll('button'));
                         btns.forEach(btn => {
                             const text = btn.innerText.trim();
                             const style = window.getComputedStyle(btn);
-                            const isVisible = style.display !== 'none' && style.visibility !== 'hidden' && btn.offsetWidth > 0;
+                            const isVisible = style.display !== 'none' && style.visibility !== 'hidden';
                             
-                            // Only chain events (contain '>')
-                            if (isVisible && text && text.includes('>') && !text.includes('Events')) {
+                            // Look for arrows (regular or heavy)
+                            if (isVisible && (text.includes('>') || text.includes('❯'))) {
                                 buttons.push(btn);
                             }
                         });
@@ -617,13 +652,20 @@ def scrape_events(page, card_id, cur):
                 return null;
             }
             
-            // Find the button with the most '>' characters (the last chain event = Golden Perk)
             let goldenPerkButton = null;
             let maxArrows = 0;
             
             for (const btn of buttons) {
                 const text = btn.innerText.trim();
-                const arrowCount = (text.match(/>/g) || []).length;
+                // Count both regular and heavy arrows
+                const arrowCount = (text.match(/>|❯/g) || []).length;
+                
+                // If it has three heavy arrows, it's almost certainly the golden perk
+                if (text.includes('❯❯❯')) {
+                    goldenPerkButton = btn;
+                    break; 
+                }
+                
                 if (arrowCount > maxArrows) {
                     maxArrows = arrowCount;
                     goldenPerkButton = btn;
@@ -709,7 +751,30 @@ def scrape_events(page, card_id, cur):
         event_id = cur.lastrowid
         
         for skill in golden_perk_data['skills']:
-            is_gold = 1 if skill_rarity_map.get(skill['name']) else 0
+            # Normalization helper
+            def normalize(s):
+                return s.lower().replace(" hint +1", "").replace(" hint +3", "").replace(" hint +5", "").replace(" hint +", "").strip().replace("  ", " ").replace("-", "").replace("(", "").replace(")", "").replace(" ", "")
+            
+            skill_name = normalize(skill['name'])
+            
+            # Use extra aggressive name matching against the map values
+            # (The map keys are already normalized)
+            is_gold = 0
+            for k, gold in skill_rarity_map.items():
+                if normalize(k) == skill_name:
+                    is_gold = 1 if gold else 0
+                    break
+            
+            # Fallback 1: If it's a chain event and specifically the last one, it's almost certainly gold
+            if not is_gold and golden_perk_data.get('type') == 'Chain':
+                # Check for "hint" patterns which usually accompany gold perks in chain events
+                if "hint +" in skill['name'].lower() or len(golden_perk_data['skills']) <= 2:
+                    is_gold = 1
+                    print(f"  ✨ Golden Skill Fallback (Last Chain Event): {skill['name']}")
+            
+            if is_gold:
+                print(f"  ✨ Golden Skill Verified: {skill['name']}")
+            
             cur.execute("""
                 INSERT INTO event_skills (event_id, skill_name, is_gold, is_or)
                 VALUES (?, ?, ?, ?)
