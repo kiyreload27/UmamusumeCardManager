@@ -197,6 +197,21 @@ class MainWindow:
             fg=TEXT_MUTED
         ).pack(side=tk.RIGHT)
         
+        # Diagnostics Button
+        diag_btn = tk.Button(
+            status_frame,
+            text="🔍 Diagnostics",
+            font=FONT_SMALL,
+            bg=BG_MEDIUM,
+            fg=ACCENT_TERTIARY,
+            bd=0,
+            activebackground=BG_LIGHT,
+            activeforeground=TEXT_PRIMARY,
+            cursor='hand2',
+            command=self.show_diagnostics
+        )
+        diag_btn.pack(side=tk.RIGHT, padx=15)
+        
         tk.Label(
             status_frame,
             text="Made by Kiyreload  │  ",
@@ -239,6 +254,64 @@ class MainWindow:
     def show_update_dialog(self):
         """Show the update dialog"""
         show_update_dialog(self.root)
+    
+    def show_diagnostics(self):
+        """Show diagnostics information for debugging"""
+        diag_win = tk.Toplevel(self.root)
+        diag_win.title("System Diagnostics")
+        diag_win.geometry("700x500")
+        diag_win.configure(bg=BG_DARK)
+        
+        from db.db_queries import DB_PATH
+        import platform
+        
+        # Info text
+        info = [
+            f"--- Application Info ---",
+            f"Version: {VERSION}",
+            f"Frozen (EXE): {getattr(sys, 'frozen', False)}",
+            f"Python: {sys.version}",
+            f"Platform: {platform.platform()}",
+            "",
+            f"--- Database ---",
+            f"DB Path: {DB_PATH}",
+            f"DB Exists: {os.path.exists(DB_PATH)}",
+            "",
+            f"--- Search Paths ---",
+            f"Executable: {sys.executable}",
+            f"Script Root: {os.path.dirname(os.path.abspath(__file__))}",
+            f"MEIPASS (Temp): {getattr(sys, '_MEIPASS', 'N/A')}",
+            "",
+            f"--- Image Check ---"
+        ]
+        
+        # Check some images
+        img_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'images')
+        info.append(f"Images Dir (Source): {img_dir}")
+        info.append(f"Exists: {os.path.exists(img_dir)}")
+        
+        if os.path.exists(img_dir):
+            files = os.listdir(img_dir)
+            info.append(f"Files found: {len(files)}")
+            if len(files) > 0:
+                info.append(f"Sample: {files[0]}")
+        
+        content = "\n".join(info)
+        
+        # Display area
+        text_frame = tk.Frame(diag_win, bg=BG_DARK, padx=20, pady=20)
+        text_frame.pack(fill=tk.BOTH, expand=True)
+        
+        from gui.theme import create_styled_text
+        text_area = create_styled_text(text_frame)
+        text_area.pack(fill=tk.BOTH, expand=True)
+        text_area.insert(tk.END, content)
+        text_area.config(state=tk.DISABLED)
+        
+        # Close button
+        btn_frame = tk.Frame(diag_win, bg=BG_DARK, pady=15)
+        btn_frame.pack(fill=tk.X)
+        create_styled_button(btn_frame, text="Close", command=diag_win.destroy).pack()
     
     def run(self):
         """
