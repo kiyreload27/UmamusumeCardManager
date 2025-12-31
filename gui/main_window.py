@@ -37,6 +37,7 @@ class MainWindow:
         self.root.geometry("1400x850") 
         self.root.minsize(1350, 800)
         
+        
         # Set icon
         try:
             icon_path = resolve_image_path("1_Special Week.png")
@@ -240,7 +241,9 @@ class MainWindow:
         show_update_dialog(self.root)
     
     def run(self):
-        """Start the application"""
+        """
+        Start the GUI application and display the main window.
+        """
         self.root.mainloop()
 
 

@@ -209,7 +209,7 @@ def configure_styles(root: tk.Tk):
                     foreground=TEXT_SECONDARY,
                     fieldbackground=BG_MEDIUM,
                     font=FONT_BODY,
-                    rowheight=40)
+                    rowheight=60)
     
     # Deck list style
     style.configure('DeckList.Treeview',
@@ -217,7 +217,7 @@ def configure_styles(root: tk.Tk):
                     foreground=TEXT_SECONDARY,
                     fieldbackground=BG_MEDIUM,
                     font=FONT_BODY,
-                    rowheight=40)
+                    rowheight=60)
     style.map('DeckList.Treeview',
               background=[('selected', ACCENT_PRIMARY)])
     
@@ -231,14 +231,6 @@ def configure_styles(root: tk.Tk):
     style.configure('Horizontal.TScale',
                     background=BG_DARK)
     
-    # ─────────────────────────────────────────────────────────────────────────
-    # Progressbar styles
-    # ─────────────────────────────────────────────────────────────────────────
-    style.configure('TProgressbar',
-                    background=ACCENT_PRIMARY,
-                    troughcolor=BG_MEDIUM,
-                    borderwidth=0,
-                    thickness=8)
     
     # ─────────────────────────────────────────────────────────────────────────
     # Scrollbar styles

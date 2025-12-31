@@ -132,14 +132,23 @@ class SkillSearchFrame(ttk.Frame):
 
     def load_skills(self):
         """Load all unique skills into listbox"""
-        self.all_skills = get_all_unique_skills()
-        self.update_listbox(self.all_skills)
+        skills_data = get_all_unique_skills()
+        # Store as list of (skill_name, is_golden) tuples
+        self.all_skills = skills_data
+        self.update_listbox(skills_data)
         
     def update_listbox(self, items):
         """Update listbox content"""
         self.skill_listbox.delete(0, tk.END)
         for item in items:
-            self.skill_listbox.insert(tk.END, item)
+            if isinstance(item, tuple):
+                skill_name, is_golden = item
+                # Display with golden indicator
+                display_name = f"✨ GOLDEN {skill_name}" if is_golden else skill_name
+                self.skill_listbox.insert(tk.END, display_name)
+            else:
+                # Backward compatibility
+                self.skill_listbox.insert(tk.END, item)
             
     def filter_skills(self, *args):
         """Filter skills based on search text"""
@@ -147,8 +156,18 @@ class SkillSearchFrame(ttk.Frame):
         if not search:
             self.update_listbox(self.all_skills)
             return
-            
-        filtered = [s for s in self.all_skills if search in s.lower()]
+        
+        # Filter skills - handle both tuple format and string format
+        filtered = []
+        for item in self.all_skills:
+            if isinstance(item, tuple):
+                skill_name, is_golden = item
+                if search in skill_name.lower() or (search == "golden" and is_golden):
+                    filtered.append(item)
+            else:
+                if search in item.lower():
+                    filtered.append(item)
+        
         self.update_listbox(filtered)
         
     def on_filter_changed(self):
@@ -162,7 +181,13 @@ class SkillSearchFrame(ttk.Frame):
         if not selection:
             return
             
-        skill_name = self.skill_listbox.get(selection[0])
+        display_name = self.skill_listbox.get(selection[0])
+        # Extract actual skill name (remove "✨ GOLDEN " prefix if present)
+        if display_name.startswith("✨ GOLDEN "):
+            skill_name = display_name.replace("✨ GOLDEN ", "", 1)
+        else:
+            skill_name = display_name
+        
         self.current_skill = skill_name
         self.show_cards_for_skill(skill_name)
     
@@ -191,22 +216,34 @@ class SkillSearchFrame(ttk.Frame):
                 if resolved_path and os.path.exists(resolved_path):
                     try:
                         pil_img = Image.open(resolved_path)
-                        pil_img.thumbnail((32, 32), Image.Resampling.LANCZOS)
+                        pil_img.thumbnail((48, 48), Image.Resampling.LANCZOS)
                         img = ImageTk.PhotoImage(pil_img)
                         self.icon_cache[card_id] = img
                     except:
                         pass
             
-            type_display = f"{get_type_icon(card['type'])} {card['type']}"
+            # Handle both 'type' and 'card_type' keys for compatibility
+            card_type = card.get('type') or card.get('card_type') or 'Unknown'
+            type_display = f"{get_type_icon(card_type)} {card_type}"
             owned_mark = "★" if card.get('is_owned') else ""
+            
+            # Highlight golden skills in source column
+            source = card.get('source', 'Event')
+            if card.get('is_gold', False):
+                source = f"✨ GOLDEN {source.replace('✨ GOLDEN ', '')}"  # Ensure no double prefix
+            
+            # Handle potential None values
+            card_name = card.get('name') or 'Unknown'
+            card_rarity = card.get('rarity') or 'Unknown'
+            card_details = card.get('details') or 'No details available'
             
             values = (
                 owned_mark,
-                card['name'],
-                card['rarity'],
+                card_name,
+                card_rarity,
                 type_display,
-                card['source'],
-                card['details']
+                source,
+                card_details
             )
             
             if img:

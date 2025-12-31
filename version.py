@@ -4,9 +4,9 @@ This file is the single source of truth for the application version.
 """
 
 # Semantic versioning: MAJOR.MINOR.PATCH
-VERSION = "7.0.0"
+VERSION: str = "7.0.0"
 
 # Application metadata
-APP_NAME = "UmamusumeCardManager"
-GITHUB_REPO = "kiyreload27/UmamusumeCardManager"
-GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+APP_NAME: str = "UmamusumeCardManager"
+GITHUB_REPO: str = "kiyreload27/UmamusumeCardManager"
+GITHUB_API_URL: str = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"

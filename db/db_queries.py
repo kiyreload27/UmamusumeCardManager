@@ -780,7 +780,7 @@ def cleanup_orphaned_data():
 # ============================================
 
 def get_all_unique_skills():
-    """Get a sorted list of all unique skills from hints and events"""
+    """Get a sorted list of all unique skills from hints and events, with golden indicator"""
     conn = get_conn()
     cur = conn.cursor()
     
@@ -788,12 +788,22 @@ def get_all_unique_skills():
     cur.execute("SELECT DISTINCT hint_name FROM support_hints")
     hint_skills = {row[0] for row in cur.fetchall() if row[0]}
     
-    # Get skills from events
-    cur.execute("SELECT DISTINCT skill_name FROM event_skills")
-    event_skills = {row[0] for row in cur.fetchall() if row[0]}
+    # Get skills from events, marking which are golden
+    cur.execute("SELECT DISTINCT skill_name, MAX(is_gold) as is_gold FROM event_skills GROUP BY skill_name")
+    event_skills_data = cur.fetchall()
+    event_skills = {}
+    for skill_name, is_gold in event_skills_data:
+        if skill_name:
+            event_skills[skill_name] = bool(is_gold)
     
-    # Combine and sort
-    all_skills = sorted(list(hint_skills.union(event_skills)))
+    # Combine and mark golden skills
+    all_skills = []
+    for skill in sorted(list(hint_skills.union(event_skills.keys()))):
+        if skill in event_skills and event_skills[skill]:
+            # Mark as golden
+            all_skills.append((skill, True))  # (skill_name, is_golden)
+        else:
+            all_skills.append((skill, False))
     
     conn.close()
     return all_skills
@@ -833,9 +843,10 @@ def get_cards_with_skill(skill_name):
         if entry_key not in seen_entries:
             results.append({
                 'card_id': row[0],
-                'name': row[1],
-                'rarity': row[2],
-                'type': row[3],
+                'name': row[1] or 'Unknown',
+                'rarity': row[2] or 'Unknown',
+                'type': row[3] or 'Unknown',  # Also include 'card_type' for compatibility
+                'card_type': row[3] or 'Unknown',
                 'image_path': row[4],
                 'source': 'Training Hint',
                 'details': row[5] or "Random hint event",
@@ -843,10 +854,11 @@ def get_cards_with_skill(skill_name):
             })
             seen_entries.add(entry_key)
             
-    # 2. Check Event Skills
+    # 2. Check Event Skills (including golden perks)
     cur.execute("""
         SELECT sc.card_id, sc.name, sc.rarity, sc.card_type, sc.image_path, se.event_name, se.event_id,
-               CASE WHEN oc.card_id IS NOT NULL THEN 1 ELSE 0 END as is_owned
+               CASE WHEN oc.card_id IS NOT NULL THEN 1 ELSE 0 END as is_owned,
+               es.is_gold
         FROM event_skills es
         JOIN support_events se ON es.event_id = se.event_id
         JOIN support_cards sc ON se.card_id = sc.card_id
@@ -856,7 +868,7 @@ def get_cards_with_skill(skill_name):
     
     rows = cur.fetchall()
     for row in rows:
-        card_id, name, rarity, card_type, image_path, event_name, event_id, is_owned = row
+        card_id, name, rarity, card_type, image_path, event_name, event_id, is_owned, is_gold = row
         event_name = event_name.replace('\n', ' ').strip()
         
         # Format event skills (handle OR groups and gold skills)
@@ -884,20 +896,30 @@ def get_cards_with_skill(skill_name):
         formatted_event_skills.extend(other_event_skills)
         
         # Create a nice string like "Event Name (Skill1, Skill2)"
-        details = f"{event_name} ({', '.join(formatted_event_skills)})" if formatted_event_skills else event_name
+        if formatted_event_skills:
+            details = f"{event_name} ({', '.join(formatted_event_skills)})"
+        elif event_name:
+            details = f"{event_name} (Golden Perk)"
+        else:
+            details = "Golden Perk Event"
+        
+        # Mark source as GOLDEN if this is a golden skill
+        source = "✨ GOLDEN Event" if is_gold else "Event"
         
         entry_key = (card_id, f'Event: {event_name}')
         
         if entry_key not in seen_entries:
             results.append({
                 'card_id': card_id,
-                'name': name,
-                'rarity': rarity,
-                'type': card_type,
+                'name': name or 'Unknown',
+                'rarity': rarity or 'Unknown',
+                'type': card_type or 'Unknown',  # Also include 'card_type' for compatibility
+                'card_type': card_type or 'Unknown',
                 'image_path': image_path,
-                'source': 'Event',
-                'details': details,
-                'is_owned': bool(is_owned)
+                'source': source,
+                'details': details or 'No details available',
+                'is_owned': bool(is_owned),
+                'is_gold': bool(is_gold)
             })
             seen_entries.add(entry_key)
     

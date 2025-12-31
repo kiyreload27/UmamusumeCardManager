@@ -53,6 +53,54 @@ def scrape_all_support_links(page):
     page.goto(f"{BASE_URL}/umamusume/supports", timeout=60000)
     page.wait_for_load_state("networkidle")
     
+    # Tick "Show Upcoming Supports" checkbox if it exists
+    print("Checking for 'Show Upcoming Supports' checkbox...")
+    checkbox_ticked = page.evaluate("""
+        () => {
+            // Look for checkbox or toggle related to "upcoming" or "future" supports
+            const labels = Array.from(document.querySelectorAll('label, span, div'));
+            const checkboxLabel = labels.find(el => 
+                el.textContent.toLowerCase().includes('upcoming') && 
+                el.textContent.toLowerCase().includes('support')
+            );
+            
+            if (checkboxLabel) {
+                // Try to find associated checkbox/input
+                let checkbox = checkboxLabel.querySelector('input[type="checkbox"]');
+                if (!checkbox) {
+                    // Look for checkbox nearby
+                    const parent = checkboxLabel.closest('div, label');
+                    if (parent) {
+                        checkbox = parent.querySelector('input[type="checkbox"]');
+                    }
+                }
+                
+                if (checkbox && !checkbox.checked) {
+                    checkbox.click();
+                    return true;
+                }
+            }
+            
+            // Alternative: Look for any checkbox with "upcoming" in nearby text
+            const checkboxes = Array.from(document.querySelectorAll('input[type="checkbox"]'));
+            for (const cb of checkboxes) {
+                const text = cb.closest('label, div')?.textContent?.toLowerCase() || '';
+                if (text.includes('upcoming') && text.includes('support') && !cb.checked) {
+                    cb.click();
+                    return true;
+                }
+            }
+            
+            return false;
+        }
+    """)
+    
+    if checkbox_ticked:
+        print("  ✓ Ticked 'Show Upcoming Supports' checkbox")
+        page.wait_for_timeout(1000)  # Wait for page to update
+    else:
+        print("  ℹ 'Show Upcoming Supports' checkbox not found or already ticked")
+    
     # Scroll to load all cards (lazy loading) - more scrolls for complete list
     print("Scrolling to load all cards...")
     for i in range(30):
@@ -106,7 +154,14 @@ def get_max_level_for_rarity(rarity):
     else:  # R
         return 40
 
-def download_card_image(page, card_id, card_name):
+def extract_stable_id_from_url(url):
+    """Extract stable numeric ID from GameTora URL (e.g., 30022 from /supports/30022-mejiro-mcqueen)"""
+    match = re.search(r'/supports/(\d+)-', url)
+    if match:
+        return match.group(1)
+    return None
+
+def download_card_image(page, stable_id, card_name):
     """Download the card's character art image"""
     os.makedirs(IMAGES_PATH, exist_ok=True)
     
@@ -132,9 +187,13 @@ def download_card_image(page, card_id, card_name):
         """)
         
         if img_url:
-            # Clean filename
+            # Clean filename - use stable ID from URL instead of card_id
             safe_name = re.sub(r'[<>:"/\\|?*]', '_', card_name)
-            file_path = os.path.join(IMAGES_PATH, f"{card_id}_{safe_name}.png")
+            if stable_id:
+                file_path = os.path.join(IMAGES_PATH, f"{stable_id}_{safe_name}.png")
+            else:
+                # Fallback to name-only if no stable ID (shouldn't happen)
+                file_path = os.path.join(IMAGES_PATH, f"{safe_name}.png")
             
             # Skip if already exists
             if os.path.exists(file_path):
@@ -209,8 +268,11 @@ def scrape_support_card(page, url, conn, max_retries=3):
             cur.execute("SELECT card_id FROM support_cards WHERE gametora_url = ?", (url,))
             card_id = cur.fetchone()[0]
             
-            # Download character art
-            image_path = download_card_image(page, card_id, name)
+            # Extract stable ID from URL for image filename
+            stable_id = extract_stable_id_from_url(url)
+            
+            # Download character art using stable ID
+            image_path = download_card_image(page, stable_id, name)
             if image_path:
                 cur.execute("UPDATE support_cards SET image_path = ? WHERE card_id = ?", (image_path, card_id))
                 conn.commit()
@@ -480,7 +542,7 @@ def scrape_hints(page, card_id, cur):
         print(f"  Found {len(hints)} hints")
 
 def scrape_events(page, card_id, cur):
-    """Scrape training events with detailed skill rewards (Gold/White/OR)"""
+    """Scrape the LAST chain event (Golden Perk) with OR options"""
     
     # Use a flag to avoid adding multiple console listeners
     if not hasattr(page, "_console_attached"):
@@ -517,135 +579,150 @@ def scrape_events(page, card_id, cur):
     page.evaluate("() => { const h = Array.from(document.querySelectorAll('h2, h1')).find(el => el.innerText.includes('Training Events')); if (h) h.scrollIntoView(); }")
     page.wait_for_timeout(1000)
     
-    # 2. Scrape the individual events and their popover rewards
-    events_data = page.evaluate("""
+    # 2. Scrape ONLY the LAST chain event (Golden Perk) with OR options
+    golden_perk_data = page.evaluate("""
         async () => {
-            console.log("Starting event scraping overhaul...");
-            const events = [];
+            console.log("Scraping Golden Perk (last chain event)...");
             
-            // Targeted search for event triggers based on section headers
-            const getTriggers = () => {
-                const triggers = [];
-                const seenNames = new Set();
+            // Find all chain event buttons
+            const getChainEventButtons = () => {
+                const buttons = [];
                 const headers = Array.from(document.querySelectorAll('div, h2, h3, span')).filter(el => 
-                    el.innerText.includes('Chain Events') || el.innerText.includes('Random Events')
+                    el.innerText.includes('Chain Events')
                 );
                 
                 headers.forEach(header => {
                     const container = header.parentElement;
                     if (container) {
-                        const buttons = Array.from(container.querySelectorAll('button'));
-                        buttons.forEach(btn => {
+                        const btns = Array.from(container.querySelectorAll('button'));
+                        btns.forEach(btn => {
                             const text = btn.innerText.trim();
                             const style = window.getComputedStyle(btn);
                             const isVisible = style.display !== 'none' && style.visibility !== 'hidden' && btn.offsetWidth > 0;
                             
-                            if (isVisible && text && text.length > 5 && !text.includes('Events') && !seenNames.has(text)) {
-                                triggers.push(btn);
-                                seenNames.add(text);
+                            // Only chain events (contain '>')
+                            if (isVisible && text && text.includes('>') && !text.includes('Events')) {
+                                buttons.push(btn);
                             }
                         });
                     }
                 });
-                return triggers;
+                return buttons;
             };
 
-            const buttons = getTriggers();
-            console.log(`Found ${buttons.length} candidate triggers: ${buttons.map(b => b.innerText.trim()).join(', ')}`);
+            const buttons = getChainEventButtons();
+            console.log(`Found ${buttons.length} chain event buttons`);
             
-            // Dedup targets by name
-            const seenNames = new Set();
+            if (buttons.length === 0) {
+                return null;
+            }
+            
+            // Find the button with the most '>' characters (the last chain event = Golden Perk)
+            let goldenPerkButton = null;
+            let maxArrows = 0;
             
             for (const btn of buttons) {
-                const eventName = btn.innerText.trim();
-                if (!eventName || seenNames.has(eventName)) continue;
-                seenNames.add(eventName);
-                
-                const eventType = eventName.includes('>') ? 'Chain' : 'Random';
-                console.log(`Processing event: ${eventName}`);
-                
-                try {
-                    // Click to open popover
-                    btn.scrollIntoViewIfNeeded ? btn.scrollIntoViewIfNeeded() : null;
-                    await new Promise(r => setTimeout(r, 100));
-                    btn.click();
-                    await new Promise(r => setTimeout(r, 600)); // Wait a bit more
-                    
-                    // Find popover - look for any dialogue/popover with the event name
-                    const popovers = Array.from(document.querySelectorAll('div')).filter(d => 
-                        d.innerText.includes(eventName) && 
-                        window.getComputedStyle(d).zIndex > 50 &&
-                        d.innerText.length < 2500
-                    );
-                    
-                    if (popovers.length > 0) {
-                        const pop = popovers[popovers.length - 1];
-                        console.log(`Found popover for ${eventName}`);
-                        const skills = [];
-                        
-                        // Look for 'OR' dividers
-                        const hasOrDivider = pop.querySelector('[class*="divider_or"]') !== null || 
-                                             pop.innerText.includes('Randomly either') ||
-                                             pop.innerText.includes(' or ');
-                        
-                        // Find all skill names
-                        const skillLinks = Array.from(pop.querySelectorAll('span, a')).filter(el => 
-                            el.innerText.length > 2 && 
-                            !el.innerText.includes('Energy') && 
-                            !el.innerText.includes('bond') &&
-                            (window.getComputedStyle(el).color === 'rgb(102, 107, 255)' || 
-                             el.className.includes('linkcolor'))
-                        );
-                        
-                        console.log(`Found ${skillLinks.length} potential skills in popover`);
-                        
-                        skillLinks.forEach(link => {
-                            const skillName = link.innerText.trim();
-                            if (skillName && skillName.length > 2 && !skills.some(s => s.name === skillName)) {
-                                // Check for inline ' or ' text nearby
-                                const textAround = link.parentElement ? link.parentElement.innerText : "";
-                                const isOr = hasOrDivider || textAround.toLowerCase().includes(' or ');
-                                skills.push({ name: skillName, is_or: isOr });
-                            }
-                        });
-                        
-                        events.push({ name: eventName, type: eventType, skills: skills });
-                        
-                        // Close popover
-                        document.body.click();
-                        await new Promise(r => setTimeout(r, 200));
-                    } else {
-                        console.log(`Popover NOT found for ${eventName}`);
-                        events.push({ name: eventName, type: eventType, skills: [] });
-                    }
-                } catch (err) {
-                    console.log(`Error clicking ${eventName}: ${err.message}`);
+                const text = btn.innerText.trim();
+                const arrowCount = (text.match(/>/g) || []).length;
+                if (arrowCount > maxArrows) {
+                    maxArrows = arrowCount;
+                    goldenPerkButton = btn;
                 }
             }
-            return events;
+            
+            if (!goldenPerkButton) {
+                console.log("No golden perk button found");
+                return null;
+            }
+            
+            const eventName = goldenPerkButton.innerText.trim();
+            console.log(`Found Golden Perk: ${eventName} (${maxArrows} arrows)`);
+            
+            try {
+                // Click to open popover
+                goldenPerkButton.scrollIntoViewIfNeeded ? goldenPerkButton.scrollIntoViewIfNeeded() : null;
+                await new Promise(r => setTimeout(r, 100));
+                goldenPerkButton.click();
+                await new Promise(r => setTimeout(r, 600));
+                
+                // Find popover
+                const popovers = Array.from(document.querySelectorAll('div')).filter(d => 
+                    d.innerText.includes(eventName) && 
+                    window.getComputedStyle(d).zIndex > 50 &&
+                    d.innerText.length < 2500
+                );
+                
+                if (popovers.length === 0) {
+                    console.log(`Popover NOT found for ${eventName}`);
+                    document.body.click();
+                    return { name: eventName, type: 'Chain', skills: [] };
+                }
+                
+                const pop = popovers[popovers.length - 1];
+                console.log(`Found popover for ${eventName}`);
+                
+                // Check for OR structure - look for "Randomly either" or "or" divider
+                const hasOrDivider = pop.querySelector('[class*="divider_or"]') !== null || 
+                                     pop.innerText.includes('Randomly either') ||
+                                     pop.innerText.toLowerCase().includes(' or ');
+                
+                // Find all skill names (purple/blue links)
+                const skillLinks = Array.from(pop.querySelectorAll('span, a')).filter(el => 
+                    el.innerText.length > 2 && 
+                    !el.innerText.includes('Energy') && 
+                    !el.innerText.includes('bond') &&
+                    (window.getComputedStyle(el).color === 'rgb(102, 107, 255)' || 
+                     el.className.includes('linkcolor'))
+                );
+                
+                console.log(`Found ${skillLinks.length} potential skills in popover`);
+                
+                const skills = [];
+                skillLinks.forEach(link => {
+                    const skillName = link.innerText.trim();
+                    if (skillName && skillName.length > 2 && !skills.some(s => s.name === skillName)) {
+                        // If there's an OR divider, all skills in this popover are part of OR groups
+                        const isOr = hasOrDivider;
+                        skills.push({ name: skillName, is_or: isOr });
+                    }
+                });
+                
+                // Close popover
+                document.body.click();
+                await new Promise(r => setTimeout(r, 200));
+                
+                return { name: eventName, type: 'Chain', skills: skills };
+                
+            } catch (err) {
+                console.log(`Error clicking ${eventName}: ${err.message}`);
+                return { name: eventName, type: 'Chain', skills: [] };
+            }
         }
     """)
     
-    # 3. Store in database
-    for event in events_data:
+    # 3. Store ONLY the golden perk in database
+    if golden_perk_data:
         cur.execute("""
             INSERT INTO support_events (card_id, event_name, event_type)
             VALUES (?, ?, ?)
-        """, (card_id, event['name'], event['type']))
+        """, (card_id, golden_perk_data['name'], golden_perk_data['type']))
         event_id = cur.lastrowid
         
-        for skill in event['skills']:
+        for skill in golden_perk_data['skills']:
             is_gold = 1 if skill_rarity_map.get(skill['name']) else 0
             cur.execute("""
                 INSERT INTO event_skills (event_id, skill_name, is_gold, is_or)
                 VALUES (?, ?, ?, ?)
             """, (event_id, skill['name'], is_gold, 1 if skill['is_or'] else 0))
-            
-    if events_data:
-        print(f"  Processed {len(events_data)} events with {sum(len(e['skills']) for e in events_data)} skill rewards")
+        
+        skill_count = len(golden_perk_data['skills'])
+        or_count = sum(1 for s in golden_perk_data['skills'] if s['is_or'])
+        print(f"  Golden Perk: {golden_perk_data['name']} ({skill_count} skills, {or_count} with OR)")
+    else:
+        print(f"  No Golden Perk found for this card")
 
 def run_scraper():
-    """Main scraper function"""
+    """ Run the web scraper to fetch card data from GameTora.com """
     print("=" * 60)
     print("GameTora Umamusume Support Card Scraper")
     print(f"Scraping effects at levels: {KEY_LEVELS}")
@@ -671,7 +748,7 @@ def run_scraper():
         
         print(f"\nStarting to scrape {len(links)} cards...")
         print("Including character art download.")
-        print("This will take approximately 30-45 minutes.\n")
+        print("This will take approximately 90-120 minutes.\n")
         
         success_count = 0
         fail_count = 0

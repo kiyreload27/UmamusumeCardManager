@@ -331,7 +331,7 @@ class CardListFrame(ttk.Frame):
                 if resolved_path and os.path.exists(resolved_path):
                     try:
                         pil_img = Image.open(resolved_path)
-                        pil_img.thumbnail((32, 32), Image.Resampling.LANCZOS)
+                        pil_img.thumbnail((48, 48), Image.Resampling.LANCZOS)
                         img = ImageTk.PhotoImage(pil_img)
                         self.icon_cache[card_id] = img
                     except:

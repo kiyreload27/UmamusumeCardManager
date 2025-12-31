@@ -49,13 +49,13 @@ class CardSlot(tk.Frame):
         
         # Image Area (Left)
         self.image_label = tk.Label(self, bg=BG_MEDIUM, text="📭", fg=TEXT_MUTED,
-                                    font=('Segoe UI', 20))
-        self.image_label.grid(row=0, column=0, rowspan=3, padx=8, pady=8)
+                                    font=('Segoe UI', 32))
+        self.image_label.grid(row=0, column=0, rowspan=3, padx=12, pady=12)
         
         # Details Area (Right)
-        self.name_label = tk.Label(self, text="Empty Slot", bg=BG_MEDIUM, fg=TEXT_MUTED,
-                                   font=FONT_BODY_BOLD, anchor='w', wraplength=130)
-        self.name_label.grid(row=0, column=1, sticky='w', padx=8, pady=(10, 0))
+        self.name_label = tk.Label(self, text="Empty Slot", bg=BG_MEDIUM, fg=TEXT_PRIMARY,
+                                   font=FONT_BODY_BOLD, anchor='w', wraplength=180) # Increased wrap
+        self.name_label.grid(row=0, column=1, sticky='w', padx=8, pady=(15, 0))
         
         self.meta_label = tk.Label(self, text="", bg=BG_MEDIUM, fg=TEXT_MUTED,
                                    font=FONT_SMALL, anchor='w')
@@ -139,7 +139,7 @@ class CardSlot(tk.Frame):
     def reset(self):
         self.name_label.config(text="Empty Slot", fg=TEXT_MUTED)
         self.meta_label.config(text="Click a card to add")
-        self.image_label.config(image='', text="📭", font=('Segoe UI', 20))
+        self.image_label.config(image='', text="📭", font=('Segoe UI', 32))
         self.config(highlightbackground=BG_LIGHT)
         self.image_ref = None
         self.toggle_controls(False)
@@ -149,7 +149,8 @@ class CardSlot(tk.Frame):
         if resolved_path and os.path.exists(resolved_path):
             try:
                 pil_img = Image.open(resolved_path)
-                pil_img.thumbnail((65, 65), Image.Resampling.LANCZOS)
+                # Significantly larger images as requested (120x120)
+                pil_img.thumbnail((120, 120), Image.Resampling.LANCZOS)
                 self.image_ref = ImageTk.PhotoImage(pil_img)
                 self.image_label.config(image=self.image_ref, text='')
             except Exception as e:
@@ -369,7 +370,8 @@ class DeckBuilderFrame(ttk.Frame):
             if not img and resolved_path and os.path.exists(resolved_path):
                 try:
                     pil_img = Image.open(resolved_path)
-                    pil_img.thumbnail((32, 32), Image.Resampling.LANCZOS)
+                    # Larger thumbnails in the list too (48x48)
+                    pil_img.thumbnail((48, 48), Image.Resampling.LANCZOS)
                     img = ImageTk.PhotoImage(pil_img)
                     self.icon_cache[card_id] = img
                 except:

@@ -33,6 +33,10 @@ def init_db(reset=False):
         cur.execute("DROP TABLE IF EXISTS support_effects")
         cur.execute("DROP TABLE IF EXISTS owned_cards")
         cur.execute("DROP TABLE IF EXISTS support_cards")
+    else:
+        # Run migrations for existing database
+        migrate_add_image_path()
+        migrate_event_skills_columns()
     
     # Support Cards - main card info
     cur.execute("""
@@ -87,6 +91,8 @@ def init_db(reset=False):
             skill_id INTEGER PRIMARY KEY AUTOINCREMENT,
             event_id INTEGER,
             skill_name TEXT,
+            is_gold INTEGER DEFAULT 0,
+            is_or INTEGER DEFAULT 0,
             FOREIGN KEY (event_id) REFERENCES support_events(event_id)
         )
     """)
@@ -148,6 +154,25 @@ def migrate_add_image_path():
         print("Added image_path column")
     except sqlite3.OperationalError:
         pass  # Column already exists
+    conn.close()
+
+def migrate_event_skills_columns():
+    """Add is_gold and is_or columns to event_skills if they don't exist"""
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("ALTER TABLE event_skills ADD COLUMN is_gold INTEGER DEFAULT 0")
+        print("Added is_gold column to event_skills")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+        
+    try:
+        cur.execute("ALTER TABLE event_skills ADD COLUMN is_or INTEGER DEFAULT 0")
+        print("Added is_or column to event_skills")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+        
+    conn.commit()
     conn.close()
 
 if __name__ == "__main__":

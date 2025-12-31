@@ -82,7 +82,7 @@ class EffectsFrame(ttk.Frame):
         button_frame = tk.Frame(control_frame, bg=BG_MEDIUM)
         button_frame.pack(side=tk.LEFT, padx=25)
         
-        quick_levels = [1, 25, 40, 50]
+        quick_levels = [25, 30, 35, 40, 45, 50]
         for lvl in quick_levels:
             btn = create_styled_button(button_frame, text=f"Lv{lvl}",
                                        command=lambda l=lvl: self.set_level(l),
