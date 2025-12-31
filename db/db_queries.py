@@ -75,9 +75,40 @@ def get_conn():
     # Check for updates and migrate if needed (only once per session)
     if not _updates_checked:
         _updates_checked = True
+        run_migrations()
         check_for_updates()
         
     return sqlite3.connect(DB_PATH)
+
+def run_migrations():
+    """Ensure database schema is up to date by adding missing columns"""
+    print("Checking for database migrations...")
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    
+    # 1. Add is_gold to event_skills
+    try:
+        cur.execute("ALTER TABLE event_skills ADD COLUMN is_gold INTEGER DEFAULT 0")
+        print("Added is_gold column to event_skills")
+    except sqlite3.OperationalError:
+        pass # Column already exists
+        
+    # 2. Add is_or to event_skills
+    try:
+        cur.execute("ALTER TABLE event_skills ADD COLUMN is_or INTEGER DEFAULT 0")
+        print("Added is_or column to event_skills")
+    except sqlite3.OperationalError:
+        pass # Column already exists
+    
+    # 3. Add image_path to support_cards
+    try:
+        cur.execute("ALTER TABLE support_cards ADD COLUMN image_path TEXT")
+        print("Added image_path column to support_cards")
+    except sqlite3.OperationalError:
+        pass # Column already exists
+        
+    conn.commit()
+    conn.close()
 
 def check_for_updates():
     """Check if database version matches app version, sync if outdated"""
@@ -299,15 +330,8 @@ def init_database():
         )
     """)
     
-    # Migration: Add columns to event_skills if they don't exist
-    try:
-        cur.execute("ALTER TABLE event_skills ADD COLUMN is_gold INTEGER DEFAULT 0")
-    except sqlite3.OperationalError:
-        pass # Column already exists
-    try:
-        cur.execute("ALTER TABLE event_skills ADD COLUMN is_or INTEGER DEFAULT 0")
-    except sqlite3.OperationalError:
-        pass # Column already exists
+    # Run migrations to ensure all columns exist
+    run_migrations()
     
     # User tables
     cur.execute("""

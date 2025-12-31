@@ -161,8 +161,10 @@ class DeckSkillsFrame(ttk.Frame):
         display_text = f"{owned_mark}{name}"
         
         # Parent row only needs display text and rarity (optional)
-        iid = self.tree.insert('', tk.END, text=display_text, image=img, open=True,
+        # We remove open=True from insert and set it using item() to avoid Tcl Errors on some systems
+        iid = self.tree.insert('', tk.END, text=display_text, image=img if img else "",
                                values=("", rarity, f"{type_icon} {card_type}", ""))
+        self.tree.item(iid, open=True)
         return iid
 
     def add_skill_row(self, parent_id, skill_name, source, details):
