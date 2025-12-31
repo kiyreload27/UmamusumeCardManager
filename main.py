@@ -14,7 +14,17 @@ def run_scraper():
         from scraper.gametora_scraper import run_scraper as scrape
         scrape()
     except Exception as e:
-        logging.error(f"An error occurred while running the scraper: {e}")
+        import traceback
+        error_msg = f"An error occurred while running the scraper:\n\n{e}\n\n{traceback.format_exc()}"
+        logging.error(error_msg)
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror("Scraper Error", error_msg)
+        except:
+            pass
         sys.exit(1)
 
 def run_gui():
@@ -23,7 +33,17 @@ def run_gui():
         app = MainWindow()
         app.run()
     except Exception as e:
-        logging.error(f"An error occurred while launching the GUI: {e}")
+        import traceback
+        error_msg = f"An error occurred while launching the GUI:\n\n{e}\n\n{traceback.format_exc()}"
+        logging.error(error_msg)
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror("Application Error", error_msg)
+        except:
+            pass
         sys.exit(1)
 
 def main():

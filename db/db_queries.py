@@ -108,7 +108,8 @@ def check_for_updates():
             cleanup_orphaned_data()
                 
         except Exception as e:
-            print(f"Update check failed: {e}")
+            import traceback
+            print(f"Update check failed: {e}\n{traceback.format_exc()}")
 
 def sync_from_seed(seed_path):
     """Merge new data from seed into user database"""
@@ -195,12 +196,12 @@ def sync_from_seed(seed_path):
         """)
         seed_events = cur.fetchall()
         
-        # Prepare Skill map: seed_event_id -> list of (skill_name)
-        cur.execute("SELECT event_id, skill_name FROM seed.event_skills")
+        # Prepare Skill map: seed_event_id -> list of (skill_name, is_gold, is_or)
+        cur.execute("SELECT event_id, skill_name, is_gold, is_or FROM seed.event_skills")
         seed_skills = {}
-        for ev_id, sk_name in cur.fetchall():
+        for ev_id, sk_name, is_gold, is_or in cur.fetchall():
             if ev_id not in seed_skills: seed_skills[ev_id] = []
-            seed_skills[ev_id].append(sk_name)
+            seed_skills[ev_id].append((sk_name, is_gold, is_or))
             
         # Main Card Map: gametora_url -> main_card_id
         cur.execute("SELECT gametora_url, card_id FROM main.support_cards")
@@ -216,9 +217,9 @@ def sync_from_seed(seed_path):
                 
                 # Insert Skills
                 if seed_ev_id in seed_skills:
-                    for sk_name in seed_skills[seed_ev_id]:
-                        cur.execute("INSERT INTO main.event_skills (event_id, skill_name) VALUES (?, ?)",
-                                    (new_event_id, sk_name))
+                    for sk_name, is_gold, is_or in seed_skills[seed_ev_id]:
+                        cur.execute("INSERT INTO main.event_skills (event_id, skill_name, is_gold, is_or) VALUES (?, ?, ?, ?)",
+                                    (new_event_id, sk_name, is_gold, is_or))
 
         cur.execute("PRAGMA foreign_keys = ON")
         conn.commit()
