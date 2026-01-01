@@ -108,7 +108,43 @@ def run_migrations():
         pass # Column already exists
         
     conn.commit()
+    repair_image_paths(conn)
     conn.close()
+
+def repair_image_paths(conn):
+    """Attempt to populate missing image_path for existing cards in old databases"""
+    print("Checking for missing image paths to repair...")
+    cur = conn.cursor()
+    
+    # Find cards with missing image paths but have a URL
+    cur.execute("SELECT card_id, name, gametora_url FROM support_cards WHERE image_path IS NULL OR image_path = ''")
+    to_repair = cur.fetchall()
+    
+    if not to_repair:
+        return
+        
+    import re
+    repaired_count = 0
+    
+    for card_id, name, url in to_repair:
+        if not url: continue
+        
+        # Extract ID from URL (e.g., 30154 from .../supports/30154-mejiro-ramonu)
+        match = re.search(r'/supports/(\d+)-', url)
+        if match:
+            stable_id = match.group(1)
+            # Create safe filename matching scraper logic
+            safe_name = re.sub(r'[<>:"/\\\\|?*]', '_', name)
+            filename = f"{stable_id}_{safe_name}.png"
+            
+            # Update DB with images/filename
+            cur.execute("UPDATE support_cards SET image_path = ? WHERE card_id = ?", 
+                       (f"images/{filename}", card_id))
+            repaired_count += 1
+            
+    if repaired_count > 0:
+        conn.commit()
+        print(f"Successfully repaired {repaired_count} image paths!")
 
 def check_for_updates():
     """Check if database version matches app version, sync if outdated"""

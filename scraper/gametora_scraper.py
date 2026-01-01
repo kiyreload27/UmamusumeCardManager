@@ -549,242 +549,200 @@ def scrape_hints(page, card_id, cur):
         print(f"  Found {len(hints)} hints")
 
 def scrape_events(page, card_id, cur):
-    """Scrape the LAST chain event (Golden Perk) with OR options"""
+    """Scrape all events including Chain, Dates, Random and Special"""
     
     # Use a flag to avoid adding multiple console listeners
     if not hasattr(page, "_console_attached"):
         page.on("console", lambda msg: print(f"  [JS Console] {msg.text}") if "scrapping" not in msg.text.lower() else None)
         page._console_attached = True
     
-    # 1. First, build a map of skills from the 'Skills from events' summary section
-    # This helps us identify which skills are Rare (Gold)
+    # 1. Build a map of skills from the 'Skills from events' summary section
+    # This remains useful for identifying golden skills.
     skill_rarity_map = page.evaluate("""
         () => {
             const map = {};
-            console.log("Building Skill Rarity Map...");
-            
-            // 1. Find all skill containers. They usually have a name and a 'Details' button.
-            // In the "Skills from events" or "Support hints" sections.
             const containers = Array.from(document.querySelectorAll('div')).filter(d => 
                 (d.innerText.includes('Details') || d.innerText.includes('Reward')) && d.innerText.length < 500
             );
             
             containers.forEach(c => {
-                // Try to extract the skill name. It's usually the first text node or a bold tag.
                 const nameNode = c.querySelector('b, span[font-weight="bold"], div[font-weight="bold"]');
-                let name = "";
-                if (nameNode) {
-                    name = nameNode.innerText.trim();
-                } else {
-                    // Fallback to text before 'Details'
-                    name = c.innerText.split('Details')[0].replace(/\\n/g, ' ').trim();
-                }
+                let name = nameNode ? nameNode.innerText.trim() : c.innerText.split('Details')[0].replace(/\\n/g, ' ').trim();
                 
                 if (name && name.length > 2) {
                     const style = window.getComputedStyle(c);
                     const nameStyle = nameNode ? window.getComputedStyle(nameNode) : null;
-                    
-                    // Golden skills have a specific background
                     const isGold = style.backgroundImage.includes('linear-gradient') || 
                                    style.backgroundColor.includes('rgb(255, 193, 7)') ||
                                    (nameStyle && nameStyle.color === 'rgb(255, 193, 7)') ||
-                                   c.className.includes('kkspcu') ||
-                                   c.innerHTML.includes('kkspcu');
+                                   c.className.includes('kkspcu');
                     
                     const normalized = name.toLowerCase().replace(/\\s+/g, ' ').replace(/[()（）-]/g, '').trim();
                     map[normalized] = isGold;
-                    console.log(`Mapped Skill: "${name}" [${normalized}] -> Gold: ${isGold}`);
                 }
             });
             return map;
         }
     """)
     
-    # Scroll to the Events section specifically
-    print("  Ensuring events are loaded...")
-    page.evaluate("() => { const h = Array.from(document.querySelectorAll('h2, h1, div')).find(el => el.innerText.toLowerCase().includes('training events')); if (h) h.scrollIntoView(); }")
-    page.wait_for_timeout(1000)
-    
-    # 2. Scrape ONLY the LAST chain event (Golden Perk) with OR options
-    golden_perk_data = page.evaluate("""
+    # 2. Scrape all event types
+    print("  Scraping all event categories...")
+    all_events_data = page.evaluate("""
         async () => {
-            console.log("Scraping Golden Perk (last chain event)...");
+            const results = [];
             
-            // Find all chain event buttons
-            const getChainEventButtons = () => {
-                const buttons = [];
-                // Look for "Chain Events" text (case-insensitive substring)
-                const labels = Array.from(document.querySelectorAll('div, span, h2, h3, h4')).filter(el => 
-                    el.innerText.toLowerCase().includes('chain events') && el.innerText.trim().length < 20
+            // Define categories to look for
+            const categories = [
+                { label: 'Chain Events', type: 'Chain' },
+                { label: 'Dates', type: 'Date' },
+                { label: 'Random Events', type: 'Random' },
+                { label: 'Special Events', type: 'Special' }
+            ];
+            
+            for (const cat of categories) {
+                // Find category headers
+                const headers = Array.from(document.querySelectorAll('div, span, h2, h3, h4')).filter(el => 
+                    el.innerText.trim() === cat.label && el.children.length === 0
                 );
                 
-                labels.forEach(label => {
-                    // The buttons are usually in the same container or next container
-                    let container = label.parentElement;
+                for (const header of headers) {
+                    // Find buttons in the following siblings or parent siblings
+                    let container = header.parentElement;
+                    let foundButtons = [];
                     let attempts = 0;
-                    while (container && container.querySelectorAll('button').length === 0 && attempts < 5) {
-                        container = container.nextElementSibling || container.parentElement;
+                    
+                    while (container && foundButtons.length === 0 && attempts < 5) {
+                        foundButtons = Array.from(container.querySelectorAll('button')).filter(btn => {
+                            const style = window.getComputedStyle(btn);
+                            return style.display !== 'none' && style.visibility !== 'hidden';
+                        });
+                        
+                        if (foundButtons.length === 0) {
+                            // Check next siblings of the header's ancestors
+                            let sibling = header;
+                            let parent = header.parentElement;
+                            while(parent && parent.tagName !== 'BODY') {
+                                if (parent.innerText.includes(cat.label)) {
+                                     const next = parent.nextElementSibling;
+                                     if (next) {
+                                         const nextBtns = Array.from(next.querySelectorAll('button'));
+                                         if (nextBtns.length > 0) {
+                                             foundButtons = nextBtns;
+                                             break;
+                                         }
+                                     }
+                                }
+                                parent = parent.parentElement;
+                            }
+                        }
+                        container = container.parentElement;
                         attempts++;
-                        if (container && container.tagName === 'BODY') break;
                     }
                     
-                    if (container) {
-                        const btns = Array.from(container.querySelectorAll('button'));
-                        btns.forEach(btn => {
-                            const text = btn.innerText.trim();
-                            const style = window.getComputedStyle(btn);
-                            const isVisible = style.display !== 'none' && style.visibility !== 'hidden';
+                    // Scrape each button in the category
+                    for (const btn of foundButtons) {
+                        const eventName = btn.innerText.trim();
+                        if (!eventName || results.some(r => r.name === eventName)) continue;
+                        
+                        // Count arrows for chain/date importance
+                        const arrows = (eventName.match(/>|❯/g) || []).length;
+                        
+                        try {
+                            btn.scrollIntoViewIfNeeded ? btn.scrollIntoViewIfNeeded() : null;
+                            await new Promise(r => setTimeout(r, 100));
+                            btn.click();
+                            await new Promise(r => setTimeout(r, 500));
                             
-                            // Look for arrows (regular or heavy)
-                            if (isVisible && (text.includes('>') || text.includes('❯'))) {
-                                buttons.push(btn);
+                            const popovers = Array.from(document.querySelectorAll('div')).filter(d => 
+                                d.innerText.includes(eventName) && 
+                                window.getComputedStyle(d).zIndex > 50 &&
+                                d.innerText.length < 2500
+                            );
+                            
+                            if (popovers.length > 0) {
+                                const pop = popovers[popovers.length - 1];
+                                const hasOrDivider = pop.querySelector('[class*="divider_or"]') !== null || 
+                                                     pop.innerText.includes('Randomly either') ||
+                                                     pop.innerText.toLowerCase().includes(' or ');
+                                                     
+                                const skillLinks = Array.from(pop.querySelectorAll('span, a')).filter(el => 
+                                    el.innerText.length > 2 && 
+                                    !el.innerText.includes('Energy') && 
+                                    (window.getComputedStyle(el).color === 'rgb(102, 107, 255)' || 
+                                     el.className.includes('linkcolor'))
+                                );
+                                
+                                const skills = [];
+                                skillLinks.forEach(link => {
+                                    const sName = link.innerText.trim();
+                                    if (sName && !skills.some(s => s.name === sName)) {
+                                        skills.push({ name: sName, is_or: hasOrDivider });
+                                    }
+                                });
+                                
+                                results.push({ 
+                                    name: eventName, 
+                                    type: cat.type, 
+                                    skills: skills,
+                                    arrows: arrows 
+                                });
                             }
-                        });
+                            
+                            document.body.click();
+                            await new Promise(r => setTimeout(r, 100));
+                        } catch (err) {
+                            console.log(`Failed to scrape event ${eventName}: ${err.message}`);
+                        }
                     }
-                });
-                return buttons;
-            };
-
-            const buttons = getChainEventButtons();
-            console.log(`Found ${buttons.length} chain event buttons`);
-            
-            if (buttons.length === 0) {
-                return null;
-            }
-            
-            let goldenPerkButton = null;
-            let maxArrows = 0;
-            
-            for (const btn of buttons) {
-                const text = btn.innerText.trim();
-                // Count both regular and heavy arrows
-                const arrowCount = (text.match(/>|❯/g) || []).length;
-                
-                // If it has three heavy arrows, it's almost certainly the golden perk
-                if (text.includes('❯❯❯')) {
-                    goldenPerkButton = btn;
-                    break; 
-                }
-                
-                if (arrowCount > maxArrows) {
-                    maxArrows = arrowCount;
-                    goldenPerkButton = btn;
                 }
             }
-            
-            if (!goldenPerkButton) {
-                console.log("No golden perk button found");
-                return null;
-            }
-            
-            const eventName = goldenPerkButton.innerText.trim();
-            console.log(`Found Golden Perk: ${eventName} (${maxArrows} arrows)`);
-            
-            try {
-                // Click to open popover
-                goldenPerkButton.scrollIntoViewIfNeeded ? goldenPerkButton.scrollIntoViewIfNeeded() : null;
-                await new Promise(r => setTimeout(r, 100));
-                goldenPerkButton.click();
-                await new Promise(r => setTimeout(r, 600));
-                
-                // Find popover
-                const popovers = Array.from(document.querySelectorAll('div')).filter(d => 
-                    d.innerText.includes(eventName) && 
-                    window.getComputedStyle(d).zIndex > 50 &&
-                    d.innerText.length < 2500
-                );
-                
-                if (popovers.length === 0) {
-                    console.log(`Popover NOT found for ${eventName}`);
-                    document.body.click();
-                    return { name: eventName, type: 'Chain', skills: [] };
-                }
-                
-                const pop = popovers[popovers.length - 1];
-                console.log(`Found popover for ${eventName}`);
-                
-                // Check for OR structure - look for "Randomly either" or "or" divider
-                const hasOrDivider = pop.querySelector('[class*="divider_or"]') !== null || 
-                                     pop.innerText.includes('Randomly either') ||
-                                     pop.innerText.toLowerCase().includes(' or ');
-                
-                // Find all skill names (purple/blue links)
-                const skillLinks = Array.from(pop.querySelectorAll('span, a')).filter(el => 
-                    el.innerText.length > 2 && 
-                    !el.innerText.includes('Energy') && 
-                    !el.innerText.includes('bond') &&
-                    (window.getComputedStyle(el).color === 'rgb(102, 107, 255)' || 
-                     el.className.includes('linkcolor'))
-                );
-                
-                console.log(`Found ${skillLinks.length} potential skills in popover`);
-                
-                const skills = [];
-                skillLinks.forEach(link => {
-                    const skillName = link.innerText.trim();
-                    if (skillName && skillName.length > 2 && !skills.some(s => s.name === skillName)) {
-                        // If there's an OR divider, all skills in this popover are part of OR groups
-                        const isOr = hasOrDivider;
-                        skills.push({ name: skillName, is_or: isOr });
-                    }
-                });
-                
-                // Close popover
-                document.body.click();
-                await new Promise(r => setTimeout(r, 200));
-                
-                return { name: eventName, type: 'Chain', skills: skills };
-                
-            } catch (err) {
-                console.log(`Error clicking ${eventName}: ${err.message}`);
-                return { name: eventName, type: 'Chain', skills: [] };
-            }
+            return results;
         }
     """)
     
-    # 3. Store ONLY the golden perk in database
-    if golden_perk_data:
-        cur.execute("""
-            INSERT INTO support_events (card_id, event_name, event_type)
-            VALUES (?, ?, ?)
-        """, (card_id, golden_perk_data['name'], golden_perk_data['type']))
-        event_id = cur.lastrowid
+    # 3. Store all found events and identify golden skills
+    if all_events_data:
+        # Determine max arrows for Chain and Dates to identify final step
+        max_arrows = {
+            'Chain': max([e['arrows'] for e in all_events_data if e['type'] == 'Chain'] + [0]),
+            'Date': max([e['arrows'] for e in all_events_data if e['type'] == 'Date'] + [0])
+        }
         
-        for skill in golden_perk_data['skills']:
-            # Normalization helper
-            def normalize(s):
-                return s.lower().replace(" hint +1", "").replace(" hint +3", "").replace(" hint +5", "").replace(" hint +", "").strip().replace("  ", " ").replace("-", "").replace("(", "").replace(")", "").replace(" ", "")
+        for event in all_events_data:
+            cur.execute("INSERT INTO support_events (card_id, event_name, event_type) VALUES (?, ?, ?)", 
+                       (card_id, event['name'], event['type']))
+            event_id = cur.lastrowid
             
-            skill_name = normalize(skill['name'])
-            
-            # Use extra aggressive name matching against the map values
-            # (The map keys are already normalized)
-            is_gold = 0
-            for k, gold in skill_rarity_map.items():
-                if normalize(k) == skill_name:
-                    is_gold = 1 if gold else 0
-                    break
-            
-            # Fallback 1: If it's a chain event and specifically the last one, it's almost certainly gold
-            if not is_gold and golden_perk_data.get('type') == 'Chain':
-                # Check for "hint" patterns which usually accompany gold perks in chain events
-                if "hint +" in skill['name'].lower() or len(golden_perk_data['skills']) <= 2:
-                    is_gold = 1
-                    print(f"  ✨ Golden Skill Fallback (Last Chain Event): {skill['name']}")
-            
-            if is_gold:
-                print(f"  ✨ Golden Skill Verified: {skill['name']}")
-            
-            cur.execute("""
-                INSERT INTO event_skills (event_id, skill_name, is_gold, is_or)
-                VALUES (?, ?, ?, ?)
-            """, (event_id, skill['name'], is_gold, 1 if skill['is_or'] else 0))
-        
-        skill_count = len(golden_perk_data['skills'])
-        or_count = sum(1 for s in golden_perk_data['skills'] if s['is_or'])
-        print(f"  Golden Perk: {golden_perk_data['name']} ({skill_count} skills, {or_count} with OR)")
+            for skill in event['skills']:
+                def normalize(s):
+                    # Remove hint suffix and special characters
+                    s = s.lower().split(' hint +')[0]
+                    return re.sub(r'[()（）\-\s\+]', '', s).strip()
+                
+                n_name = normalize(skill['name'])
+                is_gold = 0
+                for k, gold in skill_rarity_map.items():
+                    if normalize(k) == n_name:
+                        is_gold = 1 if gold else 0
+                        break
+                
+                # Heuristic: If it's the last step of a Chain or Date, it's likely gold
+                if not is_gold and event['type'] in ['Chain', 'Date']:
+                    if event['arrows'] >= 3 and event['arrows'] == max_arrows[event['type']]:
+                        if len(event['skills']) <= 2 or "hint +" in skill['name'].lower():
+                            is_gold = 1
+                            print(f"  ✨ Heuristic Gold: {skill['name']} in {event['name']}")
+                
+                if is_gold: print(f"  ✨ Verified Gold: {skill['name']}")
+                
+                cur.execute("""
+                    INSERT INTO event_skills (event_id, skill_name, is_gold, is_or)
+                    VALUES (?, ?, ?, ?)
+                """, (event_id, skill['name'], is_gold, 1 if skill['is_or'] else 0))
+                
+        print(f"  Scraped {len(all_events_data)} total events.")
     else:
-        print(f"  No Golden Perk found for this card")
+        print(f"  No events found.")
 
 def run_scraper():
     """ Run the web scraper to fetch card data from GameTora.com """
