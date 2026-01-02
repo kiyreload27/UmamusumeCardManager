@@ -522,6 +522,49 @@ def get_unique_effect_names(card_id):
     conn.close()
     return rows
 
+def search_owned_effects(search_term):
+    """
+    Search for effects among owned cards.
+    Returns list of (card_id, card_name, image_path, effect_name, effect_value, level)
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    # We need to join support_effects with owned_cards to get the level
+    # But wait, owned_cards has a level column. support_effects stores effects for specific levels.
+    # So we need to match support_effects.level with owned_cards.level
+    # OR find the effect for the closest level <= owned level (if effects aren't stored for every single level)
+    # The current DB schema seems to store effects for specific levels (1, 5, 10, ...).
+    # If a card is level 49, `get_effects_at_level` usually queries for exact level match.
+    # Let's check `get_effects_at_level` implementation: "WHERE card_id = ? AND level = ?"
+    # So if I have a card at level 49, and effects are only defined at 45 and 50, query for 49 returns nothing?
+    # That would be a bug or assumption in the current app.
+    # Let's look at `update_progression_table` in `effects_view.py`. It does some "nearest level" logic.
+    # For this search feature, to be robust, we should probably fetch ALL effects for the card
+    # and filter for the one active at the owned level.
+    # OR, assuming the scraper/DB populates "current" effects effectively.
+    # Actually, the most robust way in SQL for "value at level X" given sparse data is complex.
+    # However, let's assume for now we want exact matches or we'll handle the "effective level" logic in Python?
+    # No, that's too slow for search.
+    # Let's look at how `get_effects_at_level` is used.
+    # It is used in `update_current_effects` with `self.level_var.get()`.
+    # It expects an exact match.
+    # So we should probably join on `oc.level`.
+    
+    query = """
+        SELECT sc.card_id, sc.name, sc.image_path, se.effect_name, se.effect_value, oc.level
+        FROM owned_cards oc
+        JOIN support_cards sc ON oc.card_id = sc.card_id
+        JOIN support_effects se ON oc.card_id = se.card_id AND oc.level = se.level
+        WHERE se.effect_name LIKE ?
+        ORDER BY sc.name
+    """
+    
+    cur.execute(query, (f"%{search_term}%",))
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
 # ============================================
 # Hint Queries
 # ============================================

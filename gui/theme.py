@@ -256,6 +256,17 @@ def configure_styles(root: tk.Tk):
 # WIDGET HELPER FUNCTIONS
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
+def create_styled_entry(parent, textvariable=None, **kwargs):
+    """Create a styled tk.Entry with modern appearance"""
+    entry = ttk.Entry(
+        parent,
+        textvariable=textvariable,
+        font=FONT_BODY,
+        **kwargs
+    )
+    return entry
+
 def create_styled_button(parent, text, command=None, style_type='default', **kwargs):
     """Create a styled tk.Button with modern appearance"""
     bg_colors = {
