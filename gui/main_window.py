@@ -214,7 +214,7 @@ class MainWindow:
         
         tk.Label(
             status_frame,
-            text="Made by Kiyreload  │  ",
+            text="VibeCoded by Kiyreload  │  ",
             font=FONT_SMALL,
             bg=BG_MEDIUM,
             fg=ACCENT_TERTIARY
