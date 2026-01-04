@@ -1,9 +1,11 @@
 """
 Deck Skills View - Detailed breakdown of all skills in a deck or for a single card
+Updated for CustomTkinter
 """
 
 import tkinter as tk
 from tkinter import ttk
+import customtkinter as ctk
 import sys
 import os
 from PIL import Image, ImageTk
@@ -24,11 +26,11 @@ from gui.theme import (
 )
 
 
-class DeckSkillsFrame(ttk.Frame):
+class DeckSkillsFrame(ctk.CTkFrame):
     """Frame for viewing combined skills of a deck or individual cards"""
     
     def __init__(self, parent):
-        super().__init__(parent)
+        super().__init__(parent, fg_color="transparent")
         self.icon_cache = {}
         self.current_mode = "Deck" # or "Single"
         
@@ -38,31 +40,35 @@ class DeckSkillsFrame(ttk.Frame):
     def create_widgets(self):
         """Create the deck skills interface"""
         # Header / Controls
-        ctrl_frame = tk.Frame(self, bg=BG_DARK)
+        ctrl_frame = ctk.CTkFrame(self, fg_color="transparent")
         ctrl_frame.pack(fill=tk.X, padx=20, pady=15)
         
         # Left side: Mode/Deck selection
-        selection_frame = tk.Frame(ctrl_frame, bg=BG_DARK)
+        selection_frame = ctk.CTkFrame(ctrl_frame, fg_color="transparent")
         selection_frame.pack(side=tk.LEFT)
         
-        tk.Label(selection_frame, text="🎴 Select Deck:", font=FONT_BODY, 
-                 bg=BG_DARK, fg=TEXT_SECONDARY).pack(side=tk.LEFT)
+        ctk.CTkLabel(selection_frame, text="🎴 Select Deck:", font=FONT_BODY, 
+                  text_color=TEXT_SECONDARY).pack(side=tk.LEFT)
         
-        self.deck_combo = ttk.Combobox(selection_frame, width=30, state='readonly')
+        self.deck_combo = ctk.CTkComboBox(selection_frame, width=200, state='readonly', 
+                                          command=self.on_deck_selected_val)
         self.deck_combo.pack(side=tk.LEFT, padx=10)
-        self.deck_combo.bind('<<ComboboxSelected>>', self.on_deck_selected)
         
         # Mode indicator/Description
-        self.mode_label = tk.Label(ctrl_frame, text="Showing skills for selected deck", 
-                                   font=FONT_HEADER, bg=BG_DARK, fg=ACCENT_PRIMARY)
+        self.mode_label = ctk.CTkLabel(ctrl_frame, text="Showing skills for selected deck", 
+                                   font=FONT_HEADER, text_color=ACCENT_PRIMARY)
         self.mode_label.pack(side=tk.RIGHT)
         
         # Main Results Tree
-        tree_container = create_card_frame(self)
+        tree_container = ctk.CTkFrame(self, fg_color="transparent")
         tree_container.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 15))
         
+        # Treeview inner frame
+        tree_inner = ctk.CTkFrame(tree_container, fg_color="transparent")
+        tree_inner.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
         cols = ('skill', 'rarity', 'source', 'details')
-        self.tree = ttk.Treeview(tree_container, columns=cols, show='tree headings',
+        self.tree = ttk.Treeview(tree_inner, columns=cols, show='tree headings',
                                  style="Treeview")
         
         self.tree.heading('#0', text='★  Card / Skill')
@@ -77,36 +83,40 @@ class DeckSkillsFrame(ttk.Frame):
         self.tree.column('source', width=100)
         self.tree.column('details', width=450)
         
-        scrollbar = ttk.Scrollbar(tree_container, orient=tk.VERTICAL, command=self.tree.yview)
+        scrollbar = ttk.Scrollbar(tree_inner, orient=tk.VERTICAL, command=self.tree.yview)
         self.tree.configure(yscrollcommand=scrollbar.set)
         
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=2, pady=2)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y, pady=2)
         
         # Footer
-        self.stats_label = tk.Label(self, text="", font=FONT_SMALL,
-                                   bg=BG_DARK, fg=TEXT_MUTED)
+        self.stats_label = ctk.CTkLabel(self, text="", font=FONT_SMALL,
+                                   text_color=TEXT_MUTED)
         self.stats_label.pack(anchor='e', pady=5, padx=20)
 
     def refresh_decks(self):
         """Load decks into combobox"""
         decks = get_all_decks()
-        self.deck_combo['values'] = [f"{d[0]}: {d[1]}" for d in decks]
-        if decks:
-            self.deck_combo.current(0)
-            self.on_deck_selected(None)
+        values = [f"{d[0]}: {d[1]}" for d in decks]
+        self.deck_combo.configure(values=values)
+        if values:
+            self.deck_combo.set(values[0])
+            self.on_deck_selected_val(values[0])
 
-    def on_deck_selected(self, event):
-        """Handle deck selection"""
-        selection = self.deck_combo.get()
-        if not selection: return
+    def on_deck_selected_val(self, value):
+        """Handle deck selection from combobox values"""
+        if not value: return
         
-        deck_id = int(selection.split(':')[0])
-        deck_name = selection.split(': ')[1]
+        deck_id = int(value.split(':')[0])
+        deck_name = value.split(': ')[1]
         
         self.current_mode = "Deck"
-        self.mode_label.config(text=f"Deck: {deck_name}", fg=ACCENT_PRIMARY)
+        self.mode_label.configure(text=f"Deck: {deck_name}", text_color=ACCENT_PRIMARY)
         self.show_deck_skills(deck_id)
+        
+    def on_deck_selected(self, event):
+        """Legacy bind handler if needed"""
+        self.on_deck_selected_val(self.deck_combo.get())
 
     def show_deck_skills(self, deck_id):
         """Fetch and display all skills from a deck"""
@@ -116,7 +126,7 @@ class DeckSkillsFrame(ttk.Frame):
             
         deck_cards = get_deck_cards(deck_id)
         if not deck_cards:
-            self.stats_label.config(text="Deck is empty")
+            self.stats_label.configure(text="Deck is empty")
             return
             
         total_skills = 0
@@ -142,7 +152,7 @@ class DeckSkillsFrame(ttk.Frame):
                 self.add_skill_row(parent_id, event['skill_name'], "Event", event['details'])
                 total_skills += 1
                     
-        self.stats_label.config(text=f"Found {total_skills} total skill sources in deck")
+        self.stats_label.configure(text=f"Found {total_skills} total skill sources in deck")
 
     def add_card_node(self, card_id, owned_mark, name, rarity, card_type, image_path):
         """Add a parent node for a card"""
@@ -152,7 +162,7 @@ class DeckSkillsFrame(ttk.Frame):
             if resolved_path and os.path.exists(resolved_path):
                 try:
                     pil_img = Image.open(resolved_path)
-                    pil_img.thumbnail((48, 48), Image.Resampling.LANCZOS)
+                    pil_img.thumbnail((32, 32), Image.Resampling.LANCZOS)
                     img = ImageTk.PhotoImage(pil_img)
                     self.icon_cache[card_id] = img
                 except: pass
@@ -185,7 +195,7 @@ class DeckSkillsFrame(ttk.Frame):
         card_id, name, rarity, card_type, max_level, url, image_path, is_owned, owned_level = card
         
         self.current_mode = "Single"
-        self.mode_label.config(text=f"Card: {name}", fg=ACCENT_SECONDARY)
+        self.mode_label.configure(text=f"Card: {name}", text_color=ACCENT_SECONDARY)
         
         # Clear tree
         for item in self.tree.get_children():
@@ -209,4 +219,4 @@ class DeckSkillsFrame(ttk.Frame):
             self.add_skill_row(parent_id, event['skill_name'], "Event", event['details'])
             total_skills += 1
                 
-        self.stats_label.config(text=f"Showing {total_skills} skill sources for {name}")
+        self.stats_label.configure(text=f"Showing {total_skills} skill sources for {name}")

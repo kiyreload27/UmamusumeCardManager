@@ -1,7 +1,9 @@
 import tkinter as tk
+import customtkinter as ctk
 from db.db_queries import get_deck_bonus
+from gui.theme import BG_MEDIUM, TEXT_PRIMARY
 
-class DeckView(tk.Toplevel):
+class DeckView(ctk.CTkToplevel):
     def __init__(self, parent):
         super().__init__(parent)
         self.title("Deck Builder")
@@ -9,9 +11,9 @@ class DeckView(tk.Toplevel):
 
         self.deck_id = 1  # Default deck
 
-        tk.Button(self, text="Calculate Deck Bonuses", command=self.calculate).pack(pady=10)
-        self.output = tk.Text(self, height=20)
-        self.output.pack(fill=tk.BOTH, expand=True)
+        ctk.CTkButton(self, text="Calculate Deck Bonuses", command=self.calculate).pack(pady=10)
+        self.output = ctk.CTkTextbox(self, height=300, fg_color=BG_MEDIUM, text_color=TEXT_PRIMARY)
+        self.output.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
     def calculate(self):
         self.output.delete("1.0", tk.END)

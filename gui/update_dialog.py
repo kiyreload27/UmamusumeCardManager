@@ -1,21 +1,22 @@
 """
 Update Dialog for UmamusumeCardManager
 Provides a modal dialog for the update process.
+Updated for CustomTkinter
 """
 
 import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext
+from tkinter import ttk, messagebox
+import customtkinter as ctk
 import threading
-import webbrowser
-from typing import Optional, Callable
-
 import sys
 import os
+from typing import Optional, Callable
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from updater.update_checker import check_for_updates, download_update, apply_update, get_current_version
 from gui.theme import (
-    BG_DARK, BG_DARKEST, BG_MEDIUM, BG_LIGHT, BG_HIGHLIGHT,
+    BG_DARK, BG_MEDIUM, BG_LIGHT, BG_HIGHLIGHT,
     ACCENT_PRIMARY, ACCENT_SECONDARY, ACCENT_SUCCESS, ACCENT_ERROR,
     TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
     FONT_HEADER, FONT_SUBHEADER, FONT_BODY, FONT_BODY_BOLD, FONT_SMALL,
@@ -26,7 +27,7 @@ from gui.theme import (
 class UpdateDialog:
     """Modal dialog for checking and applying updates."""
     
-    def __init__(self, parent: tk.Tk, on_close_callback: Optional[Callable] = None):
+    def __init__(self, parent: ctk.CTk, on_close_callback: Optional[Callable] = None):
         self.parent = parent
         self.on_close_callback = on_close_callback
         self.update_info = None
@@ -34,24 +35,27 @@ class UpdateDialog:
         self.is_downloading = False
         
         # Create the dialog window
-        self.dialog = tk.Toplevel(parent)
+        self.dialog = ctk.CTkToplevel(parent)
         self.dialog.title("Check for Updates")
         self.dialog.geometry("520x600")
         self.dialog.resizable(True, True)
         self.dialog.minsize(480, 500)
+        
+        # Set transient/grab to make it modal
         self.dialog.transient(parent)
         self.dialog.grab_set()
         
         # Center on parent
         self.center_on_parent()
         
-        self.dialog.configure(bg=BG_DARK)
-        
         # Set up the UI
         self.setup_ui()
         
         # Start checking for updates
         self.check_for_updates()
+        
+        # Handle close window event
+        self.dialog.protocol("WM_DELETE_WINDOW", self.close)
     
     def center_on_parent(self):
         """Center the dialog on the parent window."""
@@ -71,9 +75,94 @@ class UpdateDialog:
     
     def setup_ui(self):
         """Set up the dialog UI."""
-        # Button frame (Create first to pack at bottom)
-        self.button_frame = tk.Frame(self.dialog, bg=BG_DARK, pady=20, padx=20)
-        self.button_frame.pack(side=tk.BOTTOM, fill=tk.X)
+        # Main container (CTk has its own bg, so we don't strictly need a frame, but for padding)
+        main_frame = ctk.CTkFrame(self.dialog, fg_color="transparent")
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        
+        # Title
+        self.title_label = ctk.CTkLabel(
+            main_frame, 
+            text="🔄 Checking for Updates...",
+            font=FONT_HEADER,
+            text_color=ACCENT_PRIMARY
+        )
+        self.title_label.pack(pady=(0, 10))
+        
+        # Status message
+        self.status_label = ctk.CTkLabel(
+            main_frame,
+            text="Connecting to GitHub...",
+            font=FONT_BODY,
+            text_color=TEXT_MUTED,
+            wraplength=460
+        )
+        self.status_label.pack(pady=(0, 10))
+        
+        # Version info frame
+        self.version_frame = ctk.CTkFrame(main_frame, fg_color=BG_MEDIUM)
+        self.version_frame.pack(fill=tk.X, pady=(0, 15), padx=5)
+        
+        self.current_version_label = ctk.CTkLabel(
+            self.version_frame,
+            text=f"Current Version: v{get_current_version()}",
+            font=FONT_BODY,
+            text_color=TEXT_SECONDARY
+        )
+        self.current_version_label.pack(anchor='w', padx=15, pady=5)
+        
+        self.new_version_label = ctk.CTkLabel(
+            self.version_frame,
+            text="Latest Version: Checking...",
+            font=FONT_BODY,
+            text_color=TEXT_SECONDARY
+        )
+        self.new_version_label.pack(anchor='w', padx=15, pady=5)
+        
+        # Release Notes Area
+        self.notes_label = ctk.CTkLabel(
+            main_frame,
+            text="What's New:",
+            font=FONT_BODY_BOLD,
+            text_color=TEXT_PRIMARY
+        )
+        self.notes_label.pack(anchor='w', pady=(0, 5))
+        
+        # Text box for release notes
+        self.notes_text = ctk.CTkTextbox(
+            main_frame,
+            height=200, 
+            fg_color=BG_MEDIUM,
+            text_color=TEXT_SECONDARY,
+            font=FONT_SMALL,
+            border_width=0
+        )
+        self.notes_text.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
+        self.notes_text.insert("1.0", "Checking for release notes...")
+        self.notes_text.configure(state=tk.DISABLED)
+        
+        # Progress bar (hidden initially)
+        self.progress_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        self.progress_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        self.progress_label = ctk.CTkLabel(
+            self.progress_frame,
+            text="",
+            font=FONT_SMALL,
+            text_color=TEXT_MUTED
+        )
+        self.progress_label.pack(anchor='w', pady=(0, 5))
+        
+        self.progress_bar = ctk.CTkProgressBar(
+            self.progress_frame,
+            mode='indeterminate',
+            width=400
+        )
+        self.progress_bar.pack(fill=tk.X)
+        self.progress_bar.start()
+        
+        # Button frame
+        self.button_frame = ctk.CTkFrame(self.dialog, fg_color="transparent")
+        self.button_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=20, pady=20)
         
         # Close button
         self.close_button = create_styled_button(
@@ -91,101 +180,7 @@ class UpdateDialog:
             command=self.start_download,
             style_type='accent'
         )
-        # We don't pack it yet
-        
-        # Main container
-        main_frame = tk.Frame(self.dialog, bg=BG_DARK, padx=25, pady=20)
-        main_frame.pack(fill=tk.BOTH, expand=True)
-        
-        # Title
-        self.title_label = tk.Label(
-            main_frame, 
-            text="🔄 Checking for Updates...",
-            font=FONT_HEADER,
-            bg=BG_DARK,
-            fg=ACCENT_PRIMARY
-        )
-        self.title_label.pack(pady=(0, 10))
-        
-        # Status message
-        self.status_label = tk.Label(
-            main_frame,
-            text="Connecting to GitHub...",
-            font=FONT_BODY,
-            bg=BG_DARK,
-            fg=TEXT_MUTED,
-            wraplength=460
-        )
-        self.status_label.pack(pady=(0, 10))
-        
-        # Version info frame
-        self.version_frame = tk.Frame(main_frame, bg=BG_MEDIUM, padx=15, pady=10)
-        self.version_frame.pack(fill=tk.X, pady=(0, 15))
-        
-        self.current_version_label = tk.Label(
-            self.version_frame,
-            text=f"Current Version: v{get_current_version()}",
-            font=FONT_BODY,
-            bg=BG_MEDIUM,
-            fg=TEXT_SECONDARY
-        )
-        self.current_version_label.pack(anchor='w')
-        
-        self.new_version_label = tk.Label(
-            self.version_frame,
-            text="Latest Version: Checking...",
-            font=FONT_BODY,
-            bg=BG_MEDIUM,
-            fg=TEXT_SECONDARY
-        )
-        self.new_version_label.pack(anchor='w')
-        
-        # Release Notes Area
-        self.notes_label = tk.Label(
-            main_frame,
-            text="What's New:",
-            font=FONT_BODY_BOLD,
-            bg=BG_DARK,
-            fg=TEXT_PRIMARY
-        )
-        self.notes_label.pack(anchor='w', pady=(0, 5))
-        
-        # Text box for release notes
-        self.notes_text = scrolledtext.ScrolledText(
-            main_frame,
-            height=10, 
-            bg=BG_MEDIUM,
-            fg=TEXT_SECONDARY,
-            font=FONT_SMALL,
-            borderwidth=0,
-            highlightthickness=0,
-            padx=10,
-            pady=10
-        )
-        self.notes_text.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
-        self.notes_text.insert(tk.END, "Checking for release notes...")
-        self.notes_text.config(state=tk.DISABLED)
-        
-        # Progress bar (hidden initially)
-        self.progress_frame = tk.Frame(main_frame, bg=BG_DARK)
-        self.progress_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        self.progress_label = tk.Label(
-            self.progress_frame,
-            text="",
-            font=FONT_SMALL,
-            bg=BG_DARK,
-            fg=TEXT_MUTED
-        )
-        self.progress_label.pack(anchor='w', pady=(0, 5))
-        
-        self.progress_bar = ttk.Progressbar(
-            self.progress_frame,
-            mode='indeterminate',
-            length=460
-        )
-        self.progress_bar.pack(fill=tk.X)
-        self.progress_bar.start(10)
+        # Pack when ready
 
     def check_for_updates(self):
         """Check for updates in a background thread."""
@@ -202,19 +197,19 @@ class UpdateDialog:
         self.progress_frame.pack_forget() # Hide progress bar when check is done
         
         # Enable text box to update it
-        self.notes_text.config(state=tk.NORMAL)
-        self.notes_text.delete(1.0, tk.END)
+        self.notes_text.configure(state=tk.NORMAL)
+        self.notes_text.delete("1.0", tk.END)
         
         if self.update_info:
             # Update available!
-            self.title_label.config(text="🎉 Update Available!")
-            self.status_label.config(
+            self.title_label.configure(text="🎉 Update Available!")
+            self.status_label.configure(
                 text="A new version is available.",
-                fg=ACCENT_SUCCESS
+                text_color=ACCENT_SUCCESS
             )
-            self.new_version_label.config(
+            self.new_version_label.configure(
                 text=f"Latest Version: {self.update_info['new_version']}",
-                fg=ACCENT_SUCCESS
+                text_color=ACCENT_SUCCESS
             )
             
             # Show Release Notes
@@ -225,18 +220,18 @@ class UpdateDialog:
             self.update_button.pack(side=tk.RIGHT, padx=(0, 10))
         else:
             # Up to date or error
-            self.title_label.config(text="✅ You're Up to Date!")
-            self.status_label.config(
+            self.title_label.configure(text="✅ You're Up to Date!")
+            self.status_label.configure(
                 text=f"You are running the latest version.",
-                fg=TEXT_SECONDARY
+                text_color=TEXT_SECONDARY
             )
-            self.new_version_label.config(
+            self.new_version_label.configure(
                 text=f"Latest Version: v{get_current_version()}",
-                fg=ACCENT_SUCCESS
+                text_color=ACCENT_SUCCESS
             )
             self.notes_text.insert(tk.END, "You are using the latest version of Umamusume Support Card Manager.\n\nEnjoy!")
             
-        self.notes_text.config(state=tk.DISABLED)
+        self.notes_text.configure(state=tk.DISABLED)
             
     def start_download(self):
         """Start downloading the update."""
@@ -244,22 +239,22 @@ class UpdateDialog:
             return
         
         self.is_downloading = True
-        self.update_button.config(state=tk.DISABLED, text="Downloading...")
-        self.close_button.config(state=tk.DISABLED)
+        self.update_button.configure(state=tk.DISABLED, text="Downloading...")
+        self.close_button.configure(state=tk.DISABLED)
         
-        self.title_label.config(text="⬇️ Downloading Update...")
-        self.status_label.config(text="Please wait...", fg=TEXT_MUTED)
+        self.title_label.configure(text="⬇️ Downloading Update...")
+        self.status_label.configure(text="Please wait...", text_color=TEXT_MUTED)
         
         # Configure progress bar for determinate mode
-        self.progress_frame.pack(fill=tk.X, pady=(0, 10)) # Show progress frame again
-        self.progress_bar.config(mode='determinate', maximum=100)
+        self.progress_frame.pack(fill=tk.X, pady=(0, 10))
+        self.progress_bar.configure(mode='determinate')
+        self.progress_bar.set(0)
         self.progress_bar.pack(fill=tk.X)
-        self.progress_bar['value'] = 0
         
         def download():
             def progress_callback(downloaded, total):
                 if total > 0:
-                    percent = int((downloaded / total) * 100)
+                    percent = downloaded / total # 0.0 to 1.0 for CTk
                     mb_downloaded = downloaded / (1024 * 1024)
                     mb_total = total / (1024 * 1024)
                     self.dialog.after(0, lambda: self.update_progress(percent, mb_downloaded, mb_total))
@@ -270,44 +265,44 @@ class UpdateDialog:
         self.download_thread = threading.Thread(target=download, daemon=True)
         self.download_thread.start()
     
-    def update_progress(self, percent: int, downloaded_mb: float, total_mb: float):
+    def update_progress(self, percent: float, downloaded_mb: float, total_mb: float):
         """Update the progress bar."""
-        self.progress_bar['value'] = percent
-        self.progress_label.config(text=f"Downloaded: {downloaded_mb:.1f} MB / {total_mb:.1f} MB ({percent}%)")
+        self.progress_bar.set(percent)
+        self.progress_label.configure(text=f"Downloaded: {downloaded_mb:.1f} MB / {total_mb:.1f} MB ({int(percent*100)}%)")
     
     def download_complete(self, download_path: Optional[str]):
         """Called when the download is complete."""
         self.is_downloading = False
         
         if download_path:
-            self.title_label.config(text="✅ Download Complete!")
-            self.status_label.config(
+            self.title_label.configure(text="✅ Download Complete!")
+            self.status_label.configure(
                 text="Update ready to install.",
-                fg=ACCENT_SUCCESS
+                text_color=ACCENT_SUCCESS
             )
             
             # Change button to install
-            self.update_button.config(
+            self.update_button.configure(
                 state=tk.NORMAL,
                 text="🔄 Install & Restart",
                 command=lambda: self.install_update(download_path)
             )
-            self.close_button.config(state=tk.NORMAL)
+            self.close_button.configure(state=tk.NORMAL)
         else:
-            self.title_label.config(text="❌ Download Failed")
-            self.status_label.config(
+            self.title_label.configure(text="❌ Download Failed")
+            self.status_label.configure(
                 text="Failed not download update.",
-                fg=ACCENT_ERROR
+                text_color=ACCENT_ERROR
             )
-            self.update_button.config(state=tk.NORMAL, text="⬇️ Retry Download")
-            self.close_button.config(state=tk.NORMAL)
+            self.update_button.configure(state=tk.NORMAL, text="⬇️ Retry Download")
+            self.close_button.configure(state=tk.NORMAL)
     
     def install_update(self, download_path: str):
         """Install the downloaded update."""
-        self.title_label.config(text="🔄 Installing Update...")
-        self.status_label.config(text="Applying update...", fg=TEXT_MUTED)
-        self.update_button.config(state=tk.DISABLED)
-        self.close_button.config(state=tk.DISABLED)
+        self.title_label.configure(text="🔄 Installing Update...")
+        self.status_label.configure(text="Applying update...", text_color=TEXT_MUTED)
+        self.update_button.configure(state=tk.DISABLED)
+        self.close_button.configure(state=tk.DISABLED)
         
         if apply_update(download_path):
             # Exit the application - the updater script will restart it
@@ -322,7 +317,6 @@ class UpdateDialog:
             )
             self.close()
 
-    
     def close(self):
         """Close the dialog."""
         if self.on_close_callback:
@@ -330,15 +324,8 @@ class UpdateDialog:
         self.dialog.destroy()
 
 
-def show_update_dialog(parent: tk.Tk, on_close_callback: Optional[Callable] = None) -> UpdateDialog:
+def show_update_dialog(parent: ctk.CTk, on_close_callback: Optional[Callable] = None) -> UpdateDialog:
     """
     Show the update dialog.
-    
-    Args:
-        parent: The parent Tk window
-        on_close_callback: Optional callback when dialog is closed
-    
-    Returns:
-        The UpdateDialog instance
     """
     return UpdateDialog(parent, on_close_callback)

@@ -1,9 +1,11 @@
 """
 Skill Search View - Find cards by the skills they teach
+Updated for CustomTkinter
 """
 
 import tkinter as tk
 from tkinter import ttk
+import customtkinter as ctk
 import sys
 import os
 from PIL import Image, ImageTk
@@ -17,15 +19,15 @@ from gui.theme import (
     ACCENT_PRIMARY, ACCENT_SECONDARY, ACCENT_TERTIARY,
     TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
     FONT_HEADER, FONT_SUBHEADER, FONT_BODY, FONT_BODY_BOLD, FONT_SMALL,
-    create_card_frame, get_type_icon, create_styled_button
+    create_card_frame, get_type_icon, create_styled_button, create_styled_entry
 )
 
 
-class SkillSearchFrame(ttk.Frame):
+class SkillSearchFrame(ctk.CTkFrame):
     """Frame for searching skills and finding cards that have them"""
     
     def __init__(self, parent):
-        super().__init__(parent)
+        super().__init__(parent, fg_color="transparent")
         self.all_skills = []
         self.icon_cache = {}
         self.current_skill = None
@@ -36,30 +38,32 @@ class SkillSearchFrame(ttk.Frame):
     def create_widgets(self):
         """Create the skill search interface"""
         # Main split container
-        main_pane = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
-        main_pane.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        # Use two frames instead of PanedWindow
         
         # === Left Panel: Skill List ===
-        left_frame = tk.Frame(main_pane, bg=BG_DARK, width=300)
-        main_pane.add(left_frame, weight=1)
+        left_frame = ctk.CTkFrame(self, width=390, corner_radius=10)
+        left_frame.pack_propagate(False) # Force width to stay 600
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=False, padx=(0, 10))
         
         # Search Header
-        header = tk.Frame(left_frame, bg=BG_DARK)
-        header.pack(fill=tk.X, pady=(0, 10))
-        tk.Label(header, text="🔍 Search Skills", font=FONT_HEADER, 
-                 bg=BG_DARK, fg=TEXT_PRIMARY).pack(side=tk.LEFT)
+        header = ctk.CTkFrame(left_frame, fg_color="transparent")
+        header.pack(fill=tk.X, pady=(15, 10), padx=10)
+        ctk.CTkLabel(header, text="🔍 Search Skills", font=FONT_HEADER, 
+                  text_color=TEXT_PRIMARY).pack(side=tk.LEFT)
         
         # Search Entry
         self.search_var = tk.StringVar()
         self.search_var.trace('w', self.filter_skills)
         
-        search_entry = ttk.Entry(left_frame, textvariable=self.search_var)
-        search_entry.pack(fill=tk.X, padx=(0, 5), pady=(0, 10))
+        # Use styled entry
+        search_entry = ctk.CTkEntry(left_frame, textvariable=self.search_var, placeholder_text="Type to filter...")
+        search_entry.pack(fill=tk.X, padx=10, pady=(0, 10))
         
-        # Skill Listbox
-        list_container = create_card_frame(left_frame)
-        list_container.pack(fill=tk.BOTH, expand=True)
+        # Skill Listbox Container (Styled)
+        list_container = ctk.CTkFrame(left_frame, fg_color="transparent")
+        list_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
         
+        # Using tk.Listbox because CTk doesn't have one and ScrollableFrame is harder to manage for simple selection list
         scrollbar = ttk.Scrollbar(list_container, orient=tk.VERTICAL)
         self.skill_listbox = tk.Listbox(list_container, 
                                         bg=BG_MEDIUM, fg=TEXT_SECONDARY,
@@ -77,27 +81,28 @@ class SkillSearchFrame(ttk.Frame):
         self.skill_listbox.bind('<<ListboxSelect>>', self.on_skill_selected)
         
         # === Right Panel: Results ===
-        right_frame = tk.Frame(main_pane, bg=BG_DARK)
-        main_pane.add(right_frame, weight=3)
+        right_frame = ctk.CTkFrame(self, corner_radius=10, fg_color="transparent")
+        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
         
         # Search Row (Search + Filter)
-        search_frame = tk.Frame(right_frame, bg=BG_DARK)
-        search_frame.pack(fill=tk.X, padx=10, pady=10)
+        search_frame = ctk.CTkFrame(right_frame, fg_color="transparent")
+        search_frame.pack(fill=tk.X, padx=10, pady=15)
         
-        self.result_header = tk.Label(search_frame, text="Select a skill to see cards", 
-                                       font=FONT_SUBHEADER, bg=BG_DARK, fg=ACCENT_PRIMARY)
+        self.result_header = ctk.CTkLabel(search_frame, text="Select a skill to see cards", 
+                                       font=FONT_SUBHEADER, text_color=ACCENT_PRIMARY)
         self.result_header.pack(side=tk.LEFT)
         
         # Owned Filter
         self.owned_only_var = tk.BooleanVar(value=False)
-        self.owned_check = ttk.Checkbutton(search_frame, text="Show Owned Only", 
+        self.owned_check = ctk.CTkCheckBox(search_frame, text="Show Owned Only", 
                                            variable=self.owned_only_var, 
-                                           command=self.on_filter_changed)
+                                           command=self.on_filter_changed,
+                                           font=FONT_SMALL)
         self.owned_check.pack(side=tk.RIGHT, padx=10)
         
-        # Results Treeview
-        tree_frame = create_card_frame(right_frame)
-        tree_frame.pack(fill=tk.BOTH, expand=True, padx=10)
+        # Results Treeview Container
+        tree_frame = ctk.CTkFrame(right_frame, fg_color="transparent")
+        tree_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
         cols = ('owned', 'name', 'rarity', 'type', 'source', 'details')
         self.tree = ttk.Treeview(tree_frame, columns=cols, show='tree headings',
@@ -122,12 +127,12 @@ class SkillSearchFrame(ttk.Frame):
         vsb = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self.tree.yview)
         self.tree.configure(yscrollcommand=vsb.set)
         
-        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=2, pady=2)
-        vsb.pack(side=tk.RIGHT, fill=tk.Y, pady=2)
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y, pady=5)
         
         # Stats footer
-        self.stats_label = tk.Label(right_frame, text="", font=FONT_SMALL,
-                                   bg=BG_DARK, fg=TEXT_MUTED)
+        self.stats_label = ctk.CTkLabel(right_frame, text="", font=FONT_SMALL,
+                                   text_color=TEXT_MUTED)
         self.stats_label.pack(anchor='e', pady=5, padx=10)
 
     def load_skills(self):
@@ -194,7 +199,7 @@ class SkillSearchFrame(ttk.Frame):
     def show_cards_for_skill(self, skill_name):
         """Fetch and display cards with the selected skill"""
         self.current_skill = skill_name
-        self.result_header.config(text=f"Cards with skill: {skill_name}")
+        self.result_header.configure(text=f"Cards with skill: {skill_name}")
         
         # Clear tree
         for item in self.tree.get_children():
@@ -204,10 +209,12 @@ class SkillSearchFrame(ttk.Frame):
         
         owned_only = self.owned_only_var.get()
         
+        display_count = 0
         for card in cards:
             if owned_only and not card.get('is_owned'):
                 continue
                 
+            display_count += 1
             # Load Icon
             card_id = card['card_id']
             img = self.icon_cache.get(card_id)
@@ -216,7 +223,7 @@ class SkillSearchFrame(ttk.Frame):
                 if resolved_path and os.path.exists(resolved_path):
                     try:
                         pil_img = Image.open(resolved_path)
-                        pil_img.thumbnail((48, 48), Image.Resampling.LANCZOS)
+                        pil_img.thumbnail((32, 32), Image.Resampling.LANCZOS)
                         img = ImageTk.PhotoImage(pil_img)
                         self.icon_cache[card_id] = img
                     except:
@@ -246,12 +253,10 @@ class SkillSearchFrame(ttk.Frame):
                 card_details
             )
             
-            if img:
-                self.tree.insert('', tk.END, text='', image=img, values=values)
-            else:
-                self.tree.insert('', tk.END, text='?', values=values)
+            kv = {'image': img} if img else {}
+            self.tree.insert('', tk.END, text='', values=values, **kv)
                 
-        self.stats_label.config(text=f"Found {len(cards)} cards")
+        self.stats_label.configure(text=f"Found {display_count} cards")
 
     def set_card(self, card_id):
         """No longer responsive to card selection in this tab"""

@@ -1,21 +1,333 @@
 """
 Centralized Theme Module for Umamusume Support Card Manager
-Modern glassmorphism-inspired dark theme with consistent styling
+Modern glassmorphism-inspired dark theme with consistent styling using CustomTkinter
 """
 
 import tkinter as tk
 from tkinter import ttk
+import customtkinter as ctk
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# COLOR PALETTE
+# CONFIGURATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Primary backgrounds (rich purplish-blues with depth)
-BG_DARKEST = '#0d0d1a'       # Deepest background
-BG_DARK = '#151528'           # Main application background  
-BG_MEDIUM = '#1e1e3f'         # Card/panel backgrounds
-BG_LIGHT = '#2a2a5a'          # Elevated elements, hover states
-BG_HIGHLIGHT = '#3d3d7a'      # Active/selected backgrounds
+# Set default theme
+ctk.set_appearance_mode("Dark")
+ctk.set_default_color_theme("blue") # We can use 'dark-blue' or 'green' too
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COLOR PALETTE (Expanded for CTk)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Primary backgrounds
+BG_DARKEST = '#0B0B15'       # Deepest background
+BG_DARK = '#1a1a1a'           # Main application background (CTk default is ~#2b2b2b, we can match or override)
+BG_MEDIUM = '#2b2b2b'         # Card/panel backgrounds
+BG_LIGHT = '#3A3A4F'          # Elevated elements
+BG_HIGHLIGHT = '#1F6AA5'      # Active/selected (matches 'blue' theme)
+
+# Accents
+ACCENT_PRIMARY = '#1F6AA5'    # CTk Blue
+ACCENT_SECONDARY = '#7c5cff'  # Purple accent
+ACCENT_TERTIARY = '#5ce1e6'   # Cyan accent
+ACCENT_SUCCESS = '#2CC985'    # Green for success
+ACCENT_WARNING = '#E9B949'    # Amber for warning
+ACCENT_ERROR = '#C33737'      # Red for errors
+
+# Text colors
+TEXT_PRIMARY = '#DCE4EE'      # CTk default text color
+TEXT_SECONDARY = '#949A9F'    # Secondary text
+TEXT_MUTED = '#6B7075'        # Muted text
+
+# Rarity colors
+RARITY_COLORS = {
+    'SSR': '#FFD700',
+    'SR': '#C0C0C0',
+    'R': '#CD853F'
+}
+
+# Type colors
+TYPE_COLORS = {
+    'Speed': '#3b82f6',
+    'Stamina': '#f97316',
+    'Power': '#eab308',
+    'Guts': '#ef4444',
+    'Wisdom': '#22c55e',
+    'Friend': '#a855f7',
+    'Group': '#f59e0b'
+}
+
+TYPE_ICONS = {
+    'Speed': '🏃',
+    'Stamina': '💚',
+    'Power': '💪',
+    'Guts': '🔥',
+    'Wisdom': '🧠',
+    'Friend': '💜',
+    'Group': '👥'
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# FONTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+FONT_FAMILY = 'Roboto Medium' # CTk Default
+FONT_FAMILY_MONO = 'Consolas'
+
+FONT_TITLE = (FONT_FAMILY, 24, 'bold')
+FONT_HEADER = (FONT_FAMILY, 20, 'bold')
+FONT_SUBHEADER = (FONT_FAMILY, 16, 'bold')
+FONT_BODY = (FONT_FAMILY, 14)
+FONT_BODY_BOLD = (FONT_FAMILY, 14, 'bold')
+FONT_SMALL = (FONT_FAMILY, 12)
+FONT_TINY = (FONT_FAMILY, 10)
+FONT_MONO = (FONT_FAMILY_MONO, 13)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# STYLE CONFIGURATION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def configure_styles(root: tk.Tk):
+    """
+    Configure ttk styles for legacy widgets (like Treeview)
+    Note: Standard TK configurations don't affect CTk widgets
+    """
+    style = ttk.Style()
+    style.theme_use('clam')
+    
+    # Configure Treeview to look dark
+    style.configure('Treeview',
+                    background=BG_MEDIUM,
+                    foreground=TEXT_PRIMARY,
+                    fieldbackground=BG_MEDIUM,
+                    font=FONT_BODY,
+                    rowheight=36,
+                    borderwidth=0)
+    style.configure('Treeview.Heading',
+                    font=FONT_BODY_BOLD,
+                    background='#333333',
+                    foreground=TEXT_PRIMARY,
+                    padding=8,
+                    borderwidth=0)
+    style.map('Treeview',
+              background=[('selected', ACCENT_PRIMARY)],
+              foreground=[('selected', 'white')])
+    style.map('Treeview.Heading',
+              background=[('active', '#404040')])
+              
+    # Card List specific
+    style.configure('CardList.Treeview',
+                     background=BG_MEDIUM,
+                     foreground=TEXT_PRIMARY,
+                     rowheight=60)
+    
+    # Scrollbar (for Treeview only)
+    style.configure('Vertical.TScrollbar',
+                    background=BG_LIGHT,
+                    troughcolor=BG_DARK,
+                    borderwidth=0,
+                    arrowsize=12)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# WIDGET FACTORIES (ADAPTERS)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def create_styled_button(parent, text, command=None, style_type='default', **kwargs):
+    """Create a styled CTkButton"""
+    
+    # Map old style types to colors
+    fg_color = None # Default
+    hover_color = None
+    
+    if style_type == 'accent':
+        pass # Uses default blue
+    elif style_type == 'secondary':
+        fg_color = ACCENT_SECONDARY
+        hover_color = '#6040e0'
+    elif style_type == 'danger':
+        fg_color = ACCENT_ERROR
+        hover_color = '#a02020'
+    elif style_type == 'default':
+        fg_color = 'transparent'
+        border_width = 1
+        kwargs['border_width'] = 1
+        kwargs['border_color'] = TEXT_SECONDARY
+    
+    # Filter out incompatible kwargs from tk
+    safe_kwargs = {k: v for k, v in kwargs.items() if k not in ['padx', 'pady', 'bg', 'fg', 'bd', 'relief', 'activebackground', 'activeforeground']}
+    
+    btn = ctk.CTkButton(
+        parent,
+        text=text,
+        command=command,
+        font=FONT_BODY_BOLD if style_type == 'accent' else FONT_BODY,
+        height=36,
+        corner_radius=8,
+        **safe_kwargs
+    )
+    
+    if fg_color:
+        btn.configure(fg_color=fg_color)
+    if hover_color:
+        btn.configure(hover_color=hover_color)
+        
+    return btn
+
+def create_styled_entry(parent, textvariable=None, **kwargs):
+    """Create a styled CTkEntry"""
+    safe_kwargs = {k: v for k, v in kwargs.items() if k not in ['bg', 'fg', 'bd', 'relief']}
+    
+    return ctk.CTkEntry(
+        parent,
+        textvariable=textvariable,
+        font=FONT_BODY,
+        height=36,
+        corner_radius=6,
+        border_color=BG_LIGHT,
+        **safe_kwargs
+    )
+
+def create_card_frame(parent, **kwargs):
+    """Create a styled CTkFrame"""
+    # Filter tk params
+    safe_kwargs = {k: v for k, v in kwargs.items() if k not in ['bg', 'highlightthickness', 'highlightbackground']}
+    
+    return ctk.CTkFrame(
+        parent,
+        corner_radius=12,
+        fg_color=BG_MEDIUM, # Card background
+        **safe_kwargs
+    )
+
+def create_styled_text(parent, height=10, **kwargs):
+    """
+    Create a styled CTkTextbox
+    Note: CTkTextbox API is slightly different from tk.Text
+    """
+    safe_kwargs = {k: v for k, v in kwargs.items() if k not in ['bg', 'fg', 'selectbackground', 'selectforeground', 'relief']}
+    
+    return ctk.CTkTextbox(
+        parent,
+        height=height * 20, # Approx pixel height
+        font=FONT_MONO,
+        corner_radius=10,
+        text_color=TEXT_PRIMARY,
+        fg_color=BG_DARK,
+        border_color=BG_LIGHT,
+        border_width=1,
+        **safe_kwargs
+    )
+
+def get_rarity_color(rarity):
+    return RARITY_COLORS.get(rarity, TEXT_SECONDARY)
+
+def get_type_color(card_type):
+    return TYPE_COLORS.get(card_type, TEXT_SECONDARY)
+
+def get_type_icon(card_type):
+    return TYPE_ICONS.get(card_type, '')
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TOOLTIPS (Legacy/Wrapper)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+EFFECT_DESCRIPTIONS = {
+    "Friendship Bonus": "Increases stats gained when training with this support card during Friendship Training (orange aura).",
+    "Motivation Bonus": "Increases stats gained based on your Uma's motivation level.",
+    "Specialty Rate": "Increases the chance of this card appearing in its specialty training.",
+    "Training Bonus": "Flat percentage increase to stats gained in training where this card is present.",
+    "Initial Bond": "Starting gauge value for this card.",
+    "Race Bonus": "Increases stats gained from racing.",
+    "Fan Count Bonus": "Increases fans gained from racing.",
+    "Skill Pt Bonus": "Bonus skill points gained when training with this card.",
+    "Hint Lv": "Starting level of skills taught by this card's hints.",
+    "Hint Rate": "Increases chance of getting a hint event.",
+    "Minigame Fail Rate": "Reduces chance of failing training.",
+    "Energy Usage": "Reduces energy consumed during training.",
+    "Current Energy": "Increases starting energy in scenario.",
+    "Vitality": "Increases vitality gain from events.",
+    "Stamina": "Increases stamina gain from training.",
+    "Speed": "Increases speed gain from training.",
+    "Power": "Increases power gain from training.",
+    "Guts": "Increases guts gain from training.",
+    "Wisdom": "Increases wisdom gain from training.",
+    "Logic": "Custom logic effect.",
+    "Starting Stats": "Increases initial stats at start of scenario."
+}
+
+class Tooltip:
+    """
+    Simple Tooltip adapted for CTk widgets
+    """
+    def __init__(self, widget, text):
+        self.widget = widget
+        self.text = text
+        self.tip_window = None
+        self.id = None
+        self.x = self.y = 0
+        self.widget.bind("<Enter>", self.enter)
+        self.widget.bind("<Leave>", self.leave)
+        self.widget.bind("<ButtonPress>", self.leave)
+
+    def enter(self, event=None):
+        self.schedule()
+
+    def leave(self, event=None):
+        self.unschedule()
+        self.hidetip()
+
+    def schedule(self):
+        self.unschedule()
+        self.id = self.widget.after(500, self.showtip)
+
+    def unschedule(self):
+        id = self.id
+        self.id = None
+        if id:
+            self.widget.after_cancel(id)
+
+    def showtip(self, event=None):
+        x = y = 0
+        try:
+            x, y, cx, cy = self.widget.bbox("insert")
+        except:
+            pass
+            
+        x += self.widget.winfo_rootx() + 25
+        y += self.widget.winfo_rooty() + 20
+        
+        self.tip_window = tk.Toplevel(self.widget)
+        self.tip_window.wm_overrideredirect(True)
+        self.tip_window.wm_geometry(f"+{x}+{y}")
+        
+        # CTkLabel inside the tooltip (if possible) or standard Label
+        # We'll use standard Label for the tooltip window content to be safe
+        label = tk.Label(
+            self.tip_window, 
+            text=self.text, 
+            justify=tk.LEFT,
+            background="#2b2b2b", 
+            foreground="#DCE4EE",
+            relief=tk.SOLID, 
+            borderwidth=1,
+            font=("Segoe UI", 10),
+            padx=10,
+            pady=5
+        )
+        label.pack(ipadx=1)
+
+    def hidetip(self):
+        tw = self.tip_window
+        self.tip_window = None
+        if tw:
+            tw.destroy()
+# Primary backgrounds (Neutral Dark)
+BG_DARKEST = '#0f0f0f'       # Deepest background (Material Darker)
+BG_DARK = '#141414'           # Main application background  
+BG_MEDIUM = '#1f1f1f'         # Card/panel backgrounds
+BG_LIGHT = '#2d2d2d'          # Elevated elements, hover states
+BG_HIGHLIGHT = '#3d3d3d'      # Active/selected backgrounds
 
 # Accents (vibrant but refined)
 ACCENT_PRIMARY = '#ff6b9d'    # Pink accent (main action color)
@@ -198,7 +510,7 @@ def configure_styles(root: tk.Tk):
                     foreground=TEXT_PRIMARY,
                     padding=6)
     style.map('Treeview',
-              background=[('selected', ACCENT_PRIMARY)],
+              background=[('selected', BG_HIGHLIGHT)],
               foreground=[('selected', TEXT_PRIMARY)])
     style.map('Treeview.Heading',
               background=[('active', BG_HIGHLIGHT)])
@@ -209,7 +521,7 @@ def configure_styles(root: tk.Tk):
                     foreground=TEXT_SECONDARY,
                     fieldbackground=BG_MEDIUM,
                     font=FONT_BODY,
-                    rowheight=60)
+                    rowheight=80)
     
     # Deck list style
     style.configure('DeckList.Treeview',
@@ -217,7 +529,7 @@ def configure_styles(root: tk.Tk):
                     foreground=TEXT_SECONDARY,
                     fieldbackground=BG_MEDIUM,
                     font=FONT_BODY,
-                    rowheight=60)
+                    rowheight=80)
     style.map('DeckList.Treeview',
               background=[('selected', ACCENT_PRIMARY)])
     
@@ -258,17 +570,27 @@ def configure_styles(root: tk.Tk):
 
 
 def create_styled_entry(parent, textvariable=None, **kwargs):
-    """Create a styled tk.Entry with modern appearance"""
-    entry = ttk.Entry(
+    """Create a styled ctk.CTkEntry with modern appearance"""
+    bg_color = kwargs.pop('bg', BG_MEDIUM)
+    fg_color = kwargs.pop('fg', TEXT_PRIMARY)
+    
+    # Filter tk args
+    safe_kwargs = {k: v for k, v in kwargs.items() if k not in ['bg', 'fg', 'bd', 'relief', 'insertbackground', 'selectbackground', 'selectforeground', 'highlightthickness']}
+
+    entry = ctk.CTkEntry(
         parent,
         textvariable=textvariable,
         font=FONT_BODY,
-        **kwargs
+        fg_color=bg_color,
+        text_color=fg_color,
+        border_width=1,
+        corner_radius=6,
+        **safe_kwargs
     )
     return entry
 
 def create_styled_button(parent, text, command=None, style_type='default', **kwargs):
-    """Create a styled tk.Button with modern appearance"""
+    """Create a styled ctk.CTkButton with modern appearance"""
     bg_colors = {
         'default': BG_LIGHT,
         'accent': ACCENT_PRIMARY,
@@ -286,34 +608,26 @@ def create_styled_button(parent, text, command=None, style_type='default', **kwa
         'danger': '#ff8a8a'
     }
     
-    bg = bg_colors.get(style_type, BG_LIGHT)
-    hover_bg = hover_colors.get(style_type, BG_HIGHLIGHT)
+    fg_color = bg_colors.get(style_type, BG_LIGHT)
+    hover_color = hover_colors.get(style_type, BG_HIGHLIGHT)
     
-    btn = tk.Button(
+    # Filter out tk-specific args that might crash CTk
+    safe_kwargs = {k: v for k, v in kwargs.items() if k not in ['bg', 'bd', 'relief', 'activebackground', 'activeforeground', 'padx', 'pady']}
+    
+    # Handle width/height specifics if needed, though CTk handles pixel width natively
+    
+    btn = ctk.CTkButton(
         parent,
         text=text,
         command=command,
-        bg=bg,
-        fg=TEXT_PRIMARY,
+        fg_color=fg_color,
+        text_color=TEXT_PRIMARY,
         font=FONT_BODY_BOLD if style_type == 'accent' else FONT_BODY,
-        activebackground=hover_bg,
-        activeforeground=TEXT_PRIMARY,
-        bd=0,
-        padx=16,
-        pady=8,
-        cursor='hand2',
-        relief=tk.FLAT,
-        **kwargs
+        hover_color=hover_color,
+        corner_radius=8,
+        border_width=0,
+        **safe_kwargs
     )
-    
-    # Add hover effect
-    def on_enter(e):
-        btn.configure(bg=hover_bg)
-    def on_leave(e):
-        btn.configure(bg=bg)
-    
-    btn.bind('<Enter>', on_enter)
-    btn.bind('<Leave>', on_leave)
     
     return btn
 
