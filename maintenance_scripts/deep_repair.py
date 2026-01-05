@@ -3,7 +3,7 @@ import os
 import sys
 
 # Ensure we can import from the project
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from scraper.gametora_scraper import scrape_support_card, sync_playwright
 from db.db_queries import DB_PATH, repair_orphaned_data, cleanup_orphaned_data

@@ -1,7 +1,7 @@
 import sqlite3
 import os
 
-DB_PATH = os.path.join("database", "umamusume.db")
+DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "database", "umamusume.db")
 
 def check_schema():
     if not os.path.exists(DB_PATH):

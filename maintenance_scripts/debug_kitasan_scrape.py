@@ -3,7 +3,7 @@ import sys
 from playwright.sync_api import sync_playwright
 
 # Add parent dir to path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 def debug_kitasan_scrape():
     url = "https://gametora.com/umamusume/supports/30028-kitasan-black"

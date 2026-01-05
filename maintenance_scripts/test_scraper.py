@@ -5,7 +5,7 @@ from playwright.sync_api import sync_playwright
 import sys
 
 # Add project root to path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 def test_scrape_events(url):
     with sync_playwright() as p:
