@@ -50,8 +50,9 @@ class CardSlot(ctk.CTkFrame):
         self.slot_label.place(x=4, y=4)
         
         # Image Area - Dominant
+        # Initial placeholder
         self.image_label = ctk.CTkLabel(self, fg_color="transparent", text="📭", text_color=TEXT_MUTED,
-                                    font=('Segoe UI', 32), width=120, height=120)
+                                    font=('Segoe UI', 32), width=90, height=90)
         self.image_label.grid(row=0, column=0, padx=5, pady=(5,0))
         
         # Mini Details Area (Below Image)
@@ -60,7 +61,7 @@ class CardSlot(ctk.CTkFrame):
         self.info_frame.columnconfigure(0, weight=1)
         
         self.name_label = ctk.CTkLabel(self.info_frame, text="Empty", fg_color="transparent", text_color=TEXT_MUTED,
-                                   font=FONT_TINY, anchor='center', height=16)
+                                    font=FONT_TINY, anchor='center', height=16)
         self.name_label.grid(row=0, column=0, sticky='ew')
         
         # Controls Overlay (Bottom)
@@ -128,23 +129,45 @@ class CardSlot(ctk.CTkFrame):
         
     def reset(self):
         self.name_label.configure(text="Empty", text_color=TEXT_MUTED)
-        self.image_label.configure(image=None, text="📭")
+        
+        # Recreate label to avoid TclError with missing images
+        if hasattr(self, 'image_label') and self.image_label:
+            self.image_label.destroy()
+            
+        self.image_label = ctk.CTkLabel(self, fg_color="transparent", text="📭", text_color=TEXT_MUTED,
+                                    font=('Segoe UI', 32), width=90, height=90)
+        self.image_label.grid(row=0, column=0, padx=5, pady=(5,0))
+        
         self.configure(border_color=BG_LIGHT)
         self.image_ref = None
         self.toggle_controls(False)
         
     def _load_image(self, path):
         resolved_path = resolve_image_path(path)
+        
+        # Prepare new image first
+        new_image = None
         if resolved_path and os.path.exists(resolved_path):
             try:
                 pil_img = Image.open(resolved_path)
                 pil_img.thumbnail((90, 90), Image.Resampling.LANCZOS)
-                self.image_ref = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(90, 90))
-                self.image_label.configure(image=self.image_ref, text="")
-            except Exception as e:
-                self.image_label.configure(image=None, text="⚠️")
+                new_image = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(90, 90))
+            except Exception:
+                pass
+
+        # Recreate label
+        if hasattr(self, 'image_label') and self.image_label:
+            self.image_label.destroy()
+
+        if new_image:
+            self.image_ref = new_image # Keep ref
+            self.image_label = ctk.CTkLabel(self, fg_color="transparent", text="", image=new_image)
         else:
-            self.image_label.configure(image=None, text="🖼️")
+            self.image_ref = None
+            self.image_label = ctk.CTkLabel(self, fg_color="transparent", text="⚠️" if resolved_path else "🖼️", 
+                                          text_color=TEXT_MUTED, font=('Segoe UI', 32), width=90, height=90)
+
+        self.image_label.grid(row=0, column=0, padx=5, pady=(5,0))
 
     def _on_level_change(self, value):
         # CTkComboBox calls command with value
@@ -198,9 +221,15 @@ class DeckBuilderFrame(ctk.CTkFrame):
         ctk.CTkCheckBox(filter_frame, text="Owned", variable=self.owned_only_var, 
                         command=self.filter_cards, checkbox_width=24, checkbox_height=24, font=FONT_SMALL).pack(side=tk.LEFT, padx=5)
         
+        # Add Button (Packed first to stick to bottom)
+        add_btn = create_styled_button(left_panel, text="➕ Add to Deck", 
+                                       command=self.add_selected_to_deck,
+                                       style_type='accent')
+        add_btn.pack(side=tk.BOTTOM, fill=tk.X, pady=10, padx=10)
+
         # Card List Treeview
         list_container = ctk.CTkFrame(left_panel, fg_color=BG_MEDIUM)
-        list_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+        list_container.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
         
         self.card_tree = ttk.Treeview(list_container, columns=('name', 'rarity', 'type'), 
                                       show='tree headings', style="DeckList.Treeview")
@@ -222,12 +251,6 @@ class DeckBuilderFrame(ctk.CTkFrame):
         
         # Double-click to add
         self.card_tree.bind('<Double-1>', lambda e: self.add_selected_to_deck())
-        
-        # Add Button
-        add_btn = create_styled_button(left_panel, text="➕ Add to Deck", 
-                                       command=self.add_selected_to_deck,
-                                       style_type='accent')
-        add_btn.pack(fill=tk.X, pady=10, padx=10)
         
         # === Right Panel: Deck & Stats ===
         right_panel = ctk.CTkFrame(self, fg_color="transparent")
