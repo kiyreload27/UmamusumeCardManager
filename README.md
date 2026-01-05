@@ -1,14 +1,15 @@
 # Umamusume Support Card Manager
 
-A tool for managing support cards and their effects in Umamusume (Granblue Fantasy Relink).
+A tool for managing support cards and their effects in Umamusume.
 
 ## Features
 
-- Web scraping of support card data from GameTora
-- Database storage of card information including effects at different levels
-- GUI application for viewing and managing support cards
-- Deck building functionality
-- Character art downloading
+- **Cards Management**: View and manage your support cards collection.
+- **Deck Builder**: Build and optimize decks with your owned cards.
+- **Effects Search**: Search for specific effects across your owned cards (e.g., "Friendship Bonus", "Skill Pt Bonus").
+- **Web Scraping**: Integrated GameTora scraper to fetch the latest card data.
+- **Auto-Updater**: Automatically improved application updates.
+- **Maintenance Scripts**: Suite of scripts for database repair and deep scraping.
 
 ## Project Structure
 
@@ -23,8 +24,15 @@ A tool for managing support cards and their effects in Umamusume (Granblue Fanta
 │   ├── db_init.py          # Database initialization
 │   └── db_queries.py       # Database queries
 ├── gui/                    # GUI components
+│   ├── main_window.py      # Main application window
+│   ├── card_view.py        # Card list and details view
+│   ├── deck_builder.py     # Deck construction view
+│   ├── effects_view.py     # Effects search view
+│   └── ...
 ├── updater/                # Update checking functionality
-├── database/               # Database files
+├── maintenance_scripts/    # Database repair and utility scripts
+├── config/                 # Configuration files
+├── database/               # Database files storage
 ├── images/                 # Character art images
 ├── build/                  # Build artifacts
 └── dist/                   # Distribution files
@@ -32,9 +40,9 @@ A tool for managing support cards and their effects in Umamusume (Granblue Fanta
 
 ## Installation
 
-1. Clone the repository
-2. Install dependencies: `pip install -r requirements.txt`
-3. Run the application: `python main.py`
+1. Clone the repository.
+2. Install dependencies: `pip install -r requirements.txt`.
+3. Run the application: `python main.py`.
 
 ## Usage
 
@@ -44,6 +52,7 @@ python main.py
 ```
 
 ### Scraping Mode
+To manually run the scraper:
 ```bash
 python main.py --scrape
 ```
@@ -51,17 +60,17 @@ python main.py --scrape
 ## Development
 
 ### Code Structure
-- `main.py`: Entry point and argument parsing
-- `scraper/gametora_scraper.py`: Web scraping logic
-- `db/db_init.py`: Database schema initialization
-- `gui/`: GUI components (MainWindow, views, etc.)
-- `updater/update_checker.py`: Update checking functionality
+- `main.py`: Entry point and argument parsing.
+- `gui/`: Contains all CustomTkinter-based UI components.
+- `db/`: Handles SQLite database interactions.
+- `scraper/`: Logic for fetching data from GameTora.
+- `maintenance_scripts/`: Tools for fixing database inconsistencies or re-fetching data.
 
 ### Contributing
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
+1. Fork the repository.
+2. Create a feature branch.
+3. Make your changes.
+4. Submit a pull request.
 
 ## License
 MIT
