@@ -98,276 +98,170 @@ def scrape_track_list(page):
 
 
 def scrape_track_detail(page, track_url):
-    """Scrape a single track's detail page to get course list"""
+    """Scrape a single track's detail page to get ALL courses and their metadata.
+    
+    GameTora lists courses as h2 headings (e.g. '1200 m・Turf') with a Japanese
+    middle dot (U+30FB). ALL course data is inline on the same page — no navigation
+    needed. Each course section contains Phases, Corners, Straights, and Other data.
+    """
     logger.info(f"  Loading track detail: {track_url}")
     page.goto(track_url, timeout=60000)
     page.wait_for_load_state("networkidle")
     page.wait_for_timeout(3000)
 
-    # Scroll to load all content
-    for _ in range(3):
+    # Scroll to ensure all lazy-loaded content is rendered
+    for _ in range(10):
         page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
         page.wait_for_timeout(500)
+    page.evaluate("window.scrollTo(0, 0)")
+    page.wait_for_timeout(1000)
 
-    # Extract course list and track info
+    # Extract ALL courses and their metadata in a single JS call
     track_data = page.evaluate("""
         () => {
             const data = {
                 courses: [],
-                location: null,
-                direction: null
+                location: null
             };
-            
-            // Try to find track location/direction from page text
-            const bodyText = document.body.innerText;
-            
-            // Look for direction indicators
-            if (bodyText.includes('Left')) data.direction = 'Left';
-            else if (bodyText.includes('Right')) data.direction = 'Right';
-            else if (bodyText.includes('Straight')) data.direction = 'Straight';
-            
-            // Find course links - they contain distance and surface info
-            // Pattern: "1200 m · Turf" or similar
-            const allLinks = Array.from(document.querySelectorAll('a'));
-            const courseLinks = allLinks.filter(a => {
-                const text = a.textContent.trim();
-                return text.match(/\\d+\\s*m\\s*[·.]\\s*(Turf|Dirt)/i);
+
+            // Find all h2 course headings using Japanese middle dot
+            const h2s = Array.from(document.querySelectorAll('h2'));
+            const courseH2s = h2s.filter(h => {
+                const t = h.textContent.trim();
+                return /\\d+\\s*m\\s*[\\u30FB\\u00B7]\\s*(Turf|Dirt)/i.test(t);
             });
-            
-            for (const link of courseLinks) {
-                const text = link.textContent.trim();
-                const href = link.href || link.getAttribute('href') || '';
-                
-                // Parse distance and surface
-                const match = text.match(/(\\d+)\\s*m\\s*[·.]\\s*(Turf|Dirt)/i);
-                if (match) {
-                    data.courses.push({
-                        distance: parseInt(match[1]),
-                        surface: match[2],
-                        text: text,
-                        url: href
-                    });
+
+            for (const h2 of courseH2s) {
+                const headerText = h2.textContent.trim();
+                const hMatch = headerText.match(/(\\d+)\\s*m\\s*[\\u30FB\\u00B7]\\s*(Turf|Dirt)/i);
+                if (!hMatch) continue;
+
+                const distance = parseInt(hMatch[1]);
+                const surface = hMatch[2];
+
+                // Collect text from h2's siblings until the next course h2.
+                // This ensures we only get THIS course's data.
+                const parent = h2.parentElement;
+                const siblings = Array.from(parent.children);
+                const myIdx = siblings.indexOf(h2);
+                let sectionText = '';
+                for (let j = myIdx; j < siblings.length; j++) {
+                    if (j > myIdx && siblings[j].tagName === 'H2') break;
+                    sectionText += (siblings[j].innerText || '') + '\\n';
                 }
-            }
-            
-            // If no links found, try looking for text-based course references
-            if (data.courses.length === 0) {
-                const textNodes = Array.from(document.querySelectorAll('div, span, p'));
-                for (const node of textNodes) {
-                    if (node.children.length > 0) continue;
-                    const text = node.textContent.trim();
-                    const match = text.match(/(\\d+)\\s*m\\s*[·.]\\s*(Turf|Dirt)/i);
-                    if (match && !data.courses.some(c => c.distance === parseInt(match[1]) && c.surface === match[2])) {
-                        data.courses.push({
-                            distance: parseInt(match[1]),
-                            surface: match[2],
-                            text: text,
-                            url: ''
-                        });
+
+                // "Version for download" separates viz labels from actual data
+                const vIdx = sectionText.indexOf('Version for download');
+                const dataText = vIdx !== -1 ? sectionText.substring(vIdx) : sectionText;
+
+                // Locate data sub-section boundaries
+                const phasesIdx = dataText.indexOf('Phases');
+                const cornersIdx = dataText.indexOf('Corners');
+                const straightsIdx = dataText.indexOf('Straights');
+                // Find 'Other' AFTER Straights to avoid matching label text
+                const otherIdx = straightsIdx !== -1
+                    ? dataText.indexOf('Other', straightsIdx + 10)
+                    : dataText.lastIndexOf('Other');
+
+                const phaseBlock = (phasesIdx !== -1 && cornersIdx > phasesIdx)
+                    ? dataText.substring(phasesIdx, cornersIdx) : '';
+                const cornerBlock = (cornersIdx !== -1 && straightsIdx > cornersIdx)
+                    ? dataText.substring(cornersIdx, straightsIdx) : '';
+                const straightBlock = (straightsIdx !== -1 && otherIdx > straightsIdx)
+                    ? dataText.substring(straightsIdx, otherIdx)
+                    : (straightsIdx !== -1 ? dataText.substring(straightsIdx) : '');
+                const otherBlock = otherIdx !== -1 ? dataText.substring(otherIdx) : '';
+
+                // ── Phases ──
+                const phases = {};
+                const phaseNames = ['Early-Race', 'Mid-Race', 'Late-Race', 'Last Spurt'];
+                for (const phase of phaseNames) {
+                    const re = new RegExp(
+                        phase + '[\\\\s\\\\S]*?Start:\\\\s*(\\\\d+)\\\\s*m[\\\\s\\\\S]*?End:\\\\s*(\\\\d+)\\\\s*m', 'i'
+                    );
+                    const m = phaseBlock.match(re);
+                    if (m) {
+                        phases[phase] = { start: parseInt(m[1]), end: parseInt(m[2]) };
                     }
                 }
+
+                // ── Corners ──
+                const corners = [];
+                const cornerRe = /Corner\\s*(\\d+)[\\s\\S]*?Start:\\s*(\\d+)\\s*m[\\s\\S]*?End:\\s*(\\d+)\\s*m/gi;
+                let cm;
+                while ((cm = cornerRe.exec(cornerBlock)) !== null) {
+                    corners.push({
+                        name: 'Corner ' + cm[1],
+                        start: parseInt(cm[2]),
+                        end: parseInt(cm[3])
+                    });
+                }
+
+                // ── Straights ──
+                const straights = [];
+                const strRe = /Straight\\s*(\\d+)[\\s\\S]*?Start:\\s*(\\d+)\\s*m[\\s\\S]*?End:\\s*(\\d+)\\s*m/gi;
+                let sm;
+                while ((sm = strRe.exec(straightBlock)) !== null) {
+                    straights.push({
+                        name: 'Straight ' + sm[1],
+                        start: parseInt(sm[2]),
+                        end: parseInt(sm[3])
+                    });
+                }
+
+                // ── Other ──
+                const other = {};
+                const pkRe = /Position\\s*Keep[\\s\\S]*?Start:\\s*(\\d+)\\s*m[\\s\\S]*?End:\\s*(\\d+)\\s*m/i;
+                const pkM = otherBlock.match(pkRe);
+                if (pkM) {
+                    other['position_keep'] = { start: parseInt(pkM[1]), end: parseInt(pkM[2]) };
+                }
+
+                const spurtRe = /Spurt[\\s\\S]*?Start:\\s*(\\d+)\\s*m/i;
+                const spM = otherBlock.match(spurtRe);
+                if (spM) {
+                    other['spurt'] = { start: parseInt(spM[1]) };
+                    const rest = otherBlock.substring(otherBlock.indexOf(spM[0]) + spM[0].length);
+                    const noteRe = /^\\s*(Final Corner|Corner|Straight)/im;
+                    const noteM = rest.match(noteRe);
+                    if (noteM) other['spurt']['note'] = noteM[1];
+                }
+
+                const statRe = /Stat\\s*Thresholds[\\s\\S]*?\\n\\s*(.+)/i;
+                const stM = otherBlock.match(statRe);
+                if (stM) {
+                    other['stat_thresholds'] = stM[1].trim();
+                }
+
+                // ── Final straight length ──
+                let finalStraightLen = null;
+                if (straights.length > 0) {
+                    const last = straights[straights.length - 1];
+                    finalStraightLen = (last.end - last.start) + ' m';
+                }
+
+                data.courses.push({
+                    distance,
+                    surface,
+                    text: headerText,
+                    direction: null,
+                    corner_count: corners.length,
+                    final_straight_length: finalStraightLen,
+                    slope_info: null,
+                    phases,
+                    corners,
+                    straights,
+                    other,
+                    raw_text: dataText.substring(0, 3000)
+                });
             }
-            
+
             return data;
         }
     """)
 
     logger.info(f"    Found {len(track_data['courses'])} courses")
     return track_data
-
-
-def scrape_course_metadata(page, track_url, course):
-    """Scrape detailed metadata for a specific course from the track page.
-    
-    On GameTora, courses are shown as sections on the track page itself.
-    Each course has a metadata table with Phases, Corners, Straights, Other info.
-    """
-    # The course detail is typically shown on the same track page when scrolled
-    # or it might be a separate section. We need to find the course section
-    # and extract the metadata table.
-    
-    course_distance = course['distance']
-    course_surface = course['surface']
-    
-    logger.info(f"    Scraping metadata for {course_distance}m {course_surface}...")
-
-    # Navigate to the track page with the course anchor if needed  
-    course_url = course.get('url', '')
-    if course_url and course_url.startswith('http'):
-        page.goto(course_url, timeout=60000)
-        page.wait_for_load_state("networkidle")
-        page.wait_for_timeout(2000)
-    
-    # Scroll to make sure the course content is loaded
-    for _ in range(5):
-        page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-        page.wait_for_timeout(400)
-    page.evaluate("window.scrollTo(0, 0)")
-    page.wait_for_timeout(500)
-
-    # Extract course metadata by looking for the section with matching distance/surface
-    metadata = page.evaluate("""
-        (params) => {
-            const { distance, surface } = params;
-            const courseLabel = distance + ' m · ' + surface;
-            const altLabel = distance + ' m \\u00b7 ' + surface;
-            
-            const result = {
-                direction: null,
-                corner_count: 0,
-                final_straight_length: null,
-                slope_info: null,
-                phases: {},
-                corners: [],
-                straights: [],
-                other: {},
-                raw_text: ''
-            };
-            
-            // Find the course section - look for h2/h3/div with the course title
-            const allElements = Array.from(document.querySelectorAll('h1, h2, h3, h4, div, span'));
-            let sectionRoot = null;
-            
-            for (const el of allElements) {
-                const text = el.textContent.trim();
-                if ((text === courseLabel || text === altLabel || 
-                     text.includes(distance + ' m') && text.includes(surface)) &&
-                    el.children.length <= 2) {
-                    // Found the course header - look for the metadata container
-                    sectionRoot = el;
-                    break;
-                }
-            }
-            
-            if (!sectionRoot) {
-                // Try broader search
-                const bodyText = document.body.innerText;
-                if (bodyText.includes(courseLabel) || bodyText.includes(altLabel)) {
-                    result.raw_text = 'Course found but could not isolate section';
-                }
-                return result;
-            }
-            
-            // Find the metadata container - it's usually in a parent or sibling section
-            let container = sectionRoot.parentElement;
-            let attempts = 0;
-            while (container && attempts < 10) {
-                const inner = container.innerText;
-                if (inner.includes('Phases') && inner.includes('Corners') && 
-                    (inner.includes('Straights') || inner.includes('Straight'))) {
-                    break;
-                }
-                container = container.parentElement;
-                attempts++;
-            }
-            
-            if (!container || attempts >= 10) {
-                // Try finding the metadata by looking at all visible text after the course header
-                result.raw_text = 'Metadata container not found';
-                return result;
-            }
-            
-            const fullText = container.innerText;
-            result.raw_text = fullText.substring(0, 3000);
-            
-            // Parse Direction
-            const dirMatch = fullText.match(/Direction[:\\s]*(Left|Right|Straight)/i);
-            if (dirMatch) result.direction = dirMatch[1];
-            
-            // Parse Phases
-            const phaseNames = ['Early-Race', 'Mid-Race', 'Late-Race', 'Last Spurt'];
-            for (const phase of phaseNames) {
-                const phaseRegex = new RegExp(phase + '[\\\\s\\\\S]*?Start:\\\\s*(\\\\d+)\\\\s*m[\\\\s\\\\S]*?End:\\\\s*(\\\\d+)\\\\s*m', 'i');
-                const match = fullText.match(phaseRegex);
-                if (match) {
-                    result.phases[phase] = {
-                        start: parseInt(match[1]),
-                        end: parseInt(match[2])
-                    };
-                }
-            }
-            
-            // Parse Corners
-            const cornerRegex = /Corner\\s*(\\d+)\\s*[\\s\\S]*?Start:\\s*(\\d+)\\s*m[\\s\\S]*?End:\\s*(\\d+)\\s*m/gi;
-            let cornerMatch;
-            const cornerText = fullText;
-            const cornerMatches = cornerText.match(/Corner\\s*\\d+/gi);
-            if (cornerMatches) {
-                result.corner_count = cornerMatches.length;
-                
-                // Try to extract each corner's data
-                for (const cm of cornerMatches) {
-                    const num = cm.match(/\\d+/)[0];
-                    const cornerPattern = new RegExp('Corner\\\\s*' + num + '[\\\\s\\\\S]*?Start:\\\\s*(\\\\d+)\\\\s*m[\\\\s\\\\S]*?End:\\\\s*(\\\\d+)\\\\s*m', 'i');
-                    const cd = fullText.match(cornerPattern);
-                    if (cd) {
-                        result.corners.push({
-                            name: 'Corner ' + num,
-                            start: parseInt(cd[1]),
-                            end: parseInt(cd[2])
-                        });
-                    }
-                }
-            }
-            
-            // Parse Straights
-            const straightRegex = /Straight\\s*(\\d+)[\\s\\S]*?Start:\\s*(\\d+)\\s*m[\\s\\S]*?End:\\s*(\\d+)\\s*m/gi;
-            let straightMatch;
-            while ((straightMatch = straightRegex.exec(fullText)) !== null) {
-                result.straights.push({
-                    name: 'Straight ' + straightMatch[1],
-                    start: parseInt(straightMatch[2]),
-                    end: parseInt(straightMatch[3])
-                });
-            }
-            
-            // Parse Final Straight
-            const finalMatch = fullText.match(/Final\\s*(?:Straight|Spurt)[\\s\\S]*?(\\d+)\\s*m/i);
-            if (finalMatch) {
-                result.final_straight_length = finalMatch[1] + ' m';
-            }
-            
-            // Parse Other section
-            // Position Keep
-            const pkMatch = fullText.match(/Position\\s*Keep[\\s\\S]*?Start:\\s*(\\d+)\\s*m[\\s\\S]*?End:\\s*(\\d+)\\s*m/i);
-            if (pkMatch) {
-                result.other['position_keep'] = {
-                    start: parseInt(pkMatch[1]),
-                    end: parseInt(pkMatch[2])
-                };
-            }
-            
-            // Spurt
-            const spurtMatch = fullText.match(/Spurt[\\s\\S]*?Start:\\s*(\\d+)\\s*m/i);
-            if (spurtMatch) {
-                result.other['spurt'] = {
-                    start: parseInt(spurtMatch[1]),
-                    note: ''
-                };
-                // Check for Final Corner note
-                const fcMatch = fullText.match(/Spurt[\\s\\S]*?(Final\\s*Corner)/i);
-                if (fcMatch) {
-                    result.other['spurt']['note'] = fcMatch[1];
-                }
-            }
-            
-            // Stat Thresholds
-            const statMatch = fullText.match(/Stat\\s*Thresholds[\\s\\S]*?([\\w\\s]+?)(?=\\n|$)/i);
-            if (statMatch) {
-                result.other['stat_thresholds'] = statMatch[1].trim();
-            }
-            
-            // Slope info
-            const slopeMatch = fullText.match(/(Uphill|Downhill|Flat)[\\s\\S]*?(\\d+)\\s*m/i);
-            if (slopeMatch) {
-                result.slope_info = slopeMatch[0].substring(0, 100);
-            }
-            
-            return result;
-        }
-    """, {"distance": course_distance, "surface": course_surface})
-
-    return metadata
 
 
 def download_track_image(img_url, track_name):
@@ -574,23 +468,17 @@ def run_track_scraper():
                         logger.info(f"    Deprecated course: {dist}m {surf}")
                 conn.commit()
 
-                # Scrape each course's detailed metadata
+                # Save each course (metadata is already embedded from scrape_track_detail)
                 for course in track_detail['courses']:
                     try:
-                        metadata = scrape_course_metadata(page, track['url'], course)
-                        is_new = save_course_to_db(conn, track_id, course, metadata, track['url'])
+                        is_new = save_course_to_db(conn, track_id, course, course, track['url'])
                         if is_new:
                             courses_added += 1
                         else:
                             courses_updated += 1
                     except Exception as e:
-                        logger.error(f"    Error scraping course {course['distance']}m {course['surface']}: {e}")
-                        # Save with minimal data even if metadata scraping fails
-                        try:
-                            save_course_to_db(conn, track_id, course, {}, track['url'])
-                            courses_added += 1
-                        except Exception:
-                            errors += 1
+                        logger.error(f"    Error saving course {course['distance']}m {course['surface']}: {e}")
+                        errors += 1
 
                 time.sleep(0.5)  # Be respectful to the server
 
