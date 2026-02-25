@@ -400,10 +400,54 @@ def init_database():
         )
     """)
     
+    # ── Track tables (additive only — no existing tables modified) ──
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS tracks (
+            track_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            location TEXT,
+            image_path TEXT,
+            image_url TEXT,
+            gametora_url TEXT UNIQUE,
+            is_active INTEGER DEFAULT 1
+        )
+    """)
+    
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS courses (
+            course_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            track_id INTEGER,
+            distance INTEGER,
+            surface TEXT,
+            direction TEXT,
+            corner_count INTEGER,
+            final_straight_length TEXT,
+            slope_info TEXT,
+            weather_data TEXT,
+            phases_json TEXT,
+            corners_json TEXT,
+            straights_json TEXT,
+            other_json TEXT,
+            raw_metadata_json TEXT,
+            gametora_url TEXT UNIQUE,
+            is_active INTEGER DEFAULT 1,
+            FOREIGN KEY (track_id) REFERENCES tracks(track_id)
+        )
+    """)
+    
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS scraper_meta (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            scraper_type TEXT UNIQUE,
+            last_run_timestamp TEXT
+        )
+    """)
+    
     # Create indexes for performance
     cur.execute("CREATE INDEX IF NOT EXISTS idx_effects_card_level ON support_effects(card_id, level)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_hints_card ON support_hints(card_id)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_events_card ON support_events(card_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_courses_track ON courses(track_id)")
     
     conn.commit()
     conn.close()
@@ -1094,3 +1138,94 @@ def get_cards_with_skill(skill_name):
     results.sort(key=lambda x: (rarity_map.get(x['rarity'], 0), x['name']), reverse=True)
     
     return results
+
+# ============================================
+# Track Queries
+# ============================================
+
+def get_all_tracks():
+    """Get all active tracks"""
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT t.track_id, t.name, t.location, t.image_path,
+                   COUNT(c.course_id) as course_count
+            FROM tracks t
+            LEFT JOIN courses c ON t.track_id = c.track_id AND c.is_active = 1
+            WHERE t.is_active = 1
+            GROUP BY t.track_id
+            ORDER BY t.name
+        """)
+        rows = cur.fetchall()
+    except sqlite3.OperationalError:
+        rows = []  # Table doesn't exist yet
+    conn.close()
+    return rows
+
+def get_track_courses(track_id):
+    """Get all active courses for a track"""
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT course_id, distance, surface, direction, corner_count,
+                   final_straight_length
+            FROM courses
+            WHERE track_id = ? AND is_active = 1
+            ORDER BY surface, distance
+        """, (track_id,))
+        rows = cur.fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+    conn.close()
+    return rows
+
+def get_course_detail(course_id):
+    """Get full course detail including JSON metadata"""
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT c.course_id, c.distance, c.surface, c.direction,
+                   c.corner_count, c.final_straight_length, c.slope_info,
+                   c.weather_data, c.phases_json, c.corners_json,
+                   c.straights_json, c.other_json, c.raw_metadata_json,
+                   t.name as track_name
+            FROM courses c
+            JOIN tracks t ON c.track_id = t.track_id
+            WHERE c.course_id = ?
+        """, (course_id,))
+        row = cur.fetchone()
+    except sqlite3.OperationalError:
+        row = None
+    conn.close()
+    return row
+
+def get_scraper_timestamp(scraper_type):
+    """Get last run timestamp for a scraper type"""
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT last_run_timestamp FROM scraper_meta WHERE scraper_type = ?", (scraper_type,))
+        row = cur.fetchone()
+        result = row[0] if row else None
+    except sqlite3.OperationalError:
+        result = None
+    conn.close()
+    return result
+
+def set_scraper_timestamp(scraper_type, timestamp):
+    """Set last run timestamp for a scraper type"""
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            INSERT INTO scraper_meta (scraper_type, last_run_timestamp)
+            VALUES (?, ?)
+            ON CONFLICT(scraper_type) DO UPDATE SET last_run_timestamp = ?
+        """, (scraper_type, timestamp, timestamp))
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+    conn.close()

@@ -15,6 +15,7 @@ from gui.card_view import CardListFrame
 from gui.effects_view import EffectsFrame
 from gui.hints_skills_view import SkillSearchFrame
 from gui.deck_skills_view import DeckSkillsFrame
+from gui.track_view import TrackViewFrame
 from gui.deck_builder import DeckBuilderFrame
 from gui.update_dialog import show_update_dialog
 from gui.theme import (
@@ -165,6 +166,11 @@ class MainWindow:
         # Deck Skills Tab
         self.deck_skills_frame = DeckSkillsFrame(tab_skills)
         self.deck_skills_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Track Tab
+        tab_tracks = self.tabview.add("  🏟️ Track  ")
+        self.track_frame = TrackViewFrame(tab_tracks)
+        self.track_frame.pack(fill=tk.BOTH, expand=True)
     
     def create_status_bar(self, parent):
         """Create status bar at bottom"""

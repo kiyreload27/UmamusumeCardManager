@@ -27,6 +27,24 @@ def run_scraper():
             pass
         sys.exit(1)
 
+def run_track_scraper():
+    try:
+        from scraper.track_scraper import run_track_scraper as scrape_tracks
+        scrape_tracks()
+    except Exception as e:
+        import traceback
+        error_msg = f"An error occurred while running the track scraper:\n\n{e}\n\n{traceback.format_exc()}"
+        logging.error(error_msg)
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror("Track Scraper Error", error_msg)
+        except:
+            pass
+        sys.exit(1)
+
 def run_gui():
     try:
         from gui.main_window import MainWindow
@@ -51,16 +69,22 @@ def main():
         description="Umamusume Support Card Manager",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
-  python main.py           # Launch the GUI (default)
-  python main.py --gui     # Launch the GUI
-  python main.py --scrape  # Run the web scraper
+  python main.py                # Launch the GUI (default)
+  python main.py --gui          # Launch the GUI
+  python main.py --scrape       # Run the support card scraper
+  python main.py --scrape-tracks  # Run the racetrack scraper
         """
     )
     
     parser.add_argument(
         '--scrape', 
         action='store_true',
-        help='Run the web scraper to fetch data from GameTora'
+        help='Run the web scraper to fetch support card data from GameTora'
+    )
+    parser.add_argument(
+        '--scrape-tracks', 
+        action='store_true',
+        help='Run the racetrack scraper to fetch track/course data from GameTora'
     )
     parser.add_argument(
         '--gui', 
@@ -71,8 +95,11 @@ def main():
     args = parser.parse_args()
     
     if args.scrape:
-        print("Starting web scraper...")
+        print("Starting support card scraper...")
         run_scraper()
+    elif args.scrape_tracks:
+        print("Starting racetrack scraper...")
+        run_track_scraper()
     else:
         # Default to GUI
         print("Launching Umamusume Support Card Manager...")
