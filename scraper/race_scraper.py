@@ -87,20 +87,15 @@ def scrape_all_races(page):
             # Extract data from the modal
             race = page.evaluate("""
                 () => {
-                    const modals = Array.from(document.querySelectorAll('div[role="dialog"], div')).filter(d => {
-                        const style = window.getComputedStyle(d);
-                        const zIndex = parseInt(style.zIndex) || 0;
-                        // Find the overlay/modal that is visible
-                        return zIndex > 50 && d.innerText.length > 20 && d.innerText.length < 3000 && d.offsetParent !== null;
+                    const modals = Array.from(document.querySelectorAll('div[role="dialog"]')).filter(d => {
+                        // Find the modal that is visible
+                        return d.innerText.length > 20 && d.innerText.length < 3000 && d.offsetParent !== null;
                     });
                     
                     if (modals.length === 0) return null;
                     
-                    const modal = modals.sort((a, b) => {
-                        const zA = parseInt(window.getComputedStyle(a).zIndex) || 0;
-                        const zB = parseInt(window.getComputedStyle(b).zIndex) || 0;
-                        return zB - zA;
-                    })[0];
+                    // If multiple, just take the last one in DOM (usually the active one)
+                    const modal = modals[modals.length - 1];
                     
                     const text = modal.innerText;
                     const lines = text.split('\\n').map(l => l.trim()).filter(l => l.length > 0);

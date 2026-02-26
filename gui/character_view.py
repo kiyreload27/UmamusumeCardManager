@@ -22,7 +22,7 @@ from gui.theme import (
     create_styled_entry, create_styled_button
 )
 from utils import resolve_image_path
-from PIL import Image, ImageTk
+from PIL import Image
 
 # Aptitude grade colors (S is best, G is worst)
 APTITUDE_COLORS = {
@@ -123,16 +123,17 @@ class CharacterViewFrame(ctk.CTkFrame):
         self.char_scroll = ctk.CTkScrollableFrame(left_frame, fg_color=BG_DARK,
                                                     corner_radius=0)
         self.char_scroll.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
-        # Configure 3 columns for the grid
-        for col in range(3):
-            self.char_scroll.columnconfigure(col, weight=1)
+        
+        # Configure the grid columns
+        self.char_scroll.grid_columnconfigure(0, weight=1)
+        self.char_scroll.grid_columnconfigure(1, weight=1)
+        self.char_scroll.grid_columnconfigure(2, weight=1)
 
         # ─── RIGHT PANEL: Character Detail ───
         self.detail_frame = ctk.CTkScrollableFrame(self, fg_color=BG_MEDIUM, corner_radius=12)
         self.detail_frame.grid(row=0, column=1, sticky="nsew", padx=(5, 0), pady=0)
         self.detail_frame.columnconfigure(0, weight=1)
 
-        # Empty state
         self.empty_label = ctk.CTkLabel(
             self.detail_frame,
             text="← Select a character\nto see their aptitude data",
@@ -141,6 +142,21 @@ class CharacterViewFrame(ctk.CTkFrame):
             justify="center"
         )
         self.empty_label.pack(expand=True, pady=100)
+
+    def _propagate_scroll(self, event, scroll_frame):
+        """Manually propagate mouse wheel events to a specific scrollable canvas"""
+        try:
+            scroll_frame._parent_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        except:
+            pass
+
+    def _bind_scroll_recursive(self, widget, scroll_frame, depth=0):
+        """Recursively bind mouse wheel, limiting depth to avoid event explosion"""
+        if depth > 2:
+            return
+        widget.bind("<MouseWheel>", lambda e: self._propagate_scroll(e, scroll_frame), add="+")
+        for child in widget.winfo_children():
+            self._bind_scroll_recursive(child, scroll_frame, depth + 1)
 
     def load_characters(self):
         """Load all characters from DB"""
@@ -178,6 +194,8 @@ class CharacterViewFrame(ctk.CTkFrame):
         for idx, char in enumerate(characters):
             row = idx // 3
             col = idx % 3
+            # Ensure row has weight so they don't squash each other
+            self.char_scroll.grid_rowconfigure(row, weight=1, uniform="row")
             self._create_character_card(char, row, col)
 
     def _create_character_card(self, char_data, row, col):
@@ -201,18 +219,19 @@ class CharacterViewFrame(ctk.CTkFrame):
         # Card frame
         card = ctk.CTkFrame(self.char_scroll, fg_color=BG_MEDIUM, corner_radius=10,
                             cursor="hand2")
-        card.grid(row=row, column=col, sticky="nsew", padx=4, pady=4)
-        card.columnconfigure(0, weight=1)
+        card.grid(row=row, column=col, sticky="new", padx=8, pady=8)
+        
+        # Make inner content center aligned
+        card.grid_columnconfigure(0, weight=1)
 
         # Character image
         resolved = resolve_character_image(image_path)
         if resolved:
             try:
                 img = Image.open(resolved)
-                img.thumbnail((80, 80), Image.Resampling.LANCZOS)
-                photo = ImageTk.PhotoImage(img)
-                self._image_refs.append(photo)
-                img_label = ctk.CTkLabel(card, image=photo, text="")
+                ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=(80, 80))
+                self._image_refs.append(ctk_img)
+                img_label = ctk.CTkLabel(card, image=ctk_img, text="")
                 img_label.grid(row=0, column=0, padx=5, pady=(8, 2))
             except Exception:
                 ctk.CTkLabel(card, text="🐴", font=("Segoe UI", 30)).grid(
@@ -253,14 +272,27 @@ class CharacterViewFrame(ctk.CTkFrame):
             card.configure(fg_color=BG_LIGHT)
 
         def on_leave(e):
-            card.configure(fg_color=BG_MEDIUM)
+            if self.current_character != char_id:
+                card.configure(fg_color=BG_MEDIUM)
 
         card.bind("<Enter>", on_enter)
         card.bind("<Leave>", on_leave)
+        card._char_id = char_id
+
+        # Bind scroll events to ensure smooth scrolling over the cards
+        self._bind_scroll_recursive(card, self.char_scroll)
 
     def select_character(self, char_id, char_data):
         """Show full detail for a selected character"""
         self.current_character = char_id
+        
+        # Highlight card
+        for child in self.char_scroll.winfo_children():
+            if hasattr(child, '_char_id'):
+                if child._char_id == char_id:
+                    child.configure(fg_color=BG_LIGHT)
+                else:
+                    child.configure(fg_color=BG_MEDIUM)
 
         # Clear detail panel
         for widget in self.detail_frame.winfo_children():
@@ -284,10 +316,9 @@ class CharacterViewFrame(ctk.CTkFrame):
         if resolved:
             try:
                 img = Image.open(resolved)
-                img.thumbnail((120, 120), Image.Resampling.LANCZOS)
-                photo = ImageTk.PhotoImage(img)
-                self._detail_image_ref = photo
-                ctk.CTkLabel(header_frame, image=photo, text="").pack(pady=(0, 5))
+                ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=(120, 120))
+                self._detail_image_ref = ctk_img
+                ctk.CTkLabel(header_frame, image=ctk_img, text="").pack(pady=(0, 5))
             except Exception:
                 ctk.CTkLabel(header_frame, text="🐴", font=("Segoe UI", 40)).pack(pady=(0, 5))
         else:

@@ -164,6 +164,21 @@ class RaceViewFrame(ctk.CTkFrame):
         )
         self.empty_label.pack(expand=True, pady=100)
 
+    def _propagate_scroll(self, event, scroll_frame):
+        """Manually propagate mouse wheel events to a specific scrollable canvas"""
+        try:
+            scroll_frame._parent_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        except:
+            pass
+
+    def _bind_scroll_recursive(self, widget, scroll_frame, depth=0):
+        """Recursively bind mouse wheel, limiting depth to avoid event explosion"""
+        if depth > 2:
+            return
+        widget.bind("<MouseWheel>", lambda e: self._propagate_scroll(e, scroll_frame), add="+")
+        for child in widget.winfo_children():
+            self._bind_scroll_recursive(child, scroll_frame, depth + 1)
+
     def load_races(self):
         """Load all races from DB"""
         self.races = get_all_races()
@@ -296,13 +311,30 @@ class RaceViewFrame(ctk.CTkFrame):
         def on_enter(e):
             card.configure(fg_color=BG_LIGHT)
         def on_leave(e):
-            card.configure(fg_color=BG_MEDIUM)
+            if self.current_race and self.current_race[0] == race_id:
+                pass
+            else:
+                card.configure(fg_color=BG_MEDIUM)
 
         card.bind("<Enter>", on_enter)
         card.bind("<Leave>", on_leave)
+        card._race_id = race_id
+        
+        # Ensure scroll propagation for the race card
+        self._bind_scroll_recursive(card, self.race_scroll)
 
     def select_race(self, race_data):
         """Show full detail for a selected race"""
+        self.current_race = race_data
+        
+        # Highlight card
+        for child in self.race_scroll.winfo_children():
+            if hasattr(child, '_race_id'):
+                if child._race_id == race_data[0]:
+                    child.configure(fg_color=BG_LIGHT)
+                else:
+                    child.configure(fg_color=BG_MEDIUM)
+
         # Clear detail panel
         for widget in self.detail_frame.winfo_children():
             widget.destroy()
@@ -402,3 +434,6 @@ class RaceViewFrame(ctk.CTkFrame):
         # Bottom padding
         ctk.CTkFrame(section, height=8, fg_color="transparent").grid(
             row=len(rows) + 1, column=0, columnspan=2)
+
+        # Ensure scroll propagation for the detail section
+        self._bind_scroll_recursive(section, self.detail_frame)
