@@ -15,15 +15,20 @@ if getattr(sys, 'frozen', False):
     db_dir = os.path.join(base_dir, "database")
     DB_PATH = os.path.join(db_dir, "umamusume.db")
     
-    # Function to check if DB is effectively empty
+    # Function to check if DB needs seed data (only if totally empty of master data)
     def is_db_empty(path):
         try:
             conn = sqlite3.connect(path)
             cur = conn.cursor()
+            
+            # Check cards - this is our primary indicator of master data
             cur.execute("SELECT COUNT(*) FROM support_cards")
-            count = cur.fetchone()[0]
+            card_count = cur.fetchone()[0]
+            
             conn.close()
-            return count == 0
+            # ONLY overwrite if we have no card data at all. 
+            # If we have cards but no tracks, we are an "old" user and should NOT be overwritten.
+            return card_count == 0
         except:
             return True
 
@@ -104,6 +109,13 @@ def run_migrations():
     try:
         cur.execute("ALTER TABLE support_cards ADD COLUMN image_path TEXT")
         print("Added image_path column to support_cards")
+    except sqlite3.OperationalError:
+        pass # Column already exists
+        
+    # 4. Add map_image_path to courses
+    try:
+        cur.execute("ALTER TABLE courses ADD COLUMN map_image_path TEXT")
+        print("Added map_image_path column to courses")
     except sqlite3.OperationalError:
         pass # Column already exists
         
@@ -211,6 +223,11 @@ def sync_from_seed(seed_path):
         # First, ensure we don't break foreign keys temporarily
         cur.execute("PRAGMA foreign_keys = OFF")
         
+        # Tracks and courses are master data, sync them completely
+        # Delete courses first due to foreign key
+        cur.execute("DELETE FROM main.courses")
+        cur.execute("DELETE FROM main.tracks")
+        
         tables_to_sync = ['support_effects', 'support_hints', 'support_events', 'event_skills']
         for table in tables_to_sync:
             cur.execute(f"DELETE FROM main.{table}")
@@ -294,6 +311,26 @@ def sync_from_seed(seed_path):
                     for sk_name, is_gold, is_or in seed_skills[seed_ev_id]:
                         cur.execute("INSERT INTO main.event_skills (event_id, skill_name, is_gold, is_or) VALUES (?, ?, ?, ?)",
                                     (new_event_id, sk_name, is_gold, is_or))
+
+        # Sync Tracks
+        cur.execute("""
+            INSERT INTO main.tracks (track_id, name, location, image_path, image_url, gametora_url, is_active)
+            SELECT track_id, name, location, image_path, image_url, gametora_url, is_active
+            FROM seed.tracks
+        """)
+        
+        # Sync Courses
+        cur.execute("""
+            INSERT INTO main.courses (course_id, track_id, distance, surface, direction, corner_count, 
+                                     final_straight_length, slope_info, weather_data, phases_json, 
+                                     corners_json, straights_json, other_json, raw_metadata_json, 
+                                     gametora_url, map_image_path, is_active)
+            SELECT course_id, track_id, distance, surface, direction, corner_count, 
+                   final_straight_length, slope_info, weather_data, phases_json, 
+                   corners_json, straights_json, other_json, raw_metadata_json, 
+                   gametora_url, map_image_path, is_active
+            FROM seed.courses
+        """)
 
         cur.execute("PRAGMA foreign_keys = ON")
         conn.commit()
@@ -430,6 +467,7 @@ def init_database():
             other_json TEXT,
             raw_metadata_json TEXT,
             gametora_url TEXT UNIQUE,
+            map_image_path TEXT,
             is_active INTEGER DEFAULT 1,
             FOREIGN KEY (track_id) REFERENCES tracks(track_id)
         )
@@ -1191,7 +1229,7 @@ def get_course_detail(course_id):
                    c.corner_count, c.final_straight_length, c.slope_info,
                    c.weather_data, c.phases_json, c.corners_json,
                    c.straights_json, c.other_json, c.raw_metadata_json,
-                   t.name as track_name
+                   c.map_image_path, t.name as track_name
             FROM courses c
             JOIN tracks t ON c.track_id = t.track_id
             WHERE c.course_id = ?

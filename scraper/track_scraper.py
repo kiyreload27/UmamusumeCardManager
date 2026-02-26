@@ -34,8 +34,11 @@ if getattr(sys, 'frozen', False):
 else:
     ASSETS_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "tracks")
 
+MAPS_PATH = os.path.join(ASSETS_PATH, 'maps')
+
 # Thumbnail size for track images (fits within the app UI)
 TRACK_IMAGE_SIZE = (300, 200)
+MAP_IMAGE_SIZE = (1000, 600)  # Course maps are wider
 
 
 def scrape_track_list(page):
@@ -139,15 +142,25 @@ def scrape_track_detail(page, track_url):
                 const distance = parseInt(hMatch[1]);
                 const surface = hMatch[2];
 
-                // Collect text from h2's siblings until the next course h2.
-                // This ensures we only get THIS course's data.
+                // Collect text and links from h2's siblings until the next course h2.
                 const parent = h2.parentElement;
                 const siblings = Array.from(parent.children);
                 const myIdx = siblings.indexOf(h2);
                 let sectionText = '';
+                let mapImageUrl = null;
                 for (let j = myIdx; j < siblings.length; j++) {
                     if (j > myIdx && siblings[j].tagName === 'H2') break;
-                    sectionText += (siblings[j].innerText || '') + '\\n';
+                    
+                    const sib = siblings[j];
+                    sectionText += (sib.innerText || '') + '\\n';
+                    
+                    // Look for the "Version for download" link
+                    const links = sib.querySelectorAll('a');
+                    for (const a of links) {
+                        if (a.textContent.includes('Version for download')) {
+                            mapImageUrl = a.href;
+                        }
+                    }
                 }
 
                 // "Version for download" separates viz labels from actual data
@@ -252,6 +265,7 @@ def scrape_track_detail(page, track_url):
                     corners,
                     straights,
                     other,
+                    map_image_url: mapImageUrl,
                     raw_text: dataText.substring(0, 3000)
                 });
             }
@@ -301,6 +315,42 @@ def download_track_image(img_url, track_name):
     return None
 
 
+def download_course_map_image(img_url, track_name, distance, surface):
+    """Download and resize a course map image"""
+    os.makedirs(MAPS_PATH, exist_ok=True)
+
+    if not img_url:
+        return None
+
+    # Clean filename: Track_Distance_Surface.png
+    safe_name = re.sub(r'[<>:"/\\|?*]', '_', f"{track_name}_{distance}m_{surface}")
+    file_path = os.path.join(MAPS_PATH, f"{safe_name}.png")
+
+    # Skip if already exists
+    if os.path.exists(file_path):
+        return file_path
+
+    try:
+        # Download
+        response = requests.get(img_url, timeout=15)
+        if response.status_code == 200:
+            img = Image.open(BytesIO(response.content))
+            # No thumbnail resize for maps to keep detail, just ensure it's not insane
+            if img.size[0] > MAP_IMAGE_SIZE[0]:
+                img.thumbnail(MAP_IMAGE_SIZE, Image.Resampling.LANCZOS)
+
+            # Save as PNG
+            img.save(file_path, 'PNG')
+            logger.info(f"    Downloaded map: {safe_name}.png")
+            return file_path
+        else:
+            logger.warning(f"    Failed to download map: HTTP {response.status_code}")
+    except Exception as e:
+        logger.warning(f"    Could not download map for {track_name} {distance}m: {e}")
+
+    return None
+
+
 def save_track_to_db(conn, track_data, image_path):
     """Save or update a track in the database"""
     cur = conn.cursor()
@@ -330,7 +380,7 @@ def save_track_to_db(conn, track_data, image_path):
     return track_id
 
 
-def save_course_to_db(conn, track_id, course, metadata, track_url):
+def save_course_to_db(conn, track_id, course, metadata, track_url, map_image_path=None):
     """Save or update a course in the database"""
     cur = conn.cursor()
 
@@ -373,25 +423,26 @@ def save_course_to_db(conn, track_id, course, metadata, track_url):
                 other_json = COALESCE(?, other_json),
                 raw_metadata_json = ?,
                 gametora_url = ?,
+                map_image_path = COALESCE(?, map_image_path),
                 is_active = 1
             WHERE course_id = ?
         """, (direction, corner_count, final_straight, slope_info,
               phases_json, corners_json, straights_json, other_json,
-              raw_json, course_url, existing[0]))
+              raw_json, course_url, map_image_path, existing[0]))
         logger.info(f"    Updated course: {distance}m {surface}")
         is_new = False
     else:
         # Insert new course
         cur.execute("""
             INSERT INTO courses (track_id, distance, surface, direction,
-                               corner_count, final_straight_length, slope_info,
-                               phases_json, corners_json, straights_json,
-                               other_json, raw_metadata_json, gametora_url)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                corner_count, final_straight_length, slope_info,
+                                phases_json, corners_json, straights_json,
+                                other_json, raw_metadata_json, gametora_url, map_image_path)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (track_id, distance, surface, direction,
               corner_count, final_straight, slope_info,
               phases_json, corners_json, straights_json,
-              other_json, raw_json, course_url))
+              other_json, raw_json, course_url, map_image_path))
         logger.info(f"    Added course: {distance}m {surface}")
         is_new = True
 
@@ -471,7 +522,15 @@ def run_track_scraper():
                 # Save each course (metadata is already embedded from scrape_track_detail)
                 for course in track_detail['courses']:
                     try:
-                        is_new = save_course_to_db(conn, track_id, course, course, track['url'])
+                        # Download course map image
+                        map_image_path = download_course_map_image(
+                            course.get('map_image_url'), 
+                            track['name'], 
+                            course['distance'], 
+                            course['surface']
+                        )
+                        
+                        is_new = save_course_to_db(conn, track_id, course, course, track['url'], map_image_path)
                         if is_new:
                             courses_added += 1
                         else:

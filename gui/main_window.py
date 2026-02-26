@@ -36,7 +36,17 @@ class MainWindow:
         # Initialize CTk root
         self.root = ctk.CTk()
         self.root.title("Umamusume Support Card Manager")
-        self.root.geometry("1400x850") 
+        
+        # Detect screen resolution for better initial scaling
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        
+        # Set a larger default if 1080p+ is detected
+        if screen_width >= 1920:
+            self.root.geometry("1600x900")
+        else:
+            self.root.geometry("1400x850")
+            
         self.root.minsize(1350, 800)
         
         # Set icon

@@ -5,7 +5,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('images', 'images'), ('database/umamusume_seed.db', 'database'), ('version.py', '.'), ('updater', 'updater')],
+    datas=[('images', 'images'), ('assets', 'assets'), ('database/umamusume_seed.db', 'database'), ('version.py', '.'), ('updater', 'updater')],
     hiddenimports=['requests', 'PIL', 'PIL._tkinter_finder'],
     hookspath=[],
     hooksconfig={},

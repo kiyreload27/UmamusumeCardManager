@@ -4,7 +4,7 @@ This file is the single source of truth for the application version.
 """
 
 # Semantic versioning: MAJOR.MINOR.PATCH
-VERSION: str = "14.0.1"
+VERSION: str = "15.1.0"
 
 # Application metadata
 APP_NAME: str = "UmamusumeCardManager"
