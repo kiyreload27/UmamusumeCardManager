@@ -331,6 +331,44 @@ def sync_from_seed(seed_path):
                    gametora_url, map_image_path, is_active
             FROM seed.courses
         """)
+        
+        # Sync Characters (safe — only if seed has the table)
+        try:
+            cur.execute("SELECT COUNT(*) FROM seed.characters")
+            seed_char_count = cur.fetchone()[0]
+            if seed_char_count > 0:
+                cur.execute("DELETE FROM main.characters")
+                cur.execute("""
+                    INSERT INTO main.characters (character_id, name, gametora_id, gametora_url, image_path,
+                                                 turf_aptitude, dirt_aptitude, short_aptitude, mile_aptitude,
+                                                 medium_aptitude, long_aptitude, runner_aptitude, leader_aptitude,
+                                                 betweener_aptitude, chaser_aptitude, is_active)
+                    SELECT character_id, name, gametora_id, gametora_url, image_path,
+                           turf_aptitude, dirt_aptitude, short_aptitude, mile_aptitude,
+                           medium_aptitude, long_aptitude, runner_aptitude, leader_aptitude,
+                           betweener_aptitude, chaser_aptitude, is_active
+                    FROM seed.characters
+                """)
+        except sqlite3.OperationalError:
+            pass  # seed doesn't have characters table yet
+        
+        # Sync Races (safe — only if seed has the table)
+        try:
+            cur.execute("SELECT COUNT(*) FROM seed.races")
+            seed_race_count = cur.fetchone()[0]
+            if seed_race_count > 0:
+                cur.execute("DELETE FROM main.races")
+                cur.execute("""
+                    INSERT INTO main.races (race_id, name_en, name_jp, grade, racetrack, direction,
+                                            participants, terrain, distance_type, distance_meters,
+                                            season, time_of_day, race_date, race_class, gametora_url, is_active)
+                    SELECT race_id, name_en, name_jp, grade, racetrack, direction,
+                           participants, terrain, distance_type, distance_meters,
+                           season, time_of_day, race_date, race_class, gametora_url, is_active
+                    FROM seed.races
+                """)
+        except sqlite3.OperationalError:
+            pass  # seed doesn't have races table yet
 
         cur.execute("PRAGMA foreign_keys = ON")
         conn.commit()
@@ -481,11 +519,57 @@ def init_database():
         )
     """)
     
+    # ── Character tables (additive only — no existing tables modified) ──
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS characters (
+            character_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            gametora_id TEXT UNIQUE,
+            gametora_url TEXT,
+            image_path TEXT,
+            turf_aptitude TEXT,
+            dirt_aptitude TEXT,
+            short_aptitude TEXT,
+            mile_aptitude TEXT,
+            medium_aptitude TEXT,
+            long_aptitude TEXT,
+            runner_aptitude TEXT,
+            leader_aptitude TEXT,
+            betweener_aptitude TEXT,
+            chaser_aptitude TEXT,
+            is_active INTEGER DEFAULT 1
+        )
+    """)
+    
+    # ── Race tables (additive only — no existing tables modified) ──
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS races (
+            race_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name_en TEXT NOT NULL,
+            name_jp TEXT,
+            grade TEXT,
+            racetrack TEXT,
+            direction TEXT,
+            participants INTEGER,
+            terrain TEXT,
+            distance_type TEXT,
+            distance_meters INTEGER,
+            season TEXT,
+            time_of_day TEXT,
+            race_date TEXT,
+            race_class TEXT,
+            gametora_url TEXT UNIQUE,
+            is_active INTEGER DEFAULT 1
+        )
+    """)
+    
     # Create indexes for performance
     cur.execute("CREATE INDEX IF NOT EXISTS idx_effects_card_level ON support_effects(card_id, level)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_hints_card ON support_hints(card_id)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_events_card ON support_events(card_id)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_courses_track ON courses(track_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_characters_name ON characters(name)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_races_grade ON races(grade)")
     
     conn.commit()
     conn.close()
@@ -1267,3 +1351,107 @@ def set_scraper_timestamp(scraper_type, timestamp):
     except sqlite3.OperationalError:
         pass
     conn.close()
+
+# ============================================
+# Character Queries
+# ============================================
+
+def get_all_characters(search_term=None, surface_filter=None, distance_filter=None, strategy_filter=None):
+    """Get all active characters with optional filtering"""
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        query = """
+            SELECT character_id, name, gametora_id, image_path,
+                   turf_aptitude, dirt_aptitude,
+                   short_aptitude, mile_aptitude, medium_aptitude, long_aptitude,
+                   runner_aptitude, leader_aptitude, betweener_aptitude, chaser_aptitude
+            FROM characters
+            WHERE is_active = 1
+        """
+        params = []
+        
+        if search_term:
+            query += " AND name LIKE ?"
+            params.append(f"%{search_term}%")
+        
+        # Filter by minimum aptitude grade in specific categories
+        if surface_filter:
+            query += f" AND (turf_aptitude <= ? OR dirt_aptitude <= ?)"
+            params.extend([surface_filter, surface_filter])
+        
+        query += " ORDER BY name"
+        
+        cur.execute(query, params)
+        rows = cur.fetchall()
+    except sqlite3.OperationalError:
+        rows = []  # Table doesn't exist yet
+    conn.close()
+    return rows
+
+def get_character_count():
+    """Get count of characters in database"""
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT COUNT(*) FROM characters WHERE is_active = 1")
+        count = cur.fetchone()[0]
+    except sqlite3.OperationalError:
+        count = 0
+    conn.close()
+    return count
+
+# ============================================
+# Race Queries
+# ============================================
+
+def get_all_races(search_term=None, grade_filter=None, terrain_filter=None, distance_filter=None):
+    """Get all active races with optional filtering"""
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        query = """
+            SELECT race_id, name_en, name_jp, grade, racetrack, direction,
+                   participants, terrain, distance_type, distance_meters,
+                   season, time_of_day, race_date, race_class
+            FROM races
+            WHERE is_active = 1
+        """
+        params = []
+        
+        if search_term:
+            query += " AND (name_en LIKE ? OR name_jp LIKE ? OR racetrack LIKE ?)"
+            params.extend([f"%{search_term}%", f"%{search_term}%", f"%{search_term}%"])
+        
+        if grade_filter:
+            query += " AND grade = ?"
+            params.append(grade_filter)
+        
+        if terrain_filter:
+            query += " AND terrain = ?"
+            params.append(terrain_filter)
+        
+        if distance_filter:
+            query += " AND distance_type = ?"
+            params.append(distance_filter)
+        
+        query += " ORDER BY grade, distance_meters"
+        
+        cur.execute(query, params)
+        rows = cur.fetchall()
+    except sqlite3.OperationalError:
+        rows = []  # Table doesn't exist yet
+    conn.close()
+    return rows
+
+def get_race_count():
+    """Get count of races in database"""
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT COUNT(*) FROM races WHERE is_active = 1")
+        count = cur.fetchone()[0]
+    except sqlite3.OperationalError:
+        count = 0
+    conn.close()
+    return count

@@ -45,6 +45,42 @@ def run_track_scraper():
             pass
         sys.exit(1)
 
+def run_character_scraper():
+    try:
+        from scraper.character_scraper import run_character_scraper as scrape_chars
+        scrape_chars()
+    except Exception as e:
+        import traceback
+        error_msg = f"An error occurred while running the character scraper:\n\n{e}\n\n{traceback.format_exc()}"
+        logging.error(error_msg)
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror("Character Scraper Error", error_msg)
+        except:
+            pass
+        sys.exit(1)
+
+def run_race_scraper():
+    try:
+        from scraper.race_scraper import run_race_scraper as scrape_races
+        scrape_races()
+    except Exception as e:
+        import traceback
+        error_msg = f"An error occurred while running the race scraper:\n\n{e}\n\n{traceback.format_exc()}"
+        logging.error(error_msg)
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror("Race Scraper Error", error_msg)
+        except:
+            pass
+        sys.exit(1)
+
 def run_gui():
     try:
         from gui.main_window import MainWindow
@@ -69,10 +105,12 @@ def main():
         description="Umamusume Support Card Manager",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
-  python main.py                # Launch the GUI (default)
-  python main.py --gui          # Launch the GUI
-  python main.py --scrape       # Run the support card scraper
-  python main.py --scrape-tracks  # Run the racetrack scraper
+  python main.py                      # Launch the GUI (default)
+  python main.py --gui                # Launch the GUI
+  python main.py --scrape             # Run the support card scraper
+  python main.py --scrape-tracks      # Run the racetrack scraper
+  python main.py --scrape-characters  # Run the character scraper
+  python main.py --scrape-races       # Run the race scraper
         """
     )
     
@@ -85,6 +123,16 @@ def main():
         '--scrape-tracks', 
         action='store_true',
         help='Run the racetrack scraper to fetch track/course data from GameTora'
+    )
+    parser.add_argument(
+        '--scrape-characters', 
+        action='store_true',
+        help='Run the character scraper to fetch character aptitude data from GameTora'
+    )
+    parser.add_argument(
+        '--scrape-races', 
+        action='store_true',
+        help='Run the race scraper to fetch race detail data from GameTora'
     )
     parser.add_argument(
         '--gui', 
@@ -100,6 +148,12 @@ def main():
     elif args.scrape_tracks:
         print("Starting racetrack scraper...")
         run_track_scraper()
+    elif args.scrape_characters:
+        print("Starting character scraper...")
+        run_character_scraper()
+    elif args.scrape_races:
+        print("Starting race scraper...")
+        run_race_scraper()
     else:
         # Default to GUI
         print("Launching Umamusume Support Card Manager...")

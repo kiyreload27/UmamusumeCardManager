@@ -17,6 +17,8 @@ from gui.hints_skills_view import SkillSearchFrame
 from gui.deck_skills_view import DeckSkillsFrame
 from gui.track_view import TrackViewFrame
 from gui.deck_builder import DeckBuilderFrame
+from gui.character_view import CharacterViewFrame
+from gui.race_view import RaceViewFrame
 from gui.update_dialog import show_update_dialog
 from gui.theme import (
     configure_styles, create_styled_button,
@@ -181,6 +183,16 @@ class MainWindow:
         tab_tracks = self.tabview.add("  🏟️ Track  ")
         self.track_frame = TrackViewFrame(tab_tracks)
         self.track_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Characters Tab
+        tab_chars = self.tabview.add("  🐴 Characters  ")
+        self.character_frame = CharacterViewFrame(tab_chars)
+        self.character_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Races Tab
+        tab_races = self.tabview.add("  🏁 Races  ")
+        self.race_frame = RaceViewFrame(tab_races)
+        self.race_frame.pack(fill=tk.BOTH, expand=True)
     
     def create_status_bar(self, parent):
         """Create status bar at bottom"""
