@@ -174,23 +174,47 @@ def scrape_character_detail(page, url):
             };
             
             // Method 2: Look for elements containing aptitude grades near category labels
+            const textContent = document.body.innerText;
+            
+            // First pass: Direct DOM traversal for structured infoboxes (like the Strategy section)
+            // The DOM has <div class="...bold_text...">Strategy</div>
+            // Followed by a row of <div class="...row_split..."><div>Label</div><div>Grade</div></div>
+            const boldTexts = Array.from(document.querySelectorAll('div[class*="bold_text"]'));
+            for (const bt of boldTexts) {
+                const title = bt.textContent.trim();
+                // If it's the "Strategy" section, look at the next sibling row
+                if (title === 'Strategy') {
+                    const parentRow = bt.closest('div[class*="row"]');
+                    if (parentRow && parentRow.nextElementSibling) {
+                        const nextRow = parentRow.nextElementSibling;
+                        const splits = nextRow.querySelectorAll('div[class*="row_split"]');
+                        splits.forEach(split => {
+                            const kids = split.children;
+                            if (kids.length >= 2) {
+                                const label = kids[0].textContent.trim();
+                                const grade = kids[1].textContent.trim();
+                                if (aptCategories.hasOwnProperty(label)) {
+                                    aptCategories[label] = grade;
+                                }
+                            }
+                        });
+                    }
+                }
+            }
+            
+            // Second pass: general proximity scan for remaining ones
             const allDivs = Array.from(document.querySelectorAll('div, span, td'));
             const gradePattern = /^[A-G]$/;
             const sGradePattern = /^S$/;
             
-            // Build a mapping by scanning for category name followed by grade
-            const textContent = document.body.innerText;
-            
-            // Parse aptitudes using proximity-based approach
             for (const category of Object.keys(aptCategories)) {
-                // Find elements that contain exactly this category name
+                if (aptCategories[category]) continue; // Skip if already found
+                
                 const catElements = allDivs.filter(el => {
-                    const text = el.textContent.trim();
-                    return text === category && el.children.length === 0;
+                    return el.textContent.trim() === category && el.children.length === 0;
                 });
                 
                 for (const catEl of catElements) {
-                    // Look at siblings and nearby elements for grade
                     let container = catEl.parentElement;
                     let attempts = 0;
                     while (container && attempts < 5) {
@@ -207,18 +231,17 @@ def scrape_character_detail(page, url):
                         container = container.parentElement;
                         attempts++;
                     }
+                    if (aptCategories[category]) break;
                 }
             }
             
-            // Method 3: Regex fallback - look for patterns like "Turf A" or "Turf: A"
-            if (!aptCategories['Turf']) {
-                for (const [cat, _] of Object.entries(aptCategories)) {
-                    if (aptCategories[cat]) continue;
-                    const regex = new RegExp(cat + '\\\\s*:?\\\\s*([SABCDEFG])', 'i');
-                    const match = textContent.match(regex);
-                    if (match) {
-                        aptCategories[cat] = match[1].toUpperCase();
-                    }
+            // Method 3: Regex fallback
+            for (const cat of Object.keys(aptCategories)) {
+                if (aptCategories[cat]) continue;
+                const regex = new RegExp(cat + '\\\\s*:?\\\\s*([SABCDEFG])', 'i');
+                const match = textContent.match(regex);
+                if (match) {
+                    aptCategories[cat] = match[1].toUpperCase();
                 }
             }
             

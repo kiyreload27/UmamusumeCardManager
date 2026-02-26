@@ -43,197 +43,147 @@ def scrape_all_races(page):
         page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
         page.wait_for_timeout(300)
 
-    # First, extract basic info for all races from the list view
-    logger.info("Extracting race data from page...")
-    races = page.evaluate("""
-        async () => {
-            const races = [];
-            
-            // Find all "Details" buttons/links on the page
-            const detailButtons = Array.from(document.querySelectorAll('button, a, div')).filter(el => {
-                const text = el.textContent.trim();
-                return text === 'Details' && el.children.length === 0;
-            });
-            
-            console.log('Found ' + detailButtons.length + ' Details buttons');
-            
-            for (let idx = 0; idx < detailButtons.length; idx++) {
-                const btn = detailButtons[idx];
-                
-                try {
-                    // Scroll into view and click
-                    btn.scrollIntoView({ behavior: 'instant', block: 'center' });
-                    await new Promise(r => setTimeout(r, 200));
-                    btn.click();
-                    await new Promise(r => setTimeout(r, 800));
-                    
-                    // Find the modal/popup that appeared
-                    const modals = Array.from(document.querySelectorAll('div')).filter(d => {
-                        const style = window.getComputedStyle(d);
-                        const zIndex = parseInt(style.zIndex) || 0;
-                        return zIndex > 50 && d.innerText.length > 20 && d.innerText.length < 3000;
-                    });
-                    
-                    if (modals.length > 0) {
-                        // Get the topmost modal
-                        const modal = modals.sort((a, b) => {
-                            const zA = parseInt(window.getComputedStyle(a).zIndex) || 0;
-                            const zB = parseInt(window.getComputedStyle(b).zIndex) || 0;
-                            return zB - zA;
-                        })[0];
-                        
-                        const modalText = modal.innerText;
-                        const lines = modalText.split('\\n').map(l => l.trim()).filter(l => l.length > 0);
-                        
-                        const race = {
-                            name_en: '',
-                            name_jp: '',
-                            grade: '',
-                            racetrack: '',
-                            direction: '',
-                            participants: null,
-                            terrain: '',
-                            distance_type: '',
-                            distance_meters: null,
-                            season: '',
-                            time_of_day: '',
-                            race_date: '',
-                            race_class: ''
-                        };
-                        
-                        // Parse modal content - look for key-value pairs
-                        for (let i = 0; i < lines.length; i++) {
-                            const line = lines[i];
-                            const nextLine = i + 1 < lines.length ? lines[i + 1] : '';
-                            
-                            // Try to extract race names from first few lines
-                            if (i === 0 && !line.includes(':') && !line.includes('Racetrack')) {
-                                race.name_jp = line;
-                            }
-                            if (i === 1 && !line.includes(':') && !line.includes('Racetrack')) {
-                                race.name_en = line;
-                            }
-                            
-                            // Key-value parsing
-                            if (line.startsWith('Racetrack') || line === 'Racetrack') {
-                                // Value might be on next line or after the label
-                                const val = line.replace('Racetrack', '').trim();
-                                race.racetrack = val || nextLine;
-                            }
-                            if (line.startsWith('Direction') || line === 'Direction') {
-                                const val = line.replace('Direction', '').trim();
-                                race.direction = val || nextLine;
-                            }
-                            if (line.startsWith('Participants') || line === 'Participants') {
-                                const val = line.replace('Participants', '').trim();
-                                const numStr = val || nextLine;
-                                const num = parseInt(numStr);
-                                if (!isNaN(num)) race.participants = num;
-                            }
-                            if (line.startsWith('Grade') || line === 'Grade') {
-                                const val = line.replace('Grade', '').trim();
-                                race.grade = val || nextLine;
-                            }
-                            if (line.startsWith('Terrain') || line === 'Terrain') {
-                                const val = line.replace('Terrain', '').trim();
-                                race.terrain = val || nextLine;
-                            }
-                            if (line.includes('Distance') && (line.includes('type') || line.includes('(type)'))) {
-                                const val = line.replace(/Distance.*?(type\)?)/i, '').trim();
-                                race.distance_type = val || nextLine;
-                            }
-                            if (line.includes('Distance') && (line.includes('meters') || line.includes('(meters)') || line.includes('(m)'))) {
-                                const val = line.replace(/Distance.*?(meters?\)?|m\)?)/i, '').trim();
-                                const numStr = val || nextLine;
-                                const num = parseInt(numStr.replace(/[^0-9]/g, ''));
-                                if (!isNaN(num)) race.distance_meters = num;
-                            }
-                            if (line.startsWith('Season') || line === 'Season') {
-                                const val = line.replace('Season', '').trim();
-                                race.season = val || nextLine;
-                            }
-                            if (line.includes('Time of day') || line.includes('Time of Day') || line === 'Time of day') {
-                                const val = line.replace(/Time of [Dd]ay/, '').trim();
-                                race.time_of_day = val || nextLine;
-                            }
-                        }
-                        
-                        // Also try to get grade from badges/icons in modal
-                        if (!race.grade) {
-                            const gradeMatch = modalText.match(/(G[I1]{1,3}|GII|GIII|OP|Pre-OP)/);
-                            if (gradeMatch) race.grade = gradeMatch[1];
-                        }
-                        
-                        // Get distance if not yet found
-                        if (!race.distance_meters) {
-                            const distMatch = modalText.match(/(\d{3,4})\s*m/);
-                            if (distMatch) race.distance_meters = parseInt(distMatch[1]);
-                        }
-                        
-                        // Get distance type if not yet found
-                        if (!race.distance_type) {
-                            if (race.distance_meters) {
-                                if (race.distance_meters <= 1400) race.distance_type = 'Short';
-                                else if (race.distance_meters <= 1800) race.distance_type = 'Mile';
-                                else if (race.distance_meters <= 2400) race.distance_type = 'Medium';
-                                else race.distance_type = 'Long';
-                            }
-                        }
-                        
-                        // Only add if we got meaningful data
-                        if (race.name_en || race.name_jp || race.racetrack) {
-                            races.push(race);
-                        }
-                    }
-                    
-                    // Close the modal
-                    document.body.click();
-                    await new Promise(r => setTimeout(r, 300));
-                    
-                    // Also try pressing Escape
-                    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-                    await new Promise(r => setTimeout(r, 200));
-                    
-                } catch (err) {
-                    console.log('Error scraping race ' + idx + ': ' + err.message);
-                }
-                
-                // Progress logging
-                if ((idx + 1) % 25 === 0) {
-                    console.log('Processed ' + (idx + 1) + '/' + detailButtons.length + ' races');
-                }
-            }
-            
-            return races;
-        }
-    """)
-
-    # Also try an alternative extraction approach: grab data from the table rows first
-    # before relying solely on modals
+    # Better approach: Python-driven loop to avoid JS timeouts
+    logger.info("Extracting race data...")
+    
+    # 1. Parse list data first
     list_data = page.evaluate("""
         () => {
             const rows = [];
-            // Look for table rows or list entries with race data
             const links = Array.from(document.querySelectorAll('a[href*="/umamusume/races/"]'));
             
             links.forEach(link => {
                 const href = link.href;
-                // Skip if it's just the main races page
                 if (href.endsWith('/races') || href.endsWith('/races/')) return;
                 
                 const container = link.closest('tr, div[class]');
                 if (container) {
-                    const text = container.innerText;
                     rows.push({
                         url: href,
-                        text: text.substring(0, 500)
+                        text: container.innerText.substring(0, 500)
                     });
                 }
             });
-            
             return rows;
         }
     """)
+    
+    # 2. Get locators for all Details buttons
+    detail_buttons = page.locator("text='Details'")
+    count = detail_buttons.count()
+    logger.info(f"Found {count} Details buttons to process")
+    
+    races = []
+    
+    for i in range(count):
+        try:
+            # Scroll to the button and click it
+            btn = detail_buttons.nth(i)
+            btn.scroll_into_view_if_needed()
+            page.wait_for_timeout(100)
+            btn.click()
+            page.wait_for_timeout(400)  # Wait for modal animation
+            
+            # Extract data from the modal
+            race = page.evaluate("""
+                () => {
+                    const modals = Array.from(document.querySelectorAll('div[role="dialog"], div')).filter(d => {
+                        const style = window.getComputedStyle(d);
+                        const zIndex = parseInt(style.zIndex) || 0;
+                        // Find the overlay/modal that is visible
+                        return zIndex > 50 && d.innerText.length > 20 && d.innerText.length < 3000 && d.offsetParent !== null;
+                    });
+                    
+                    if (modals.length === 0) return null;
+                    
+                    const modal = modals.sort((a, b) => {
+                        const zA = parseInt(window.getComputedStyle(a).zIndex) || 0;
+                        const zB = parseInt(window.getComputedStyle(b).zIndex) || 0;
+                        return zB - zA;
+                    })[0];
+                    
+                    const text = modal.innerText;
+                    const lines = text.split('\\n').map(l => l.trim()).filter(l => l.length > 0);
+                    
+                    const race = {
+                        name_en: '', name_jp: '', grade: '', racetrack: '',
+                        direction: '', participants: null, terrain: '',
+                        distance_type: '', distance_meters: null,
+                        season: '', time_of_day: '', race_date: '', race_class: ''
+                    };
+                    
+                    for (let j = 0; j < lines.length; j++) {
+                        const line = lines[j];
+                        const nextLine = j + 1 < lines.length ? lines[j + 1] : '';
+                        
+                        if (j === 0 && !line.includes(':') && !line.includes('Racetrack')) race.name_jp = line;
+                        if (j === 1 && !line.includes(':') && !line.includes('Racetrack')) race.name_en = line;
+                        
+                        if (line.startsWith('Racetrack')) race.racetrack = line.replace('Racetrack', '').trim() || nextLine;
+                        if (line.startsWith('Direction')) race.direction = line.replace('Direction', '').trim() || nextLine;
+                        if (line.startsWith('Participants')) {
+                            const num = parseInt(line.replace('Participants', '').trim() || nextLine);
+                            if (!isNaN(num)) race.participants = num;
+                        }
+                        if (line.startsWith('Grade')) race.grade = line.replace('Grade', '').trim() || nextLine;
+                        if (line.startsWith('Terrain')) race.terrain = line.replace('Terrain', '').trim() || nextLine;
+                        
+                        if (line.includes('Distance') && line.includes('type')) {
+                            race.distance_type = line.replace(/Distance.*?(type\)?)/i, '').trim() || nextLine;
+                        }
+                        if (line.includes('Distance') && (line.includes('meters') || line.includes('m)'))) {
+                            const str = line.replace(/Distance.*?(meters?\)?|m\)?)/i, '').trim() || nextLine;
+                            const num = parseInt(str.replace(/[^0-9]/g, ''));
+                            if (!isNaN(num)) race.distance_meters = num;
+                        }
+                        if (line.startsWith('Season')) race.season = line.replace('Season', '').trim() || nextLine;
+                        if (line.includes('Time of day') || line.includes('Time of Day')) {
+                            race.time_of_day = line.replace(/Time of [Dd]ay/i, '').trim() || nextLine;
+                        }
+                        // Simple heuristic for Schedule/Date
+                        if (line === 'Schedule') {
+                            race.race_class = nextLine;
+                            if (j + 2 < lines.length) race.race_date = lines[j + 2];
+                        }
+                    }
+                    
+                    if (!race.grade) {
+                        const match = text.match(/(G[I1]{1,3}|GII|GIII|OP|Pre-OP)/);
+                        if (match) race.grade = match[1];
+                    }
+                    
+                    if (!race.distance_meters) {
+                        const match = text.match(/(\\d{3,4})\\s*m/);
+                        if (match) race.distance_meters = parseInt(match[1]);
+                    }
+                    
+                    if (!race.distance_type && race.distance_meters) {
+                        if (race.distance_meters <= 1400) race.distance_type = 'Short';
+                        else if (race.distance_meters <= 1800) race.distance_type = 'Mile';
+                        else if (race.distance_meters <= 2400) race.distance_type = 'Medium';
+                        else race.distance_type = 'Long';
+                    }
+                    
+                    return race;
+                }
+            """)
+            
+            if race and (race.get('name_en') or race.get('name_jp') or race.get('racetrack')):
+                races.append(race)
+                
+            # Close the modal
+            page.keyboard.press("Escape")
+            page.mouse.click(10, 10)  # Click outside just in case
+            page.wait_for_timeout(200)
+            
+            if (i + 1) % 25 == 0:
+                logger.info(f"Processed {i + 1}/{count} races")
+                
+        except Exception as e:
+            logger.warning(f"Error scraping race {i}: {e}")
+            # Ensure modal is closed before continuing
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(100)
 
     logger.info(f"Scraped {len(races)} races from details, {len(list_data)} from list")
     return races, list_data
