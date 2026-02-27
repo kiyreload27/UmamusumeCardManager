@@ -20,7 +20,7 @@ from gui.theme import (
     TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
     FONT_TITLE, FONT_HEADER, FONT_SUBHEADER, FONT_BODY, FONT_BODY_BOLD,
     FONT_SMALL, FONT_TINY, FONT_MONO, FONT_FAMILY,
-    create_styled_button, create_styled_text
+    create_styled_button, create_styled_text, create_card_frame
 )
 
 # Surface/direction colors and icons
@@ -438,7 +438,7 @@ class TrackViewFrame(ctk.CTkFrame):
                 if self.map_frame:
                     self.map_frame.destroy()
 
-                self.map_frame = ctk.CTkFrame(self.detail_scroll, fg_color=BG_MEDIUM, corner_radius=8)
+                self.map_frame = create_card_frame(self.detail_scroll)
                 self.map_frame.pack(pady=4, padx=4, anchor="w")
                 
                 self.map_label = ctk.CTkLabel(self.map_frame, image=img, text="")
@@ -700,9 +700,7 @@ class TrackViewFrame(ctk.CTkFrame):
 
     def _add_detail_section(self, title, rows):
         """Add a styled section card to the detail panel"""
-        section = ctk.CTkFrame(
-            self.detail_scroll, fg_color=BG_MEDIUM, corner_radius=8
-        )
+        section = create_card_frame(self.detail_scroll)
         section.pack(fill=tk.X, pady=4, padx=4)
 
         # Title

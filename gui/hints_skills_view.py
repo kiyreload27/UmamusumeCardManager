@@ -41,7 +41,7 @@ class SkillSearchFrame(ctk.CTkFrame):
         # Use two frames instead of PanedWindow
         
         # === Left Panel: Skill List ===
-        left_frame = ctk.CTkFrame(self, width=390, corner_radius=10)
+        left_frame = create_card_frame(self, width=390)
         left_frame.pack_propagate(False) # Force width to stay 600
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=False, padx=(0, 10))
         
@@ -81,7 +81,7 @@ class SkillSearchFrame(ctk.CTkFrame):
         self.skill_listbox.bind('<<ListboxSelect>>', self.on_skill_selected)
         
         # === Right Panel: Results ===
-        right_frame = ctk.CTkFrame(self, corner_radius=10, fg_color="transparent")
+        right_frame = create_card_frame(self)
         right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
         
         # Search Row (Search + Filter)

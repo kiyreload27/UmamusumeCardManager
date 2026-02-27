@@ -52,11 +52,11 @@ class CardListFrame(ctk.CTkFrame):
         # We can simulate split view with two frames
         
         # Left panel - Card list with filters
-        left_frame = ctk.CTkFrame(self, width=420, corner_radius=10)
+        left_frame = create_card_frame(self, width=420)
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=False, padx=(0, 10))
         
         # Right panel - Card details
-        self.details_frame = ctk.CTkFrame(self, corner_radius=10, fg_color="transparent")
+        self.details_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
         self.details_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
         
         # === Left Panel Contents ===
@@ -193,8 +193,8 @@ class CardListFrame(ctk.CTkFrame):
     def create_details_panel(self):
         """Create the card details panel"""
         # Container
-        details_container = ctk.CTkFrame(self.details_frame, corner_radius=12)
-        details_container.pack(fill=tk.BOTH, expand=True, padx=0, pady=0) # Flush with right panel
+        details_container = create_card_frame(self.details_frame)
+        details_container.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
         
         # Content scrolling container (Optional, but good for small screens)
         # For now, static

@@ -19,7 +19,7 @@ from gui.theme import (
     TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
     FONT_TITLE, FONT_HEADER, FONT_SUBHEADER, FONT_BODY, FONT_BODY_BOLD,
     FONT_SMALL, FONT_TINY,
-    create_styled_entry, create_styled_button
+    create_styled_entry, create_styled_button, create_card_frame
 )
 from utils import resolve_image_path
 from PIL import Image
@@ -75,17 +75,22 @@ def resolve_character_image(image_path):
     return None
 
 
+PAGE_SIZE = 30  # Number of characters to render per page
+
+
 class CharacterViewFrame(ctk.CTkFrame):
     """Character browser with 2-panel layout"""
 
     def __init__(self, parent):
         super().__init__(parent, fg_color="transparent")
         self.characters = []
+        self.displayed_characters = []  # currently visible subset
         self.current_character = None
         self._image_refs = []  # Keep references to prevent GC
         self._detail_image_ref = None
+        self._page_count = 0   # how many pages loaded so far
         self.search_var = tk.StringVar()
-        self.search_var.trace_add('write', lambda *a: self.filter_characters())
+        self._search_after_id = None  # for debounce
         
         self.create_widgets()
         self.load_characters()
@@ -118,6 +123,7 @@ class CharacterViewFrame(ctk.CTkFrame):
         search_entry = create_styled_entry(search_frame, textvariable=self.search_var,
                                             placeholder_text="🔍 Search characters...")
         search_entry.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(5, 0))
+        search_entry.bind('<KeyRelease>', self._on_search_key)
 
         # Scrollable character grid
         self.char_scroll = ctk.CTkScrollableFrame(left_frame, fg_color=BG_DARK,
@@ -128,6 +134,14 @@ class CharacterViewFrame(ctk.CTkFrame):
         self.char_scroll.grid_columnconfigure(0, weight=1)
         self.char_scroll.grid_columnconfigure(1, weight=1)
         self.char_scroll.grid_columnconfigure(2, weight=1)
+
+        # "Load More" button (placed below grid, shown when there are more)
+        self.load_more_btn = ctk.CTkButton(
+            left_frame, text="Load More...", font=FONT_SMALL,
+            fg_color=BG_LIGHT, hover_color=ACCENT_PRIMARY,
+            height=32, command=self._load_next_page
+        )
+        # Will be grid-managed dynamically in render_character_grid
 
         # ─── RIGHT PANEL: Character Detail ───
         self.detail_frame = ctk.CTkScrollableFrame(self, fg_color=BG_MEDIUM, corner_radius=12)
@@ -161,25 +175,38 @@ class CharacterViewFrame(ctk.CTkFrame):
     def load_characters(self):
         """Load all characters from DB"""
         self.characters = get_all_characters()
+        self.displayed_characters = list(self.characters)
         self.count_label.configure(text=f"{len(self.characters)} characters")
-        self.render_character_grid(self.characters)
+        self.render_character_grid(self.displayed_characters)
+
+    def _on_search_key(self, event=None):
+        """Debounced search — waits 300ms after last keystroke"""
+        if self._search_after_id is not None:
+            self.after_cancel(self._search_after_id)
+        self._search_after_id = self.after(300, self.filter_characters)
 
     def filter_characters(self):
         """Filter characters by search term"""
+        self._search_after_id = None
         search = self.search_var.get().strip()
         if search:
-            filtered = get_all_characters(search_term=search)
+            self.displayed_characters = [c for c in self.characters
+                                          if search.lower() in (c[1] or '').lower()]
         else:
-            filtered = self.characters
-        self.count_label.configure(text=f"{len(filtered)} characters")
-        self.render_character_grid(filtered)
+            self.displayed_characters = list(self.characters)
+        self.count_label.configure(text=f"{len(self.displayed_characters)} characters")
+        self.render_character_grid(self.displayed_characters)
 
     def render_character_grid(self, characters):
-        """Render character cards in a grid layout"""
+        """Render first page of character cards in a grid layout"""
         # Clear existing
         for widget in self.char_scroll.winfo_children():
             widget.destroy()
         self._image_refs.clear()
+        self._page_count = 0
+
+        # Hide load-more button initially
+        self.load_more_btn.grid_forget()
 
         if not characters:
             ctk.CTkLabel(
@@ -191,12 +218,31 @@ class CharacterViewFrame(ctk.CTkFrame):
             ).grid(row=0, column=0, columnspan=3, pady=50)
             return
 
-        for idx, char in enumerate(characters):
+        self._load_next_page()
+
+    def _load_next_page(self):
+        """Render the next PAGE_SIZE characters into the grid"""
+        chars = self.displayed_characters
+        start = self._page_count * PAGE_SIZE
+        end = start + PAGE_SIZE
+        page = chars[start:end]
+
+        for i, char in enumerate(page):
+            idx = start + i
             row = idx // 3
             col = idx % 3
-            # Ensure row has weight so they don't squash each other
             self.char_scroll.grid_rowconfigure(row, weight=1, uniform="row")
             self._create_character_card(char, row, col)
+
+        self._page_count += 1
+
+        # Show/hide load-more button
+        if end < len(chars):
+            remaining = len(chars) - end
+            self.load_more_btn.configure(text=f"Load More ({remaining} remaining)...")
+            self.load_more_btn.grid(row=2, column=0, pady=(0, 10))
+        else:
+            self.load_more_btn.grid_forget()
 
     def _create_character_card(self, char_data, row, col):
         """Create a single character card in the grid"""
@@ -355,8 +401,8 @@ class CharacterViewFrame(ctk.CTkFrame):
 
     def _add_aptitude_section(self, title, items):
         """Add an aptitude section with grade bars"""
-        section = ctk.CTkFrame(self.detail_frame, fg_color=BG_DARK, corner_radius=10)
-        section.pack(fill=tk.X, padx=10, pady=5)
+        section = create_card_frame(self.detail_frame)
+        section.pack(fill=tk.X, padx=10, pady=6)
         section.columnconfigure(1, weight=1)
 
         # Section title

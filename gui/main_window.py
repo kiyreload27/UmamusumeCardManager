@@ -22,7 +22,7 @@ from gui.race_view import RaceViewFrame
 from gui.update_dialog import show_update_dialog
 from gui.theme import (
     configure_styles, create_styled_button,
-    BG_DARK, BG_MEDIUM, BG_LIGHT, BG_HIGHLIGHT,
+    BG_DARKEST, BG_DARK, BG_MEDIUM, BG_LIGHT, BG_HIGHLIGHT,
     ACCENT_PRIMARY, ACCENT_SECONDARY, ACCENT_TERTIARY,
     TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
     FONT_TITLE, FONT_HEADER, FONT_BODY, FONT_SMALL
@@ -65,22 +65,26 @@ class MainWindow:
         configure_styles(self.root)
         
         # Create main container
-        # Note: CTk already has a main frame in a way, but we'll use a container for padding
-        main_container = ctk.CTkFrame(self.root, fg_color="transparent")
-        main_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        # Use a padded container so the whole app feels like a centered canvas
+        main_container = ctk.CTkFrame(self.root, fg_color=BG_DARKEST, corner_radius=0)
+        main_container.pack(fill=tk.BOTH, expand=True)
         
         # State
         self.last_selected_levels = {} # card_id -> level
         
+        # Inner content padding
+        content_shell = ctk.CTkFrame(main_container, fg_color="transparent")
+        content_shell.pack(fill=tk.BOTH, expand=True, padx=12, pady=12)
+        
         # Header with stats
-        self.create_header(main_container)
+        self.create_header(content_shell)
         
         # Status bar
-        self.create_status_bar(main_container)
+        self.create_status_bar(content_shell)
         
         # Tabbed notebook -> CTkTabview
-        self.tabview = ctk.CTkTabview(main_container)
-        self.tabview.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.tabview = ctk.CTkTabview(content_shell, fg_color=BG_DARK, segmented_button_fg_color=BG_MEDIUM)
+        self.tabview.pack(fill=tk.BOTH, expand=True, padx=4, pady=8)
         
         # Create tabs
         self.create_tabs()

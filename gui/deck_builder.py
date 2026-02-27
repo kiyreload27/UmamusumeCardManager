@@ -188,7 +188,7 @@ class DeckBuilderFrame(ctk.CTkFrame):
         # Main container with split view (simulated with frames)
         
         # === Left Panel: Card Browser ===
-        left_panel = ctk.CTkFrame(self, width=350, corner_radius=10)
+        left_panel = create_card_frame(self, width=350)
         left_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=False, padx=(0, 10), pady=10)
         
         # Header
@@ -254,7 +254,7 @@ class DeckBuilderFrame(ctk.CTkFrame):
         
         # === Right Panel: Deck & Stats ===
         right_panel = ctk.CTkFrame(self, fg_color="transparent")
-        right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, pady=10)
+        right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, pady=10, padx=(0, 2))
         
         # Deck Controls
         deck_ctrl = ctk.CTkFrame(right_panel, fg_color="transparent")
@@ -298,7 +298,7 @@ class DeckBuilderFrame(ctk.CTkFrame):
                   font=FONT_SUBHEADER, text_color=TEXT_PRIMARY).pack(side=tk.LEFT)
         
         # Effects Tree Container
-        effects_container = ctk.CTkFrame(right_panel, fg_color=BG_MEDIUM)
+        effects_container = create_card_frame(right_panel)
         effects_container.pack(fill=tk.BOTH, expand=True)
         
         self.effects_tree = ttk.Treeview(effects_container, 
@@ -326,7 +326,7 @@ class DeckBuilderFrame(ctk.CTkFrame):
         ctk.CTkLabel(unique_header, text="✨ Unique Effects", font=FONT_BODY_BOLD, 
                   text_color=ACCENT_SECONDARY).pack(side=tk.LEFT)
         
-        unique_frame = ctk.CTkFrame(right_panel, fg_color=BG_MEDIUM)
+        unique_frame = create_card_frame(right_panel)
         unique_frame.pack(fill=tk.X)
         
         self.unique_text = ctk.CTkTextbox(unique_frame, height=60, fg_color=BG_MEDIUM, text_color=TEXT_PRIMARY) # Reduced Height

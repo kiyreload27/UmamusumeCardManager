@@ -19,7 +19,7 @@ from gui.theme import (
     ACCENT_PRIMARY, ACCENT_SECONDARY, ACCENT_SUCCESS, ACCENT_TERTIARY,
     TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
     FONT_HEADER, FONT_SUBHEADER, FONT_BODY, FONT_BODY_BOLD, FONT_SMALL,
-    create_styled_button, create_styled_entry
+    create_styled_button, create_styled_entry, create_card_frame
 )
 from utils import resolve_image_path
 
@@ -34,8 +34,8 @@ class EffectsFrame(ctk.CTkFrame):
     def create_widgets(self):
         """Create the effects search interface"""
         # Header / Search Bar
-        header_frame = ctk.CTkFrame(self, fg_color="transparent")
-        header_frame.pack(fill=tk.X, padx=20, pady=15)
+        header_frame = create_card_frame(self)
+        header_frame.pack(fill=tk.X, padx=18, pady=(18, 10))
         
         # Search container
         search_container = ctk.CTkFrame(header_frame, fg_color="transparent")
@@ -60,8 +60,8 @@ class EffectsFrame(ctk.CTkFrame):
                   font=FONT_SMALL, text_color=TEXT_MUTED).pack(side=tk.LEFT)
 
         # Results Area
-        results_container = ctk.CTkFrame(self, fg_color="transparent")
-        results_container.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 20))
+        results_container = create_card_frame(self)
+        results_container.pack(fill=tk.BOTH, expand=True, padx=18, pady=(0, 18))
         
         # Label for the frame
         ctk.CTkLabel(results_container, text="Search Results (Owned Cards)", 

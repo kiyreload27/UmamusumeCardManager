@@ -60,7 +60,7 @@ class DeckSkillsFrame(ctk.CTkFrame):
         self.mode_label.pack(side=tk.RIGHT)
         
         # Main Results Tree
-        tree_container = ctk.CTkFrame(self, fg_color="transparent")
+        tree_container = create_card_frame(self)
         tree_container.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 15))
         
         # Treeview inner frame

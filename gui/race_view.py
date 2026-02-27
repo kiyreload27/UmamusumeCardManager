@@ -1,6 +1,6 @@
 """
 Race View - Browse races with filtering and detail panel
-2-panel layout: Filterable Race List | Race Detail
+2-panel layout: Filterable Race List (Treeview) | Race Detail
 """
 
 import tkinter as tk
@@ -19,19 +19,16 @@ from gui.theme import (
     TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
     FONT_TITLE, FONT_HEADER, FONT_SUBHEADER, FONT_BODY, FONT_BODY_BOLD,
     FONT_SMALL, FONT_TINY,
-    create_styled_entry, create_styled_button
+    create_styled_entry, create_styled_button, create_card_frame
 )
 
 # Grade colors and icons
 GRADE_COLORS = {
-    'GI': '#FFD700',      # Gold
-    'G1': '#FFD700',
-    'GII': '#C0C0C0',     # Silver
-    'G2': '#C0C0C0',
-    'GIII': '#CD853F',    # Bronze
-    'G3': '#CD853F',
-    'OP': '#54A0FF',      # Blue
-    'Pre-OP': '#5F27CD',  # Purple
+    'GI': '#FFD700', 'G1': '#FFD700',
+    'GII': '#C0C0C0', 'G2': '#C0C0C0',
+    'GIII': '#CD853F', 'G3': '#CD853F',
+    'OP': '#54A0FF',
+    'Pre-OP': '#5F27CD',
 }
 
 GRADE_BADGES = {
@@ -60,21 +57,22 @@ DISTANCE_COLORS = {
 
 
 class RaceViewFrame(ctk.CTkFrame):
-    """Race browser with filterable list and detail panel"""
+    """Race browser with filterable Treeview list and detail panel"""
 
     def __init__(self, parent):
         super().__init__(parent, fg_color="transparent")
-        self.races = []
+        self.races = []           # all races from DB
+        self.filtered_races = []  # currently displayed subset
         self.current_race = None
         self.search_var = tk.StringVar()
-        self.grade_var = tk.StringVar(value="All")
-        self.terrain_var = tk.StringVar(value="All")
-        self.distance_var = tk.StringVar(value="All")
-
-        self.search_var.trace_add('write', lambda *a: self.filter_races())
+        self._search_after_id = None  # for debounce
 
         self.create_widgets()
         self.load_races()
+
+    # ──────────────────────────────────────────────
+    # Widget creation
+    # ──────────────────────────────────────────────
 
     def create_widgets(self):
         """Build the 2-panel layout"""
@@ -85,7 +83,7 @@ class RaceViewFrame(ctk.CTkFrame):
         # ─── LEFT PANEL: Race List ───
         left_frame = ctk.CTkFrame(self, fg_color=BG_DARK, corner_radius=12)
         left_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5), pady=0)
-        left_frame.rowconfigure(2, weight=1)
+        left_frame.rowconfigure(3, weight=1)
         left_frame.columnconfigure(0, weight=1)
 
         # Header
@@ -100,54 +98,98 @@ class RaceViewFrame(ctk.CTkFrame):
                                          text_color=TEXT_MUTED)
         self.count_label.grid(row=0, column=1, sticky="e", padx=(10, 0))
 
-        # Search and filters row
+        # Search bar (debounced)
+        search_frame = ctk.CTkFrame(left_frame, fg_color="transparent")
+        search_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 5))
+        search_frame.columnconfigure(0, weight=1)
+
+        search_entry = create_styled_entry(search_frame, textvariable=self.search_var,
+                                            placeholder_text="🔍 Search races...")
+        search_entry.grid(row=0, column=0, sticky="ew")
+        search_entry.bind('<KeyRelease>', self._on_search_key)
+
+        # Filter row using segmented buttons (no Toplevel popups)
         filter_frame = ctk.CTkFrame(left_frame, fg_color="transparent")
-        filter_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 5))
+        filter_frame.grid(row=2, column=0, sticky="ew", padx=10, pady=(0, 5))
         filter_frame.columnconfigure(0, weight=1)
 
-        search_entry = create_styled_entry(filter_frame, textvariable=self.search_var,
-                                            placeholder_text="🔍 Search races...")
-        search_entry.grid(row=0, column=0, sticky="ew", pady=(0, 5))
-
-        # Filter buttons row
-        btn_frame = ctk.CTkFrame(filter_frame, fg_color="transparent")
-        btn_frame.grid(row=1, column=0, sticky="ew")
-
         # Grade filter
-        ctk.CTkLabel(btn_frame, text="Grade:", font=FONT_TINY,
-                     text_color=TEXT_MUTED).pack(side=tk.LEFT, padx=(0, 3))
-        grade_menu = ctk.CTkOptionMenu(
-            btn_frame, values=["All", "GI", "GII", "GIII", "OP", "Pre-OP"],
-            variable=self.grade_var, command=lambda _: self.filter_races(),
-            width=80, height=26, font=FONT_TINY
+        grade_row = ctk.CTkFrame(filter_frame, fg_color="transparent")
+        grade_row.pack(fill=tk.X, pady=(0, 3))
+        ctk.CTkLabel(grade_row, text="Grade:", font=FONT_TINY,
+                     text_color=TEXT_MUTED).pack(side=tk.LEFT, padx=(0, 5))
+        self.grade_seg = ctk.CTkSegmentedButton(
+            grade_row, values=["All", "GI", "GII", "GIII", "OP", "Pre-OP"],
+            command=lambda _: self.apply_filters(),
+            font=FONT_TINY, height=26
         )
-        grade_menu.pack(side=tk.LEFT, padx=(0, 8))
+        self.grade_seg.set("All")
+        self.grade_seg.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        # Terrain filter
-        ctk.CTkLabel(btn_frame, text="Terrain:", font=FONT_TINY,
-                     text_color=TEXT_MUTED).pack(side=tk.LEFT, padx=(0, 3))
-        terrain_menu = ctk.CTkOptionMenu(
-            btn_frame, values=["All", "Turf", "Dirt"],
-            variable=self.terrain_var, command=lambda _: self.filter_races(),
-            width=70, height=26, font=FONT_TINY
+        # Terrain + Distance row
+        td_row = ctk.CTkFrame(filter_frame, fg_color="transparent")
+        td_row.pack(fill=tk.X)
+
+        ctk.CTkLabel(td_row, text="Terrain:", font=FONT_TINY,
+                     text_color=TEXT_MUTED).pack(side=tk.LEFT, padx=(0, 5))
+        self.terrain_seg = ctk.CTkSegmentedButton(
+            td_row, values=["All", "Turf", "Dirt"],
+            command=lambda _: self.apply_filters(),
+            font=FONT_TINY, height=26, width=120
         )
-        terrain_menu.pack(side=tk.LEFT, padx=(0, 8))
+        self.terrain_seg.set("All")
+        self.terrain_seg.pack(side=tk.LEFT, padx=(0, 10))
 
-        # Distance filter
-        ctk.CTkLabel(btn_frame, text="Distance:", font=FONT_TINY,
-                     text_color=TEXT_MUTED).pack(side=tk.LEFT, padx=(0, 3))
-        distance_menu = ctk.CTkOptionMenu(
-            btn_frame, values=["All", "Short", "Mile", "Medium", "Long"],
-            variable=self.distance_var, command=lambda _: self.filter_races(),
-            width=80, height=26, font=FONT_TINY
+        ctk.CTkLabel(td_row, text="Dist:", font=FONT_TINY,
+                     text_color=TEXT_MUTED).pack(side=tk.LEFT, padx=(0, 5))
+        self.distance_seg = ctk.CTkSegmentedButton(
+            td_row, values=["All", "Short", "Mile", "Medium", "Long"],
+            command=lambda _: self.apply_filters(),
+            font=FONT_TINY, height=26
         )
-        distance_menu.pack(side=tk.LEFT)
+        self.distance_seg.set("All")
+        self.distance_seg.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        # Scrollable race list
-        self.race_scroll = ctk.CTkScrollableFrame(left_frame, fg_color=BG_DARK,
-                                                    corner_radius=0)
-        self.race_scroll.grid(row=2, column=0, sticky="nsew", padx=5, pady=5)
-        self.race_scroll.columnconfigure(0, weight=1)
+        # Treeview for race list
+        tree_container = ctk.CTkFrame(left_frame, fg_color="transparent")
+        tree_container.grid(row=3, column=0, sticky="nsew", padx=10, pady=(0, 10))
+
+        scrollbar = ttk.Scrollbar(tree_container, orient=tk.VERTICAL)
+        self.tree = ttk.Treeview(
+            tree_container,
+            columns=('grade', 'name', 'track', 'terrain', 'distance'),
+            show='headings',
+            selectmode='browse',
+            yscrollcommand=scrollbar.set
+        )
+        scrollbar.config(command=self.tree.yview)
+
+        self.tree.heading('grade', text='Grade', command=lambda: self._sort_column('grade'))
+        self.tree.heading('name', text='Race', anchor='w', command=lambda: self._sort_column('name'))
+        self.tree.heading('track', text='Track', anchor='w', command=lambda: self._sort_column('track'))
+        self.tree.heading('terrain', text='Terrain', command=lambda: self._sort_column('terrain'))
+        self.tree.heading('distance', text='Distance', command=lambda: self._sort_column('distance'))
+
+        self.tree.column('grade', width=70, anchor='center')
+        self.tree.column('name', width=220, minwidth=150)
+        self.tree.column('track', width=130, minwidth=80)
+        self.tree.column('terrain', width=70, anchor='center')
+        self.tree.column('distance', width=80, anchor='center')
+
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        self.tree.bind('<<TreeviewSelect>>', self._on_tree_select)
+
+        # Tag colours for grades
+        self.tree.tag_configure('GI', foreground='#FFD700')
+        self.tree.tag_configure('G1', foreground='#FFD700')
+        self.tree.tag_configure('GII', foreground='#C0C0C0')
+        self.tree.tag_configure('G2', foreground='#C0C0C0')
+        self.tree.tag_configure('GIII', foreground='#CD853F')
+        self.tree.tag_configure('G3', foreground='#CD853F')
+        self.tree.tag_configure('OP', foreground='#54A0FF')
+        self.tree.tag_configure('Pre-OP', foreground='#5F27CD')
 
         # ─── RIGHT PANEL: Race Detail ───
         self.detail_frame = ctk.CTkScrollableFrame(self, fg_color=BG_MEDIUM, corner_radius=12)
@@ -164,176 +206,114 @@ class RaceViewFrame(ctk.CTkFrame):
         )
         self.empty_label.pack(expand=True, pady=100)
 
-    def _propagate_scroll(self, event, scroll_frame):
-        """Manually propagate mouse wheel events to a specific scrollable canvas"""
-        try:
-            scroll_frame._parent_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-        except:
-            pass
+        # Sort state
+        self._sort_col = None
+        self._sort_reverse = False
 
-    def _bind_scroll_recursive(self, widget, scroll_frame, depth=0):
-        """Recursively bind mouse wheel, limiting depth to avoid event explosion"""
-        if depth > 2:
-            return
-        widget.bind("<MouseWheel>", lambda e: self._propagate_scroll(e, scroll_frame), add="+")
-        for child in widget.winfo_children():
-            self._bind_scroll_recursive(child, scroll_frame, depth + 1)
+    # ──────────────────────────────────────────────
+    # Data loading and filtering
+    # ──────────────────────────────────────────────
 
     def load_races(self):
-        """Load all races from DB"""
+        """Load all races from DB once"""
         self.races = get_all_races()
+        self.filtered_races = list(self.races)
         self.count_label.configure(text=f"{len(self.races)} races")
-        self.render_race_list(self.races)
+        self._populate_tree(self.filtered_races)
 
-    def filter_races(self):
-        """Filter races by search/grade/terrain/distance"""
-        search = self.search_var.get().strip() or None
-        grade = self.grade_var.get()
-        terrain = self.terrain_var.get()
-        distance = self.distance_var.get()
+    def _on_search_key(self, event=None):
+        """Debounced search — waits 300ms after last keystroke"""
+        if self._search_after_id is not None:
+            self.after_cancel(self._search_after_id)
+        self._search_after_id = self.after(300, self.apply_filters)
 
-        filtered = get_all_races(
-            search_term=search,
-            grade_filter=grade if grade != "All" else None,
-            terrain_filter=terrain if terrain != "All" else None,
-            distance_filter=distance if distance != "All" else None,
-        )
+    def apply_filters(self):
+        """Filter the in-memory race list and repopulate Treeview"""
+        self._search_after_id = None
+        search = self.search_var.get().strip().lower()
+        grade = self.grade_seg.get()
+        terrain = self.terrain_seg.get()
+        distance = self.distance_seg.get()
+
+        filtered = []
+        for r in self.races:
+            # r: (race_id, name_en, name_jp, grade, racetrack, direction,
+            #     participants, terrain, distance_type, distance_meters,
+            #     season, time_of_day, race_date, race_class)
+            if grade != "All" and (r[3] or "") != grade:
+                continue
+            if terrain != "All" and (r[7] or "") != terrain:
+                continue
+            if distance != "All" and (r[8] or "") != distance:
+                continue
+            if search:
+                haystack = f"{r[1] or ''} {r[2] or ''} {r[4] or ''}".lower()
+                if search not in haystack:
+                    continue
+            filtered.append(r)
+
+        self.filtered_races = filtered
         self.count_label.configure(text=f"{len(filtered)} races")
-        self.render_race_list(filtered)
+        self._populate_tree(filtered)
 
-    def render_race_list(self, races):
-        """Render race cards in the list"""
-        for widget in self.race_scroll.winfo_children():
-            widget.destroy()
+    def _populate_tree(self, races):
+        """Insert rows into the Treeview"""
+        self.tree.delete(*self.tree.get_children())
+        for race in races:
+            race_id = race[0]
+            name = race[1] or race[2] or ""
+            grade = race[3] or ""
+            track = race[4] or ""
+            terrain = race[7] or ""
+            dist_m = race[9]
+            dist_text = f"{dist_m}m" if dist_m else (race[8] or "")
 
-        if not races:
-            ctk.CTkLabel(
-                self.race_scroll,
-                text="No races found.\n\nRun the race scraper:\npython main.py --scrape-races",
-                font=FONT_BODY,
-                text_color=TEXT_MUTED,
-                justify="center"
-            ).pack(pady=50)
+            tag = grade if grade in GRADE_COLORS else ''
+            self.tree.insert('', tk.END, iid=str(race_id),
+                             values=(grade, name, track, terrain, dist_text),
+                             tags=(tag,))
+
+    def _sort_column(self, col):
+        """Sort Treeview by clicking a column header"""
+        if self._sort_col == col:
+            self._sort_reverse = not self._sort_reverse
+        else:
+            self._sort_col = col
+            self._sort_reverse = False
+
+        col_map = {'grade': 3, 'name': 1, 'track': 4, 'terrain': 7, 'distance': 9}
+        idx = col_map.get(col, 1)
+
+        def sort_key(r):
+            val = r[idx]
+            if val is None:
+                return ""
+            if isinstance(val, int):
+                return val
+            return str(val).lower()
+
+        self.filtered_races.sort(key=sort_key, reverse=self._sort_reverse)
+        self._populate_tree(self.filtered_races)
+
+    # ──────────────────────────────────────────────
+    # Selection & detail
+    # ──────────────────────────────────────────────
+
+    def _on_tree_select(self, event=None):
+        """Handle Treeview row selection"""
+        sel = self.tree.selection()
+        if not sel:
             return
-
-        for idx, race in enumerate(races):
-            self._create_race_card(race, idx)
-
-    def _create_race_card(self, race_data, idx):
-        """Create a single race card in the list"""
-        # race_data: (race_id, name_en, name_jp, grade, racetrack, direction,
-        #             participants, terrain, distance_type, distance_meters,
-        #             season, time_of_day, race_date, race_class)
-        race_id = race_data[0]
-        name_en = race_data[1] or ""
-        name_jp = race_data[2] or ""
-        grade = race_data[3] or ""
-        racetrack = race_data[4] or ""
-        terrain = race_data[7] or ""
-        distance_type = race_data[8] or ""
-        distance_meters = race_data[9]
-
-        # Card frame
-        card = ctk.CTkFrame(self.race_scroll, fg_color=BG_MEDIUM, corner_radius=8,
-                            cursor="hand2", height=65)
-        card.pack(fill=tk.X, padx=4, pady=2)
-        card.pack_propagate(False)
-
-        # Content layout: [Grade Badge] [Name + Track] [Distance badge] [Terrain badge]
-        inner = ctk.CTkFrame(card, fg_color="transparent")
-        inner.pack(fill=tk.BOTH, expand=True, padx=8, pady=5)
-        inner.columnconfigure(1, weight=1)
-
-        # Grade badge
-        grade_color = GRADE_COLORS.get(grade, TEXT_MUTED)
-        grade_icon = GRADE_BADGES.get(grade, '🏁')
-        grade_label = ctk.CTkLabel(inner, text=f"{grade_icon}", font=("Segoe UI", 18))
-        grade_label.grid(row=0, column=0, rowspan=2, padx=(0, 8), sticky="w")
-
-        # Name
-        display_name = name_en if name_en else name_jp
-        ctk.CTkLabel(inner, text=display_name, font=FONT_BODY_BOLD,
-                     text_color=TEXT_PRIMARY, anchor="w").grid(
-            row=0, column=1, sticky="ew")
-
-        # Subtitle: Racetrack + Class info
-        subtitle_parts = []
-        if racetrack:
-            subtitle_parts.append(racetrack)
-        if race_data[13]:  # race_class
-            subtitle_parts.append(race_data[13])
-        subtitle = " • ".join(subtitle_parts) if subtitle_parts else ""
-        ctk.CTkLabel(inner, text=subtitle, font=FONT_TINY,
-                     text_color=TEXT_MUTED, anchor="w").grid(
-            row=1, column=1, sticky="ew")
-
-        # Right side badges
-        badge_frame = ctk.CTkFrame(inner, fg_color="transparent")
-        badge_frame.grid(row=0, column=2, rowspan=2, padx=(5, 0), sticky="e")
-
-        # Terrain badge
-        terrain_icon = TERRAIN_ICONS.get(terrain, '')
-        terrain_color = TERRAIN_COLORS.get(terrain, TEXT_MUTED)
-        if terrain:
-            ctk.CTkLabel(badge_frame, text=f"{terrain_icon}{terrain}",
-                         font=FONT_TINY, text_color=terrain_color).pack(
-                side=tk.LEFT, padx=3)
-
-        # Distance badge
-        dist_color = DISTANCE_COLORS.get(distance_type, TEXT_SECONDARY)
-        dist_text = f"{distance_meters}m" if distance_meters else distance_type
-        if dist_text:
-            ctk.CTkLabel(badge_frame, text=dist_text, font=FONT_TINY,
-                         text_color=dist_color, fg_color=BG_DARK,
-                         corner_radius=4, height=20, width=55).pack(
-                side=tk.LEFT, padx=3)
-
-        # Grade text
-        if grade:
-            ctk.CTkLabel(badge_frame, text=grade, font=FONT_TINY,
-                         text_color=grade_color, fg_color=BG_DARK,
-                         corner_radius=4, height=20, width=45).pack(
-                side=tk.LEFT, padx=3)
-
-        # Click handler
-        def on_click(e, data=race_data):
-            self.select_race(data)
-
-        card.bind("<Button-1>", on_click)
-        for child in card.winfo_children():
-            child.bind("<Button-1>", on_click)
-            for gc in child.winfo_children():
-                gc.bind("<Button-1>", on_click)
-                for ggc in gc.winfo_children():
-                    ggc.bind("<Button-1>", on_click)
-
-        # Hover effects
-        def on_enter(e):
-            card.configure(fg_color=BG_LIGHT)
-        def on_leave(e):
-            if self.current_race and self.current_race[0] == race_id:
-                pass
-            else:
-                card.configure(fg_color=BG_MEDIUM)
-
-        card.bind("<Enter>", on_enter)
-        card.bind("<Leave>", on_leave)
-        card._race_id = race_id
-        
-        # Ensure scroll propagation for the race card
-        self._bind_scroll_recursive(card, self.race_scroll)
+        race_id = int(sel[0])
+        # Find the race data
+        for r in self.filtered_races:
+            if r[0] == race_id:
+                self.select_race(r)
+                break
 
     def select_race(self, race_data):
         """Show full detail for a selected race"""
         self.current_race = race_data
-        
-        # Highlight card
-        for child in self.race_scroll.winfo_children():
-            if hasattr(child, '_race_id'):
-                if child._race_id == race_data[0]:
-                    child.configure(fg_color=BG_LIGHT)
-                else:
-                    child.configure(fg_color=BG_MEDIUM)
 
         # Clear detail panel
         for widget in self.detail_frame.winfo_children():
@@ -409,8 +389,8 @@ class RaceViewFrame(ctk.CTkFrame):
 
     def _add_detail_section(self, title, rows):
         """Add a styled section card to the detail panel"""
-        section = ctk.CTkFrame(self.detail_frame, fg_color=BG_DARK, corner_radius=10)
-        section.pack(fill=tk.X, padx=10, pady=5)
+        section = create_card_frame(self.detail_frame)
+        section.pack(fill=tk.X, padx=10, pady=6)
         section.columnconfigure(1, weight=1)
 
         # Section title
@@ -421,12 +401,10 @@ class RaceViewFrame(ctk.CTkFrame):
         for idx, (label, value) in enumerate(rows):
             row_num = idx + 1
 
-            # Label
             ctk.CTkLabel(section, text=label, font=FONT_BODY,
                          text_color=TEXT_MUTED).grid(
                 row=row_num, column=0, sticky="w", padx=(12, 10), pady=4)
 
-            # Value
             ctk.CTkLabel(section, text=str(value), font=FONT_BODY_BOLD,
                          text_color=TEXT_PRIMARY).grid(
                 row=row_num, column=1, sticky="e", padx=(10, 12), pady=4)
@@ -434,6 +412,3 @@ class RaceViewFrame(ctk.CTkFrame):
         # Bottom padding
         ctk.CTkFrame(section, height=8, fg_color="transparent").grid(
             row=len(rows) + 1, column=0, columnspan=2)
-
-        # Ensure scroll propagation for the detail section
-        self._bind_scroll_recursive(section, self.detail_frame)
