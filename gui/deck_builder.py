@@ -168,6 +168,10 @@ class DeckBuilderFrame(ctk.CTkFrame):
         self.icon_cache = {}
         self.av_card_widgets = []
         self.selected_av_card_id = None
+        
+        self._rendering_cards = False
+        self._card_render_queue = []
+        
         self.setup_ui()
         self.refresh_decks()
     
@@ -282,6 +286,7 @@ class DeckBuilderFrame(ctk.CTkFrame):
             c.configure(fg_color=BG_MEDIUM if getattr(c, '_data_id', None) == card_id else BG_DARK)
     
     def filter_cards(self):
+        self._rendering_cards = False # Cancel ongoing
         for widget in self.av_card_widgets:
             widget.destroy()
         self.av_card_widgets.clear()
@@ -292,11 +297,21 @@ class DeckBuilderFrame(ctk.CTkFrame):
         owned_only = self.owned_only_var.get()
         
         cards = get_all_cards(type_filter=type_filter, search_term=search, owned_only=owned_only)
+        self._card_render_queue = cards[:40] # soft limit
+        self._rendering_cards = True
         
-        count = 0
-        for card in cards:
-            if count >= 40: break # soft limit
-            count += 1
+        self._process_card_queue()
+        
+    def _process_card_queue(self):
+        if not self._rendering_cards or not self._card_render_queue:
+            self._rendering_cards = False
+            return
+            
+        # Process 5 cards per frame to stay at 60fps interaction
+        chunk = self._card_render_queue[:5]
+        self._card_render_queue = self._card_render_queue[5:]
+        
+        for card in chunk:
             card_id, name, rarity, card_type, max_level, image_path, is_owned, owned_level = card
             
             row_frame = ctk.CTkFrame(self.card_scroll, fg_color=BG_DARK, corner_radius=8, border_width=1, border_color=BG_HIGHLIGHT)
@@ -331,6 +346,9 @@ class DeckBuilderFrame(ctk.CTkFrame):
             ctk.CTkLabel(info, text=f"{get_type_icon(card_type)} {card_type} • {rarity}", font=FONT_SMALL, text_color=get_rarity_color(rarity), anchor="w").pack(fill=tk.X)
             
             make_clickable(row_frame)
+            
+        if self._card_render_queue:
+            self.after(15, self._process_card_queue)
 
     def refresh_decks(self):
         decks = get_all_decks()

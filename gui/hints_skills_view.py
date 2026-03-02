@@ -34,6 +34,11 @@ class SkillSearchFrame(ctk.CTkFrame):
         self.skill_widgets = []
         self.result_widgets = []
         
+        self._rendering_skills = False
+        self._rendering_cards = False
+        self._skill_render_queue = []
+        self._card_render_queue = []
+        
         self.create_widgets()
         self.load_skills()
     
@@ -104,14 +109,29 @@ class SkillSearchFrame(ctk.CTkFrame):
         self.on_skill_selected(skill_name)
         
     def update_skill_list(self, items):
-        """Update skill list UI"""
+        """Update skill list UI sequentially to avoid blocking"""
+        self._rendering_skills = False # Cancel any ongoing render
+        
         for w in self.skill_widgets:
             w.destroy()
         self.skill_widgets.clear()
         
         display_items = items[:60]
+        self._skill_render_queue = display_items
+        self._rendering_skills = True
         
-        for idx, item in enumerate(display_items):
+        self._process_skill_queue()
+        
+    def _process_skill_queue(self):
+        if not self._rendering_skills or not self._skill_render_queue:
+            self._rendering_skills = False
+            return
+            
+        # Process up to 10 at a time
+        chunk = self._skill_render_queue[:10]
+        self._skill_render_queue = self._skill_render_queue[10:]
+        
+        for item in chunk:
             if isinstance(item, tuple):
                 skill_name, is_golden = item
             else:
@@ -134,6 +154,9 @@ class SkillSearchFrame(ctk.CTkFrame):
             btn.pack(fill=tk.X, pady=1, padx=4)
             btn.configure(command=lambda n=skill_name, b=btn: self._select_skill_widget(n, b))
             self.skill_widgets.append(btn)
+            
+        if self._skill_render_queue:
+            self.after(20, self._process_skill_queue)
             
     def filter_skills(self, *args):
         search = self.search_var.get().lower()
@@ -163,6 +186,7 @@ class SkillSearchFrame(ctk.CTkFrame):
     
     def show_cards_for_skill(self, skill_name):
         self.current_skill = skill_name
+        self._rendering_cards = False # Cancel any ongoing render
         self.result_header.configure(text=f"Cards with ✨ {skill_name}")
         
         for w in self.result_widgets:
@@ -172,14 +196,34 @@ class SkillSearchFrame(ctk.CTkFrame):
         cards = get_cards_with_skill(skill_name)
         owned_only = self.owned_only_var.get()
         
-        display_count = 0
-        row, col = 0, 0
-        
+        filtered_cards = []
         for card in cards:
             if owned_only and not card.get('is_owned'):
                 continue
-                
-            display_count += 1
+            filtered_cards.append(card)
+            
+        self.stats_label.configure(text=f"Loading cards...")
+        
+        self._card_render_queue = filtered_cards
+        self._card_render_row = 0
+        self._card_render_col = 0
+        self._card_render_count = 0
+        self._rendering_cards = True
+        
+        self._process_card_queue()
+        
+    def _process_card_queue(self):
+        if not self._rendering_cards or not self._card_render_queue:
+            self._rendering_cards = False
+            self.stats_label.configure(text=f"Found {self._card_render_count} cards teaching ✨ {self.current_skill}")
+            return
+            
+        # Process up to 5 cards per frame to maintain 60fps interaction
+        chunk = self._card_render_queue[:5]
+        self._card_render_queue = self._card_render_queue[5:]
+        
+        for card in chunk:
+            self._card_render_count += 1
             card_id = card['card_id']
             card_type = card.get('type') or card.get('card_type') or 'Unknown'
             rarity = card.get('rarity') or 'Unknown'
@@ -189,7 +233,7 @@ class SkillSearchFrame(ctk.CTkFrame):
             border_color = ACCENT_SUCCESS if is_owned else BG_HIGHLIGHT
             
             card_frame = ctk.CTkFrame(self.results_scroll, fg_color=bg_color, corner_radius=10, border_width=1, border_color=border_color)
-            card_frame.grid(row=row, column=col, sticky="nsew", padx=6, pady=6)
+            card_frame.grid(row=self._card_render_row, column=self._card_render_col, sticky="nsew", padx=6, pady=6)
             self.result_widgets.append(card_frame)
             
             # Load Image
@@ -228,12 +272,13 @@ class SkillSearchFrame(ctk.CTkFrame):
             ctk.CTkLabel(det, text=source, font=FONT_SMALL, text_color=ACCENT_WARNING if 'GOLDEN' in source else ACCENT_SECONDARY, anchor="w").pack(fill=tk.X, padx=8)
             ctk.CTkLabel(det, text=card.get('details', ''), font=FONT_TINY, text_color=TEXT_MUTED, anchor="w", justify="left", wraplength=200).pack(fill=tk.X, padx=8)
             
-            col += 1
-            if col > 1:
-                col = 0
-                row += 1
+            self._card_render_col += 1
+            if self._card_render_col > 1:
+                self._card_render_col = 0
+                self._card_render_row += 1
                 
-        self.stats_label.configure(text=f"Found {display_count} cards teaching ✨ {skill_name}")
+        if self._card_render_queue:
+            self.after(10, self._process_card_queue)
 
     def set_card(self, card_id):
         pass
