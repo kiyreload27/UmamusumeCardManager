@@ -151,41 +151,16 @@ class CardListFrame(ctk.CTkFrame):
         )
         self.count_label.pack(pady=(5, 5))
         
-        # Card list (Treeview wrapped in Frame)
-        # We use a standard Frame to hold the Treeview because Treeview is a tk widget
-        tree_container = ctk.CTkFrame(left_frame, fg_color="transparent")
-        tree_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+        # Card list (Modern Grid/List replacing Treeview)
+        self.scroll_container = ctk.CTkScrollableFrame(left_frame, fg_color="transparent")
+        self.scroll_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
         
-        # Scrollbar
-        scrollbar = ttk.Scrollbar(tree_container, orient=tk.VERTICAL)
+        # We will use a 2-column grid in the scroll container
+        self.scroll_container.columnconfigure(0, weight=1)
+        self.scroll_container.columnconfigure(1, weight=1)
         
-        self.tree = ttk.Treeview(
-            tree_container, 
-            columns=('owned', 'name', 'rarity', 'type'), 
-            show='tree headings', 
-            selectmode='browse',
-            style="CardList.Treeview",
-            yscrollcommand=scrollbar.set
-        )
-        scrollbar.config(command=self.tree.yview)
-        
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-                                  
-        self.tree.column('#0', width=100, anchor='center') # Thumbnail column
-        
-        self.tree.heading('owned', text='★', command=lambda: self.sort_column('owned', False))
-        self.tree.heading('name', text='Name', anchor='w', command=lambda: self.sort_column('name', False))
-        self.tree.heading('rarity', text='Rarity', command=lambda: self.sort_column('rarity', False))
-        self.tree.heading('type', text='Type', command=lambda: self.sort_column('type', False))
-        
-        self.tree.column('owned', width=50, anchor='center')
-        self.tree.column('name', width=350, minwidth=200)
-        self.tree.column('rarity', width=80, anchor='center')
-        self.tree.column('type', width=100, anchor='center')
-        
-        self.tree.bind('<<TreeviewSelect>>', self.on_select)
-        self.tree.tag_configure('owned', background='#1a3a2e') # Kept legacy tag, might need update if theme changes
+        # Store references to card widgets so they can be destroyed on refresh
+        self.card_widgets = []
         
         # === Right Panel Contents (Details) ===
         self.create_details_panel()
@@ -338,51 +313,85 @@ class CardListFrame(ctk.CTkFrame):
         self.tree.heading(col, command=lambda: self.sort_column(col, not reverse))
         
     def populate_tree(self, cards):
-        """Populate treeview with cards"""
-        self.tree.delete(*self.tree.get_children())
+        """Populate scrollable frame with modern card widgets"""
+        # Clear existing widgets
+        for widget in self.card_widgets:
+            widget.destroy()
+        self.card_widgets.clear()
         
+        row, col = 0, 0
         for card in cards:
             card_id, name, rarity, card_type, max_level, image_path, is_owned, owned_level = card
             type_icon = get_type_icon(card_type)
-            owned_mark = "★" if is_owned else ""
-            tag = 'owned' if is_owned else ''
             
             display_name = name
             if is_owned and owned_level:
                 display_name = f"{name} (Lv{owned_level})"
+                
+            # Card styling
+            border_color = ACCENT_SUCCESS if is_owned else BG_HIGHLIGHT
+            bg_color = BG_MEDIUM if is_owned else BG_DARK
             
-            # Load Icon (keeping simplistic for now)
-            # Treeview images need to be tk.PhotoImage, PIL works
+            # The card widget
+            card_frame = ctk.CTkFrame(self.scroll_container, fg_color=bg_color, corner_radius=12, border_width=1, border_color=border_color)
+            card_frame.grid(row=row, column=col, sticky="nsew", padx=5, pady=5)
+            self.card_widgets.append(card_frame)
+            
+            # Make the frame internally clickable
+            def make_clickable(widget, cid=card_id):
+                widget.bind("<Button-1>", lambda e, id=cid: self.on_select(id))
+                for child in widget.winfo_children():
+                    make_clickable(child, cid)
+            
+            # Image
             img = self.icon_cache.get(card_id)
             if not img:
                 resolved_path = resolve_image_path(image_path)
                 if resolved_path and os.path.exists(resolved_path):
                     try:
                         pil_img = Image.open(resolved_path)
-                        # Resize for treeview (Larger to fill row based on user request)
-                        pil_img.thumbnail((78, 78), Image.Resampling.LANCZOS)
-                        img = ImageTk.PhotoImage(pil_img)
+                        # Resize for grid
+                        pil_img.thumbnail((80, 80), Image.Resampling.LANCZOS)
+                        img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(80, 80))
                         self.icon_cache[card_id] = img
                     except:
                         pass
+                        
+            img_label = ctk.CTkLabel(card_frame, text="", image=img if img else None, width=80, height=80, corner_radius=8)
+            img_label.pack(side=tk.LEFT, padx=10, pady=10)
             
-            # Only use image if cached/loaded
-            kv = {'image': img} if img else {}
+            # Info container
+            info_frame = ctk.CTkFrame(card_frame, fg_color="transparent")
+            info_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=10, padx=(0, 10))
             
-            self.tree.insert('', tk.END, iid=card_id, text='', 
-                           values=(owned_mark, display_name, rarity, f"{type_icon} {card_type}"),
-                           tags=(tag,), **kv)
+            # Name
+            ctk.CTkLabel(info_frame, text=display_name, font=FONT_BODY_BOLD, text_color=TEXT_PRIMARY, anchor="w", justify="left").pack(fill=tk.X)
+            
+            # Meta
+            meta_frame = ctk.CTkFrame(info_frame, fg_color="transparent")
+            meta_frame.pack(fill=tk.X, pady=(5, 0))
+            
+            rarity_color = get_rarity_color(rarity)
+            type_color = get_type_color(card_type)
+            
+            ctk.CTkLabel(meta_frame, text=rarity, font=FONT_SMALL, text_color=rarity_color).pack(side=tk.LEFT, padx=(0, 10))
+            ctk.CTkLabel(meta_frame, text=f"{type_icon} {card_type}", font=FONT_SMALL, text_color=type_color).pack(side=tk.LEFT)
+            
+            make_clickable(card_frame)
+            
+            col += 1
+            if col > 1:
+                col = 0
+                row += 1
         
         if hasattr(self, 'count_label'):
             self.count_label.configure(text=f"{len(cards)} cards")
     
-    def on_select(self, event):
+    def on_select(self, override_id=None):
         """Handle card selection"""
-        selection = self.tree.selection()
-        if not selection:
+        card_id = override_id
+        if not card_id:
             return
-        
-        card_id = int(selection[0])
         card = get_card_by_id(card_id)
         
         if card:

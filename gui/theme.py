@@ -18,26 +18,26 @@ ctk.set_default_color_theme("blue")
 # COLOR PALETTE
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Backgrounds — deep blue/purple neutrals
-BG_DARKEST = '#050816'
-BG_DARK = '#070b1a'
-BG_MEDIUM = '#101624'
-BG_LIGHT = '#1b2335'
-BG_HIGHLIGHT = '#25324a'
+# Backgrounds — Modern Tailwind Slate darks for a premium feel
+BG_DARKEST = '#0B0F19'  # Deepest background (Main container)
+BG_DARK = '#111827'     # Gray-900 (Sidebar, Panels)
+BG_MEDIUM = '#1F2937'   # Gray-800 (Cards, Inputs)
+BG_LIGHT = '#374151'    # Gray-700 (Hover states, borders)
+BG_HIGHLIGHT = '#4B5563' # Gray-600 (Active states)
 
-# Accents — softer, modern neon-inspired
-ACCENT_PRIMARY = '#7dd3fc'     # Cyan — main action color
-ACCENT_SECONDARY = '#c4b5fd'   # Soft purple
-ACCENT_TERTIARY = '#f9a8d4'    # Pink highlight
-ACCENT_SUCCESS = '#4ade80'     # Green
-ACCENT_WARNING = '#facc15'     # Amber
-ACCENT_ERROR = '#fb7185'       # Red
+# Accents — Vibrant, high-contrast neon-inspired
+ACCENT_PRIMARY = '#38bdf8'     # Sky-400 (Main CTA)
+ACCENT_SECONDARY = '#818cf8'   # Indigo-400 (Secondary)
+ACCENT_TERTIARY = '#f472b6'    # Pink-400 (Highlights)
+ACCENT_SUCCESS = '#4ade80'     # Green-400
+ACCENT_WARNING = '#fbbf24'     # Amber-400
+ACCENT_ERROR = '#f87171'       # Red-400
 
-# Text
-TEXT_PRIMARY = '#e5e7eb'
-TEXT_SECONDARY = '#cbd5f5'
-TEXT_MUTED = '#9ca3c7'
-TEXT_DISABLED = '#4b5563'
+# Text — Soft contrast for readability
+TEXT_PRIMARY = '#f8fafc'       # Slate-50 (Headers, Main text)
+TEXT_SECONDARY = '#cbd5e1'     # Slate-300 (Subtext)
+TEXT_MUTED = '#94a3b8'         # Slate-400 (Disabled/Muted)
+TEXT_DISABLED = '#64748b'      # Slate-500
 
 # Rarity — brighter for contrast against new background
 RARITY_SSR = '#facc15'
@@ -203,6 +203,28 @@ def create_styled_button(parent, text, command=None, style_type='default', **kwa
         text_color=TEXT_PRIMARY,
         font=FONT_BODY_BOLD if style_type == 'accent' else FONT_BODY,
         corner_radius=8, border_width=0, **safe
+    )
+
+
+def create_sidebar_button(parent, text, command=None, active=False, **kwargs):
+    """Create a styled CTkButton for the sidebar navigation"""
+    safe = {k: v for k, v in kwargs.items()
+            if k not in ('bg', 'fg', 'activebackground', 'activeforeground', 'padx', 'pady')}
+    
+    bg_color = BG_MEDIUM if active else "transparent"
+    text_color = ACCENT_PRIMARY if active else TEXT_SECONDARY
+    hover_color = BG_LIGHT
+    
+    return ctk.CTkButton(
+        parent, text=text, command=command,
+        fg_color=bg_color,
+        hover_color=hover_color,
+        text_color=text_color,
+        font=FONT_BODY_BOLD,
+        corner_radius=10,
+        anchor="w",
+        height=45,
+        border_width=0, **safe
     )
 
 

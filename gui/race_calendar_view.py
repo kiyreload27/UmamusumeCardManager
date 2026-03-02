@@ -38,6 +38,82 @@ def format_half_month(month, half):
     return f"{month}, {half}"
 
 
+class CharacterSelectionDialog(ctk.CTkToplevel):
+    """Modal dialog for selecting a character via image grid"""
+    def __init__(self, parent, characters, icon_cache, on_select_callback):
+        super().__init__(parent)
+        self.title("Select Character")
+        self.geometry("640x480")
+        self.transient(parent)
+        self.grab_set()
+        
+        self.on_select_callback = on_select_callback
+        self.characters = characters # List of tuples: (id, name, rarity, type, ...)
+        self.icon_cache = icon_cache
+        
+        # Header
+        hdr = ctk.CTkFrame(self, fg_color="transparent")
+        hdr.pack(fill=tk.X, padx=20, pady=15)
+        ctk.CTkLabel(hdr, text="Choose a Character", font=FONT_HEADER, text_color=TEXT_PRIMARY).pack(side=tk.LEFT)
+        
+        # Grid
+        self.scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        self.scroll.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+        
+        for i in range(5):
+            self.scroll.columnconfigure(i, weight=1)
+            
+        row, col = 0, 0
+        for char in self.characters:
+            char_id, name, rarity, char_type, s_turf, s_dirt, s_short, s_mile, s_med, s_long, img_path = char[:11]
+            
+            card = ctk.CTkFrame(self.scroll, fg_color=BG_MEDIUM, corner_radius=8, cursor="hand2")
+            card.grid(row=row, column=col, padx=8, pady=8, sticky="nsew")
+            
+            # Load Image
+            img = self.icon_cache.get(char_id)
+            if not img:
+                resolved = resolve_image_path(img_path)
+                if resolved and os.path.exists(resolved):
+                    try:
+                        pil_img = Image.open(resolved)
+                        pil_img.thumbnail((70, 70), Image.Resampling.LANCZOS)
+                        img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(70, 70))
+                        self.icon_cache[char_id] = img
+                    except: pass
+                    
+            img_lbl = ctk.CTkLabel(card, text="" if img else "?", image=img if img else None, width=70, height=70, corner_radius=8)
+            img_lbl.pack(pady=(10, 5), padx=10)
+            
+            # Truncate
+            disp_name = name[:10] + ".." if len(name) > 10 else name
+            name_lbl = ctk.CTkLabel(card, text=disp_name, font=FONT_TINY, text_color=TEXT_PRIMARY)
+            name_lbl.pack(pady=(0, 10))
+            
+            def get_click_handler(cid=char_id):
+                def handler(e):
+                    self.on_select_callback(cid)
+                    self.destroy()
+                return handler
+                
+            on_click = get_click_handler()
+            card.bind("<Button-1>", on_click)
+            img_lbl.bind("<Button-1>", on_click)
+            name_lbl.bind("<Button-1>", on_click)
+            
+            def on_enter(e, c=card): c.configure(border_color=ACCENT_PRIMARY, border_width=2)
+            def on_leave(e, c=card): c.configure(border_width=0)
+            
+            card.bind("<Enter>", on_enter)
+            card.bind("<Leave>", on_leave)
+            
+            col += 1
+            if col > 4:
+                col = 0
+                row += 1
+
+
+
 class RaceCalendarViewFrame(ctk.CTkFrame):
     """Race Calendar tab merging Characters and Races logic"""
 
@@ -62,7 +138,7 @@ class RaceCalendarViewFrame(ctk.CTkFrame):
         self.selected_races = {}
         
         # Grid references
-        self._image_refs = []
+        self._image_refs = {} # Changed to dict for cache
         self.calendar_tabs = None
         self.slot_frames = {} # To hold the UI references for each slot
         
@@ -83,14 +159,21 @@ class RaceCalendarViewFrame(ctk.CTkFrame):
         char_frame = ctk.CTkFrame(top_frame, fg_color="transparent")
         char_frame.grid(row=0, column=0, sticky="nw", padx=15, pady=15)
         
-        ctk.CTkLabel(char_frame, text="🐴 Select Character:", font=FONT_BODY_BOLD, text_color=TEXT_PRIMARY).pack(anchor="w")
-        self.char_combo = ctk.CTkComboBox(
-            char_frame, 
-            values=["Loading..."], 
-            command=self._on_character_select,
-            width=200
-        )
-        self.char_combo.pack(anchor="w", pady=(5, 0))
+        self.char_img_label = ctk.CTkLabel(char_frame, text="?", font=FONT_HEADER, width=80, height=80, corner_radius=10, fg_color=BG_MEDIUM)
+        self.char_img_label.pack(side=tk.LEFT, padx=(0, 15))
+        
+        char_info = ctk.CTkFrame(char_frame, fg_color="transparent")
+        char_info.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        self.char_name_label = ctk.CTkLabel(char_info, text="No Character Selected", font=FONT_SUBHEADER, text_color=TEXT_PRIMARY)
+        self.char_name_label.pack(anchor="w", pady=(5, 5))
+        
+        create_styled_button(
+            char_info, text="🖼️ Choose Character...", 
+            command=self._open_character_selector,
+            style_type="secondary",
+            width=180
+        ).pack(anchor="w")
         
         # Stats inputs
         stats_frame = ctk.CTkFrame(top_frame, fg_color="transparent")
@@ -193,18 +276,20 @@ class RaceCalendarViewFrame(ctk.CTkFrame):
                     col = 0
                     row += 1
 
+    def _open_character_selector(self):
+        if not self.characters: return
+        CharacterSelectionDialog(self, self.characters, self._image_refs, self._on_character_select_id)
+
     def load_data(self):
         """Load characters and races from the database"""
         self.characters = get_all_characters()
         self.races = get_all_races()
         
         if self.characters:
-            char_names = [c[1] for c in self.characters] # Assuming name is index 1
-            self.char_combo.configure(values=char_names)
-            self.char_combo.set(char_names[0])
-            self._on_character_select(char_names[0])
+            # Auto-select first character
+            self._on_character_select_id(self.characters[0][0])
         else:
-            self.char_combo.set("No characters found")
+            self.char_name_label.configure(text="No characters found")
 
     def _get_char_by_name(self, name):
         for c in self.characters:
@@ -215,19 +300,36 @@ class RaceCalendarViewFrame(ctk.CTkFrame):
     def _on_stat_change(self, _=None):
         self._refresh_calendar()
 
-    def _on_character_select(self, name):
-        self.current_character = self._get_char_by_name(name)
+    def _on_character_select_id(self, char_id):
+        char = next((c for c in self.characters if c[0] == char_id), None)
+        if not char: return
+        
+        self.current_character = char
+        self.char_name_label.configure(text=char[1])
+        
+        # Try loading image
+        img_path = char[10] # image_path is at index 10 typically in get_all_characters
+        img = self._image_refs.get(char_id) if isinstance(self._image_refs, dict) else None # Using dict temporarily
+        # Actually _image_refs was instantiated as a list in init. Let's fix that below if needed, here we'll just cache it onto the label
+        resolved = resolve_image_path(img_path)
+        if resolved and os.path.exists(resolved):
+            try:
+                pil_img = Image.open(resolved)
+                pil_img.thumbnail((80, 80), Image.Resampling.LANCZOS)
+                img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(80, 80))
+                self.char_img_label.configure(image=img, text="")
+                self.char_img_label._image = img # Keep ref
+            except: 
+                self.char_img_label.configure(image=None, text="?")
         
         # Load base aptitudes into UI
-        if self.current_character:
-            # char_data aptitudes: Turf=4, Dirt=5, Short=6, Mile=7, Medium=8, Long=9
-            c = self.current_character
-            self.aptitudes['Turf'].set(c[4] or 'G')
-            self.aptitudes['Dirt'].set(c[5] or 'G')
-            self.aptitudes['Sprint'].set(c[6] or 'G')
-            self.aptitudes['Mile'].set(c[7] or 'G')
-            self.aptitudes['Medium'].set(c[8] or 'G')
-            self.aptitudes['Long'].set(c[9] or 'G')
+        c = self.current_character
+        self.aptitudes['Turf'].set(c[4] or 'G')
+        self.aptitudes['Dirt'].set(c[5] or 'G')
+        self.aptitudes['Sprint'].set(c[6] or 'G')
+        self.aptitudes['Mile'].set(c[7] or 'G')
+        self.aptitudes['Medium'].set(c[8] or 'G')
+        self.aptitudes['Long'].set(c[9] or 'G')
 
         # Clear selected races on character change
         self.selected_races.clear()

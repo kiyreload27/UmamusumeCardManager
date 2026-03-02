@@ -1,14 +1,13 @@
 """
 Deck Skills View - Detailed breakdown of all skills in a deck or for a single card
-Updated for CustomTkinter
+Redesigned with modern nested card layouts replacing Treeview
 """
 
 import tkinter as tk
-from tkinter import ttk
 import customtkinter as ctk
 import sys
 import os
-from PIL import Image, ImageTk
+from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -19,10 +18,10 @@ from db.db_queries import (
 from utils import resolve_image_path
 from gui.theme import (
     BG_DARK, BG_MEDIUM, BG_LIGHT, BG_HIGHLIGHT,
-    ACCENT_PRIMARY, ACCENT_SECONDARY, ACCENT_TERTIARY,
+    ACCENT_PRIMARY, ACCENT_SECONDARY, ACCENT_WARNING, ACCENT_SUCCESS,
     TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
-    FONT_HEADER, FONT_SUBHEADER, FONT_BODY, FONT_BODY_BOLD, FONT_SMALL,
-    create_card_frame, get_type_icon
+    FONT_HEADER, FONT_SUBHEADER, FONT_BODY, FONT_BODY_BOLD, FONT_SMALL, FONT_TINY,
+    create_card_frame, get_type_icon, get_rarity_color
 )
 
 
@@ -32,7 +31,8 @@ class DeckSkillsFrame(ctk.CTkFrame):
     def __init__(self, parent):
         super().__init__(parent, fg_color="transparent")
         self.icon_cache = {}
-        self.current_mode = "Deck" # or "Single"
+        self.current_mode = "Deck"
+        self.card_blocks = []
         
         self.create_widgets()
         self.refresh_decks()
@@ -40,62 +40,34 @@ class DeckSkillsFrame(ctk.CTkFrame):
     def create_widgets(self):
         """Create the deck skills interface"""
         # Header / Controls
-        ctrl_frame = ctk.CTkFrame(self, fg_color="transparent")
-        ctrl_frame.pack(fill=tk.X, padx=20, pady=15)
+        ctrl_frame = create_card_frame(self)
+        ctrl_frame.pack(fill=tk.X, padx=20, pady=(20, 10))
         
         # Left side: Mode/Deck selection
         selection_frame = ctk.CTkFrame(ctrl_frame, fg_color="transparent")
-        selection_frame.pack(side=tk.LEFT)
+        selection_frame.pack(side=tk.LEFT, padx=20, pady=20)
         
-        ctk.CTkLabel(selection_frame, text="🎴 Select Deck:", font=FONT_BODY, 
-                  text_color=TEXT_SECONDARY).pack(side=tk.LEFT)
+        ctk.CTkLabel(selection_frame, text="🎴 Select Deck:", font=FONT_HEADER, text_color=TEXT_PRIMARY).pack(side=tk.LEFT, padx=(0, 15))
         
-        self.deck_combo = ctk.CTkComboBox(selection_frame, width=200, state='readonly', 
-                                          command=self.on_deck_selected_val)
-        self.deck_combo.pack(side=tk.LEFT, padx=10)
+        self.deck_combo = ctk.CTkComboBox(selection_frame, width=250, state='readonly', command=self.on_deck_selected_val)
+        self.deck_combo.pack(side=tk.LEFT)
         
         # Mode indicator/Description
-        self.mode_label = ctk.CTkLabel(ctrl_frame, text="Showing skills for selected deck", 
-                                   font=FONT_HEADER, text_color=ACCENT_PRIMARY)
-        self.mode_label.pack(side=tk.RIGHT)
+        self.mode_label = ctk.CTkLabel(ctrl_frame, text="Showing skills for selected deck", font=FONT_SUBHEADER, text_color=ACCENT_PRIMARY)
+        self.mode_label.pack(side=tk.RIGHT, padx=20)
         
-        # Main Results Tree
-        tree_container = create_card_frame(self)
-        tree_container.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 15))
+        # Main Results Scroll Area replacing treeview
+        self.results_container = create_card_frame(self)
+        self.results_container.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 20))
         
-        # Treeview inner frame
-        tree_inner = ctk.CTkFrame(tree_container, fg_color="transparent")
-        tree_inner.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-        cols = ('skill', 'rarity', 'source', 'details')
-        self.tree = ttk.Treeview(tree_inner, columns=cols, show='tree headings',
-                                 style="Treeview")
-        
-        self.tree.heading('#0', text='★  Card / Skill')
-        self.tree.heading('skill', text='Skill Name')
-        self.tree.heading('rarity', text='Rarity')
-        self.tree.heading('source', text='Source')
-        self.tree.heading('details', text='Details / Other Event Skills')
-        
-        self.tree.column('#0', width=250, anchor='w')
-        self.tree.column('skill', width=150)
-        self.tree.column('rarity', width=50, anchor='center')
-        self.tree.column('source', width=100)
-        self.tree.column('details', width=450)
-        
-        scrollbar = ttk.Scrollbar(tree_inner, orient=tk.VERTICAL, command=self.tree.yview)
-        self.tree.configure(yscrollcommand=scrollbar.set)
-        
-        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=2, pady=2)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y, pady=2)
+        self.scroll_area = ctk.CTkScrollableFrame(self.results_container, fg_color="transparent")
+        self.scroll_area.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
         # Footer
-        self.stats_label = ctk.CTkLabel(self, text="", font=FONT_SMALL,
-                                   text_color=TEXT_MUTED)
-        self.stats_label.pack(anchor='e', pady=5, padx=20)
+        self.stats_label = ctk.CTkLabel(self.results_container, text="", font=FONT_SMALL, text_color=TEXT_MUTED)
+        self.stats_label.pack(side=tk.BOTTOM, anchor='e', pady=10, padx=20)
 
     def refresh_decks(self):
-        """Load decks into combobox"""
         decks = get_all_decks()
         values = [f"{d[0]}: {d[1]}" for d in decks]
         self.deck_combo.configure(values=values)
@@ -104,25 +76,21 @@ class DeckSkillsFrame(ctk.CTkFrame):
             self.on_deck_selected_val(values[0])
 
     def on_deck_selected_val(self, value):
-        """Handle deck selection from combobox values"""
         if not value: return
-        
         deck_id = int(value.split(':')[0])
         deck_name = value.split(': ')[1]
         
         self.current_mode = "Deck"
         self.mode_label.configure(text=f"Deck: {deck_name}", text_color=ACCENT_PRIMARY)
         self.show_deck_skills(deck_id)
-        
-    def on_deck_selected(self, event):
-        """Legacy bind handler if needed"""
-        self.on_deck_selected_val(self.deck_combo.get())
+
+    def _clear_blocks(self):
+        for block in self.card_blocks:
+            block.destroy()
+        self.card_blocks.clear()
 
     def show_deck_skills(self, deck_id):
-        """Fetch and display all skills from a deck"""
-        # Clear tree
-        for item in self.tree.get_children():
-            self.tree.delete(item)
+        self._clear_blocks()
             
         deck_cards = get_deck_cards(deck_id)
         if not deck_cards:
@@ -132,91 +100,119 @@ class DeckSkillsFrame(ctk.CTkFrame):
         total_skills = 0
         for card_row in deck_cards:
             slot_pos, level, card_id, name, rarity, card_type, image_path = card_row
-            
             card_full = get_card_by_id(card_id)
             is_owned = bool(card_full[7]) if card_full else False
             
-            # Create Parent Node for Card
-            owned_mark = "★ " if is_owned else "   "
-            parent_id = self.add_card_node(card_id, owned_mark, name, rarity, card_type, image_path)
-            
-            # 1. Hints
+            skills = []
             hints = get_hints(card_id)
             for h_name, h_desc in hints:
-                self.add_skill_row(parent_id, h_name, "Training Hint", h_desc)
+                skills.append({"name": h_name, "source": "Training Hint", "desc": h_desc, "golden": False})
                 total_skills += 1
                 
-            # 2. Event Skills
             events = get_all_event_skills(card_id)
             for event in events:
-                self.add_skill_row(parent_id, event['skill_name'], "Event", event['details'])
+                src = "Event"
+                golden = False
+                if event.get('is_gold', False):
+                    src = "Event (Golden)"
+                    golden = True
+                skills.append({"name": event['skill_name'], "source": src, "desc": event['details'], "golden": golden})
                 total_skills += 1
+                
+            self._render_card_block(card_id, name, rarity, card_type, image_path, is_owned, skills)
                     
         self.stats_label.configure(text=f"Found {total_skills} total skill sources in deck")
 
-    def add_card_node(self, card_id, owned_mark, name, rarity, card_type, image_path):
-        """Add a parent node for a card"""
+    def _render_card_block(self, card_id, name, rarity, card_type, image_path, is_owned, skills):
+        """Render a modern expandable card block containing all its skills"""
+        block_frame = ctk.CTkFrame(self.scroll_area, fg_color=BG_DARK, corner_radius=10, border_width=1, border_color=ACCENT_SUCCESS if is_owned else BG_HIGHLIGHT)
+        block_frame.pack(fill=tk.X, pady=8, padx=4)
+        self.card_blocks.append(block_frame)
+        
+        # Header (Card Info)
+        header = ctk.CTkFrame(block_frame, fg_color="transparent")
+        header.pack(fill=tk.X, padx=15, pady=10)
+        
+        # Resolve Image
         img = self.icon_cache.get(card_id)
         if not img:
-            resolved_path = resolve_image_path(image_path)
-            if resolved_path and os.path.exists(resolved_path):
+            resolved = resolve_image_path(image_path)
+            if resolved and os.path.exists(resolved):
                 try:
-                    pil_img = Image.open(resolved_path)
-                    pil_img.thumbnail((32, 32), Image.Resampling.LANCZOS)
-                    img = ImageTk.PhotoImage(pil_img)
+                    pil_img = Image.open(resolved)
+                    pil_img.thumbnail((48, 48), Image.Resampling.LANCZOS)
+                    img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(48, 48))
                     self.icon_cache[card_id] = img
                 except: pass
         
-        type_icon = get_type_icon(card_type)
-        display_text = f"{owned_mark}{name}"
+        ctk.CTkLabel(header, text="", image=img if img else None, width=48, height=48, corner_radius=8).pack(side=tk.LEFT, padx=(0, 15))
         
-        # Parent row only needs display text and rarity (optional)
-        # We remove open=True from insert and set it using item() to avoid Tcl Errors on some systems
-        iid = self.tree.insert('', tk.END, text=display_text, image=img if img else "",
-                               values=("", rarity, f"{type_icon} {card_type}", ""))
-        self.tree.item(iid, open=True)
-        return iid
-
-    def add_skill_row(self, parent_id, skill_name, source, details):
-        """Add a child skill row to a card node"""
-        values = (
-            skill_name,
-            "", # Rarity column empty for skills
-            source,
-            details
-        )
-        self.tree.insert(parent_id, tk.END, values=values)
+        info = ctk.CTkFrame(header, fg_color="transparent")
+        info.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        ctk.CTkLabel(info, text=name, font=FONT_SUBHEADER, text_color=TEXT_PRIMARY, anchor="w").pack(fill=tk.X)
+        ctk.CTkLabel(info, text=f"{get_type_icon(card_type)} {card_type} • {rarity} {'• Owned' if is_owned else ''}", 
+                     font=FONT_SMALL, text_color=get_rarity_color(rarity), anchor="w").pack(fill=tk.X)
+        
+        if not skills:
+            ctk.CTkLabel(block_frame, text="No notable skills found for this card.", font=FONT_BODY, text_color=TEXT_MUTED).pack(pady=10)
+            return
+            
+        # Skills Container
+        skills_container = ctk.CTkFrame(block_frame, fg_color="transparent")
+        skills_container.pack(fill=tk.X, padx=15, pady=(0, 15))
+        
+        # We can simulate a grid/table for skills vertically
+        for skill in skills:
+            skill_row = ctk.CTkFrame(skills_container, fg_color=BG_MEDIUM, corner_radius=6)
+            skill_row.pack(fill=tk.X, pady=3)
+            
+            # Left: Skill Name + Source
+            left_col = ctk.CTkFrame(skill_row, fg_color="transparent", width=250)
+            left_col.pack(side=tk.LEFT, fill=tk.Y, padx=12, pady=8)
+            left_col.pack_propagate(False)
+            
+            prefix = "✨ " if skill['golden'] else "• "
+            c_name = ACCENT_WARNING if skill['golden'] else TEXT_PRIMARY
+            c_src = ACCENT_SECONDARY if 'Event' in skill['source'] else TEXT_MUTED
+            
+            ctk.CTkLabel(left_col, text=f"{prefix}{skill['name']}", font=FONT_BODY_BOLD, text_color=c_name, anchor="w").pack(fill=tk.X)
+            ctk.CTkLabel(left_col, text=skill['source'], font=FONT_TINY, text_color=c_src, anchor="w").pack(fill=tk.X)
+            
+            # Right: Details
+            right_col = ctk.CTkFrame(skill_row, fg_color="transparent")
+            right_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=8)
+            
+            ctk.CTkLabel(right_col, text=skill['desc'] if skill['desc'] else "No description available", 
+                         font=FONT_SMALL, text_color=TEXT_SECONDARY, justify="left", anchor="w", wraplength=400).pack(fill=tk.X)
 
     def set_card(self, card_id):
         """Show skills for a single card selection"""
         card = get_card_by_id(card_id)
         if not card: return
-        
         card_id, name, rarity, card_type, max_level, url, image_path, is_owned, owned_level = card
         
         self.current_mode = "Single"
         self.mode_label.configure(text=f"Card: {name}", text_color=ACCENT_SECONDARY)
         
-        # Clear tree
-        for item in self.tree.get_children():
-            self.tree.delete(item)
+        self._clear_blocks()
             
         total_skills = 0
-        
-        # Create Parent Node
-        owned_mark = "★ " if is_owned else "   "
-        parent_id = self.add_card_node(card_id, owned_mark, name, rarity, card_type, image_path)
-        
-        # 1. Hints
+        skills = []
         hints = get_hints(card_id)
         for h_name, h_desc in hints:
-            self.add_skill_row(parent_id, h_name, "Training Hint", h_desc)
+            skills.append({"name": h_name, "source": "Training Hint", "desc": h_desc, "golden": False})
             total_skills += 1
             
-        # 2. Event Skills
         events = get_all_event_skills(card_id)
         for event in events:
-            self.add_skill_row(parent_id, event['skill_name'], "Event", event['details'])
+            src = "Event"
+            golden = False
+            if event.get('is_gold', False):
+                src = "Event (Golden)"
+                golden = True
+            skills.append({"name": event['skill_name'], "source": src, "desc": event['details'], "golden": golden})
             total_skills += 1
-                
+            
+        self._render_card_block(card_id, name, rarity, card_type, image_path, is_owned, skills)
         self.stats_label.configure(text=f"Showing {total_skills} skill sources for {name}")
