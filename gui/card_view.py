@@ -39,6 +39,11 @@ class CardListFrame(ctk.CTkFrame):
         self.card_image = None
         self.icon_cache = {}  # Cache for list icons
         
+        # Pagination state
+        self.current_page = 0
+        self.items_per_page = 40
+        self.filtered_cards = []
+        
         # Create main layout
         self.create_widgets()
         self.load_cards()
@@ -162,6 +167,19 @@ class CardListFrame(ctk.CTkFrame):
         # Store references to card widgets so they can be destroyed on refresh
         self.card_widgets = []
         
+        # Pagination controls
+        self.pagination_frame = ctk.CTkFrame(left_frame, fg_color="transparent")
+        self.pagination_frame.pack(fill=tk.X, pady=(5, 10))
+        
+        self.btn_prev = create_styled_button(self.pagination_frame, text="◀ Prev", command=self.prev_page, width=80, style_type="secondary")
+        self.btn_prev.pack(side=tk.LEFT, padx=10)
+        
+        self.page_label = ctk.CTkLabel(self.pagination_frame, text="Page 1 of 1", font=FONT_BODY_BOLD, text_color=TEXT_PRIMARY)
+        self.page_label.pack(side=tk.LEFT, expand=True)
+        
+        self.btn_next = create_styled_button(self.pagination_frame, text="Next ▶", command=self.next_page, width=80, style_type="secondary")
+        self.btn_next.pack(side=tk.RIGHT, padx=10)
+        
         # === Right Panel Contents (Details) ===
         self.create_details_panel()
     
@@ -271,7 +289,9 @@ class CardListFrame(ctk.CTkFrame):
     def load_cards(self):
         """Load all cards from database"""
         self.cards = get_all_cards()
-        self.populate_tree(self.cards)
+        self.filtered_cards = self.cards
+        self.current_page = 0
+        self.populate_tree()
     
     def reset_filters(self):
         """Reset all filters to default"""
@@ -292,35 +312,43 @@ class CardListFrame(ctk.CTkFrame):
         
         self.cards = get_all_cards(rarity_filter=rarity, type_filter=card_type, 
                                    search_term=search, owned_only=owned_only)
-        self.populate_tree(self.cards)
+        self.filtered_cards = self.cards
+        self.current_page = 0
+        self.populate_tree()
         self.count_label.configure(text=f"{len(self.cards)} cards")
     
-    def sort_column(self, col, reverse):
-        """Sort treeview by column"""
-        l = [(self.tree.set(k, col), k) for k in self.tree.get_children('')]
-        
-        if col == 'owned':
-             l.sort(key=lambda t: t[0] if t[0] else "", reverse=reverse)
-        elif col == 'rarity':
-            rarity_map = {'SSR': 3, 'SR': 2, 'R': 1}
-            l.sort(key=lambda t: rarity_map.get(t[0], 0), reverse=reverse)
-        else:
-            l.sort(reverse=reverse)
+    def prev_page(self):
+        if self.current_page > 0:
+            self.current_page -= 1
+            self.populate_tree()
             
-        for index, (val, k) in enumerate(l):
-            self.tree.move(k, '', index)
-            
-        self.tree.heading(col, command=lambda: self.sort_column(col, not reverse))
+    def next_page(self):
+        max_page = max(0, (len(self.filtered_cards) - 1) // self.items_per_page)
+        if self.current_page < max_page:
+            self.current_page += 1
+            self.populate_tree()
         
-    def populate_tree(self, cards):
-        """Populate scrollable frame with modern card widgets"""
+    def populate_tree(self):
+        """Populate scrollable frame with modern card widgets using pagination"""
         # Clear existing widgets
         for widget in self.card_widgets:
             widget.destroy()
         self.card_widgets.clear()
         
+        # Calculate pagination
+        start_idx = self.current_page * self.items_per_page
+        end_idx = start_idx + self.items_per_page
+        page_cards = self.filtered_cards[start_idx:end_idx]
+        
+        # Update UI Controls
+        max_page = max(1, (len(self.filtered_cards) + self.items_per_page - 1) // self.items_per_page)
+        self.page_label.configure(text=f"Page {self.current_page + 1} of {max_page}")
+        
+        self.btn_prev.configure(state="normal" if self.current_page > 0 else "disabled")
+        self.btn_next.configure(state="normal" if self.current_page < max_page - 1 else "disabled")
+        
         row, col = 0, 0
-        for card in cards:
+        for card in page_cards:
             card_id, name, rarity, card_type, max_level, image_path, is_owned, owned_level = card
             type_icon = get_type_icon(card_type)
             
@@ -383,9 +411,6 @@ class CardListFrame(ctk.CTkFrame):
             if col > 1:
                 col = 0
                 row += 1
-        
-        if hasattr(self, 'count_label'):
-            self.count_label.configure(text=f"{len(cards)} cards")
     
     def on_select(self, override_id=None):
         """Handle card selection"""

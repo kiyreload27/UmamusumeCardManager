@@ -119,7 +119,13 @@ class EffectsFrame(ctk.CTkFrame):
         
         # Populate Grid
         row, col = 0, 0
+        count = 0
         for item in processed_results:
+            if count >= 100:
+                self.status_label.configure(text=f"Showing top 100 of {len(processed_results)} effects.")
+                break
+            count += 1
+            
             r = item['data']
             
             card_id, card_name, image_path, effect_name, effect_value, level = r

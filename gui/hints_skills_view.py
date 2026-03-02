@@ -15,10 +15,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from db.db_queries import get_all_unique_skills, get_cards_with_skill, get_card_by_id, get_hints, get_all_event_skills
 from utils import resolve_image_path
 from gui.theme import (
-    BG_DARK, BG_MEDIUM, BG_LIGHT, BG_HIGHLIGHT,
+    BG_DARKEST, BG_DARK, BG_MEDIUM, BG_LIGHT, BG_HIGHLIGHT,
     ACCENT_PRIMARY, ACCENT_SECONDARY, ACCENT_TERTIARY, ACCENT_SUCCESS, ACCENT_WARNING,
     TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
-    FONT_HEADER, FONT_SUBHEADER, FONT_BODY, FONT_BODY_BOLD, FONT_SMALL,
+    FONT_HEADER, FONT_SUBHEADER, FONT_BODY, FONT_BODY_BOLD, FONT_SMALL, FONT_TINY,
     create_card_frame, get_type_icon, get_rarity_color, create_styled_button, create_styled_entry
 )
 
@@ -109,7 +109,9 @@ class SkillSearchFrame(ctk.CTkFrame):
             w.destroy()
         self.skill_widgets.clear()
         
-        for idx, item in enumerate(items):
+        display_items = items[:60]
+        
+        for idx, item in enumerate(display_items):
             if isinstance(item, tuple):
                 skill_name, is_golden = item
             else:

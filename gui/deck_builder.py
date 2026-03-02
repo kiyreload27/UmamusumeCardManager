@@ -295,7 +295,7 @@ class DeckBuilderFrame(ctk.CTkFrame):
         
         count = 0
         for card in cards:
-            if count >= 100: break # soft limit
+            if count >= 40: break # soft limit
             count += 1
             card_id, name, rarity, card_type, max_level, image_path, is_owned, owned_level = card
             
