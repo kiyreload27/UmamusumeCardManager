@@ -89,14 +89,15 @@ def download_character_image(page, gametora_id, char_name):
                 
                 // Look for character portrait - usually a large image with the character
                 const charImg = imgs.find(img => 
-                    (img.src.includes('/characters/') || img.src.includes('/chara/')) &&
-                    img.width > 50
+                    img.src.includes('chara_stand_') && img.src.includes('.png') && !img.src.includes('/thumb/')
                 );
                 
-                // Also look for images in the header/infobox area
-                const infoImg = document.querySelector('[class*="infobox"] img, [class*="header"] img, [class*="chara"] img');
+                // Fallback to thumbnail if full stand not found
+                const thumbImg = imgs.find(img =>
+                    img.src.includes('chara_stand_') && img.src.includes('.png') && img.src.includes('/thumb/')
+                );
                 
-                return charImg ? charImg.src : (infoImg ? infoImg.src : null);
+                return charImg ? charImg.src : (thumbImg ? thumbImg.src : null);
             }
         """)
 
@@ -357,8 +358,9 @@ def run_character_scraper():
                 # Download character image
                 image_path = download_character_image(page, gametora_id, name)
 
-                # Save to database
-                save_character_to_db(conn, gametora_id, url, name, aptitudes, image_path)
+                # Save to database (relative path for portability)
+                db_image_path = f"assets/characters/{os.path.basename(image_path)}" if image_path else None
+                save_character_to_db(conn, gametora_id, url, name, aptitudes, db_image_path)
                 chars_added += 1
 
                 # Log aptitude data

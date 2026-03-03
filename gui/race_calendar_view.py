@@ -4,11 +4,11 @@ Replaces the old Character and Race tabs.
 """
 
 import tkinter as tk
-from tkinter import ttk
 import customtkinter as ctk
 import sys
 import os
 import math
+import logging
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -65,7 +65,10 @@ class CharacterSelectionDialog(ctk.CTkToplevel):
             
         row, col = 0, 0
         for char in self.characters:
-            char_id, name, rarity, char_type, s_turf, s_dirt, s_short, s_mile, s_med, s_long, img_path = char[:11]
+            # char: (id, name, gametora_id, image_path, turf, dirt, short, mile, med, long, runner, leader, between, chaser)
+            char_id = char[0]
+            name = char[1]
+            img_path = char[3]
             
             card = ctk.CTkFrame(self.scroll, fg_color=BG_MEDIUM, corner_radius=8, cursor="hand2")
             card.grid(row=row, column=col, padx=8, pady=8, sticky="nsew")
@@ -307,20 +310,23 @@ class RaceCalendarViewFrame(ctk.CTkFrame):
         self.current_character = char
         self.char_name_label.configure(text=char[1])
         
-        # Try loading image
-        img_path = char[10] # image_path is at index 10 typically in get_all_characters
-        img = self._image_refs.get(char_id) if isinstance(self._image_refs, dict) else None # Using dict temporarily
-        # Actually _image_refs was instantiated as a list in init. Let's fix that below if needed, here we'll just cache it onto the label
-        resolved = resolve_image_path(img_path)
-        if resolved and os.path.exists(resolved):
-            try:
-                pil_img = Image.open(resolved)
-                pil_img.thumbnail((80, 80), Image.Resampling.LANCZOS)
-                img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(80, 80))
-                self.char_img_label.configure(image=img, text="")
-                self.char_img_label._image = img # Keep ref
-            except: 
-                self.char_img_label.configure(image=None, text="?")
+        # Load and cache character image
+        img = self._image_refs.get(char_id)
+        if img:
+            self.char_img_label.configure(image=img, text="")
+        else:
+            img_path = char[3]
+            resolved = resolve_image_path(img_path)
+            if resolved and os.path.exists(resolved):
+                try:
+                    pil_img = Image.open(resolved)
+                    pil_img.thumbnail((80, 80), Image.Resampling.LANCZOS)
+                    img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(80, 80))
+                    self._image_refs[char_id] = img  # Cache it
+                    self.char_img_label.configure(image=img, text="")
+                except (OSError, SyntaxError, ValueError) as e:
+                    logging.debug(f"Failed to load character image: {e}")
+                    self.char_img_label.configure(image=None, text="?")
         
         # Load base aptitudes into UI
         c = self.current_character
@@ -383,7 +389,7 @@ class RaceCalendarViewFrame(ctk.CTkFrame):
                 # If race class is empty (for OP/Pre-OP), we might allow it, but let's stick to matching classes.
                 # Actually, Classic/Senior races sometimes overlap. For now let's just match strictly or if empty/broad.
                 rc = r[13] or ""
-                if rc == race_class or rc == "Classic/Senior Class" and race_class in ["Classic Class", "Senior Class"] or rc == "":
+                if (rc == race_class) or (rc == "Classic/Senior Class" and race_class in ["Classic Class", "Senior Class"]) or (rc == ""):
                     if self._is_eligible(r):
                         eligible.append(r)
                         
@@ -393,7 +399,7 @@ class RaceCalendarViewFrame(ctk.CTkFrame):
         """Pick a race for the slot, or cycle to next if one is already selected"""
         eligible = self._get_eligible_races_for_date(year, date_str)
         if not eligible:
-            print(f"No eligible races for {year} {date_str}")
+            logging.debug(f"No eligible races for {year} {date_str}")
             return
             
         current = self.selected_races.get((year, date_str))

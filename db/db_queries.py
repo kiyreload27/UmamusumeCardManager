@@ -154,12 +154,38 @@ def repair_image_paths(conn):
                        (f"images/{filename}", card_id))
             repaired_count += 1
             
-    if repaired_count > 0:
+    # Also repair character image paths
+    cur.execute("SELECT character_id, name, image_path, gametora_id FROM characters")
+    char_rows = cur.fetchall()
+    char_repaired = 0
+    for cid, name, path, g_id in char_rows:
+        if path and (os.path.isabs(path) or not path.startswith('assets')):
+            # Normalize to relative path
+            filename = os.path.basename(path)
+            # If path is just a filename, assume it's in assets/characters
+            new_path = f"assets/characters/{filename}"
+            cur.execute("UPDATE characters SET image_path = ? WHERE character_id = ?", (new_path, cid))
+            char_repaired += 1
+            
+    if repaired_count > 0 or char_repaired > 0:
         conn.commit()
-        print(f"Successfully repaired {repaired_count} image paths!")
+        if repaired_count > 0:
+            print(f"Successfully repaired {repaired_count} support card image paths!")
+        if char_repaired > 0:
+            print(f"Successfully repaired {char_repaired} character image paths!")
 
 def check_for_updates():
     """Check if database version matches app version, sync if outdated"""
+    # Always ensure data integrity (run for both frozen and source)
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        repair_orphaned_data()
+        repair_image_paths(conn)
+        cleanup_orphaned_data()
+        conn.close()
+    except Exception as e:
+        logging.debug(f"Data integrity check failed: {e}")
+        
     if getattr(sys, 'frozen', False):
         bundled_seed_path = os.path.join(sys._MEIPASS, "database", "umamusume_seed.db")
         if not os.path.exists(bundled_seed_path):
@@ -182,18 +208,14 @@ def check_for_updates():
                 row = cur.fetchone()
                 db_version = row[0] if row else "0.0.0"
             
-            conn.close()
-            
-            # Compare versions (simple string compare works for semver if zero-padded, but valid enough here)
-            # Or just check inequality. If different, try to update.
+            # Compare versions
             if db_version != VERSION:
                 sync_from_seed(bundled_seed_path)
-            
-            # Always ensure data integrity
-            repair_orphaned_data()
-            cleanup_orphaned_data()
                 
+            conn.close()
         except Exception as e:
+            import traceback
+            print(f"Update check failed: {e}\n{traceback.format_exc()}")
             import traceback
             print(f"Update check failed: {e}\n{traceback.format_exc()}")
 

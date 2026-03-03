@@ -4,10 +4,10 @@ Redesigned with modern grids and styled cards
 """
 
 import tkinter as tk
-from tkinter import ttk
 import customtkinter as ctk
 import sys
 import os
+import logging
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -34,8 +34,9 @@ class SkillSearchFrame(ctk.CTkFrame):
         self.skill_widgets = []
         self.result_widgets = []
         
-        self._rendering_skills = False
-        self._rendering_cards = False
+        # Generation counters for safe async rendering cancellation
+        self._skill_render_gen = 0
+        self._card_render_gen = 0
         self._skill_render_queue = []
         self._card_render_queue = []
         
@@ -110,21 +111,22 @@ class SkillSearchFrame(ctk.CTkFrame):
         
     def update_skill_list(self, items):
         """Update skill list UI sequentially to avoid blocking"""
-        self._rendering_skills = False # Cancel any ongoing render
+        # Increment generation to cancel any in-flight render
+        self._skill_render_gen += 1
+        my_gen = self._skill_render_gen
         
         for w in self.skill_widgets:
             w.destroy()
         self.skill_widgets.clear()
         
         display_items = items[:60]
-        self._skill_render_queue = display_items
-        self._rendering_skills = True
+        self._skill_render_queue = display_items[:]
         
-        self._process_skill_queue()
+        self._process_skill_queue(my_gen)
         
-    def _process_skill_queue(self):
-        if not self._rendering_skills or not self._skill_render_queue:
-            self._rendering_skills = False
+    def _process_skill_queue(self, gen):
+        # Abort if a newer render has started
+        if gen != self._skill_render_gen or not self._skill_render_queue:
             return
             
         # Process up to 10 at a time
@@ -155,8 +157,8 @@ class SkillSearchFrame(ctk.CTkFrame):
             btn.configure(command=lambda n=skill_name, b=btn: self._select_skill_widget(n, b))
             self.skill_widgets.append(btn)
             
-        if self._skill_render_queue:
-            self.after(20, self._process_skill_queue)
+        if self._skill_render_queue and gen == self._skill_render_gen:
+            self.after(20, lambda: self._process_skill_queue(gen))
             
     def filter_skills(self, *args):
         search = self.search_var.get().lower()
@@ -186,7 +188,10 @@ class SkillSearchFrame(ctk.CTkFrame):
     
     def show_cards_for_skill(self, skill_name):
         self.current_skill = skill_name
-        self._rendering_cards = False # Cancel any ongoing render
+        # Increment generation to cancel any in-flight render
+        self._card_render_gen += 1
+        my_gen = self._card_render_gen
+        
         self.result_header.configure(text=f"Cards with ✨ {skill_name}")
         
         for w in self.result_widgets:
@@ -204,18 +209,18 @@ class SkillSearchFrame(ctk.CTkFrame):
             
         self.stats_label.configure(text=f"Loading cards...")
         
-        self._card_render_queue = filtered_cards
+        self._card_render_queue = filtered_cards[:]
         self._card_render_row = 0
         self._card_render_col = 0
         self._card_render_count = 0
-        self._rendering_cards = True
         
-        self._process_card_queue()
+        self._process_card_queue(my_gen)
         
-    def _process_card_queue(self):
-        if not self._rendering_cards or not self._card_render_queue:
-            self._rendering_cards = False
-            self.stats_label.configure(text=f"Found {self._card_render_count} cards teaching ✨ {self.current_skill}")
+    def _process_card_queue(self, gen):
+        # Abort if a newer render has started
+        if gen != self._card_render_gen or not self._card_render_queue:
+            if gen == self._card_render_gen:
+                self.stats_label.configure(text=f"Found {self._card_render_count} cards teaching ✨ {self.current_skill}")
             return
             
         # Process up to 5 cards per frame to maintain 60fps interaction
@@ -246,7 +251,8 @@ class SkillSearchFrame(ctk.CTkFrame):
                         pil_img.thumbnail((70, 70), Image.Resampling.LANCZOS)
                         img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(70, 70))
                         self.icon_cache[card_id] = img
-                    except: pass
+                    except (OSError, SyntaxError, ValueError) as e:
+                        logging.debug(f"Failed to load skill card icon: {e}")
             
             img_label = ctk.CTkLabel(card_frame, text="", image=img if img else None, width=70, height=70, corner_radius=8)
             img_label.pack(side=tk.LEFT, padx=10, pady=10)
@@ -277,8 +283,8 @@ class SkillSearchFrame(ctk.CTkFrame):
                 self._card_render_col = 0
                 self._card_render_row += 1
                 
-        if self._card_render_queue:
-            self.after(10, self._process_card_queue)
+        if self._card_render_queue and gen == self._card_render_gen:
+            self.after(10, lambda: self._process_card_queue(gen))
 
     def set_card(self, card_id):
         pass

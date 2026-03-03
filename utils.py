@@ -33,10 +33,14 @@ def resolve_image_path(db_path):
     # 2. Source code directory
     source_dir = os.path.dirname(os.path.abspath(__file__))
     search_dirs.append(os.path.join(source_dir, 'images'))
+    search_dirs.append(os.path.join(source_dir, 'assets', 'characters'))
+    search_dirs.append(os.path.join(source_dir, 'assets', 'cards'))
     
     # 3. Parent of source code (project root)
     project_root = os.path.dirname(source_dir)
     search_dirs.append(os.path.join(project_root, 'images'))
+    search_dirs.append(os.path.join(project_root, 'assets', 'characters'))
+    search_dirs.append(os.path.join(project_root, 'assets', 'cards'))
 
     # Try each search directory
     for d in search_dirs:

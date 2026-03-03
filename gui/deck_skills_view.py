@@ -7,6 +7,7 @@ import tkinter as tk
 import customtkinter as ctk
 import sys
 import os
+import logging
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -33,6 +34,10 @@ class DeckSkillsFrame(ctk.CTkFrame):
         self.icon_cache = {}
         self.current_mode = "Deck"
         self.card_blocks = []
+        
+        # Generation counter for safe async rendering cancellation
+        self._block_render_gen = 0
+        self._block_render_queue = []
         
         self.create_widgets()
         self.refresh_decks()
@@ -91,12 +96,17 @@ class DeckSkillsFrame(ctk.CTkFrame):
 
     def show_deck_skills(self, deck_id):
         self._clear_blocks()
+        # Increment generation to cancel any in-flight render
+        self._block_render_gen += 1
+        my_gen = self._block_render_gen
             
         deck_cards = get_deck_cards(deck_id)
         if not deck_cards:
             self.stats_label.configure(text="Deck is empty")
             return
-            
+        
+        # Build card data with skills before rendering so DB isn't called in `.after` loop
+        card_data_list = []
         total_skills = 0
         for card_row in deck_cards:
             slot_pos, level, card_id, name, rarity, card_type, image_path = card_row
@@ -118,10 +128,31 @@ class DeckSkillsFrame(ctk.CTkFrame):
                     golden = True
                 skills.append({"name": event['skill_name'], "source": src, "desc": event['details'], "golden": golden})
                 total_skills += 1
-                
-            self._render_card_block(card_id, name, rarity, card_type, image_path, is_owned, skills)
-                    
-        self.stats_label.configure(text=f"Found {total_skills} total skill sources in deck")
+            
+            card_data_list.append((card_id, name, rarity, card_type, image_path, is_owned, skills))
+        
+        self.stats_label.configure(text=f"Loading... ({total_skills} skill sources)")
+        self._block_render_queue = card_data_list[:]
+        
+        self._process_block_queue(my_gen)
+    
+    def _process_block_queue(self, gen):
+        """Process one card block per frame to stay responsive"""
+        if gen != self._block_render_gen or not self._block_render_queue:
+            if gen == self._block_render_gen:
+                total = sum(len(c[6]) for c in []) # Tally done
+                self.stats_label.configure(text=self.stats_label.cget('text').replace('Loading...', 'Done'))
+            return
+        
+        # Render one card block per tick
+        card_id, name, rarity, card_type, image_path, is_owned, skills = self._block_render_queue.pop(0)
+        self._render_card_block(card_id, name, rarity, card_type, image_path, is_owned, skills)
+        
+        if self._block_render_queue and gen == self._block_render_gen:
+            self.after(25, lambda: self._process_block_queue(gen))
+        elif gen == self._block_render_gen:
+            # Done rendering all blocks
+            pass  # stats_label was set before queuing
 
     def _render_card_block(self, card_id, name, rarity, card_type, image_path, is_owned, skills):
         """Render a modern expandable card block containing all its skills"""
@@ -143,7 +174,8 @@ class DeckSkillsFrame(ctk.CTkFrame):
                     pil_img.thumbnail((48, 48), Image.Resampling.LANCZOS)
                     img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(48, 48))
                     self.icon_cache[card_id] = img
-                except: pass
+                except (OSError, SyntaxError, ValueError) as e:
+                    logging.debug(f"Failed to load deck skill card icon: {e}")
         
         ctk.CTkLabel(header, text="", image=img if img else None, width=48, height=48, corner_radius=8).pack(side=tk.LEFT, padx=(0, 15))
         

@@ -169,7 +169,8 @@ class DeckBuilderFrame(ctk.CTkFrame):
         self.av_card_widgets = []
         self.selected_av_card_id = None
         
-        self._rendering_cards = False
+        # Generation counter for safe async rendering cancellation
+        self._card_render_gen = 0
         self._card_render_queue = []
         
         self.setup_ui()
@@ -286,7 +287,10 @@ class DeckBuilderFrame(ctk.CTkFrame):
             c.configure(fg_color=BG_MEDIUM if getattr(c, '_data_id', None) == card_id else BG_DARK)
     
     def filter_cards(self):
-        self._rendering_cards = False # Cancel ongoing
+        # Increment generation to cancel any in-flight render
+        self._card_render_gen += 1
+        my_gen = self._card_render_gen
+        
         for widget in self.av_card_widgets:
             widget.destroy()
         self.av_card_widgets.clear()
@@ -297,14 +301,13 @@ class DeckBuilderFrame(ctk.CTkFrame):
         owned_only = self.owned_only_var.get()
         
         cards = get_all_cards(type_filter=type_filter, search_term=search, owned_only=owned_only)
-        self._card_render_queue = cards[:40] # soft limit
-        self._rendering_cards = True
+        self._card_render_queue = list(cards[:40])  # soft limit
         
-        self._process_card_queue()
+        self._process_card_queue(my_gen)
         
-    def _process_card_queue(self):
-        if not self._rendering_cards or not self._card_render_queue:
-            self._rendering_cards = False
+    def _process_card_queue(self, gen):
+        # Abort if a newer render has started
+        if gen != self._card_render_gen or not self._card_render_queue:
             return
             
         # Process 5 cards per frame to stay at 60fps interaction
@@ -335,7 +338,9 @@ class DeckBuilderFrame(ctk.CTkFrame):
                         pil_img.thumbnail((40, 40), Image.Resampling.LANCZOS)
                         img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(40, 40))
                         self.icon_cache[card_id] = img
-                    except: pass
+                    except (OSError, SyntaxError, ValueError) as e:
+                        import logging
+                        logging.debug(f"Failed to load card icon {image_path}: {e}")
             
             ctk.CTkLabel(row_frame, text="", image=img if img else None, width=40, height=40, corner_radius=4).pack(side=tk.LEFT, padx=5, pady=5)
             
@@ -347,8 +352,8 @@ class DeckBuilderFrame(ctk.CTkFrame):
             
             make_clickable(row_frame)
             
-        if self._card_render_queue:
-            self.after(15, self._process_card_queue)
+        if self._card_render_queue and gen == self._card_render_gen:
+            self.after(15, lambda: self._process_card_queue(gen))
 
     def refresh_decks(self):
         decks = get_all_decks()

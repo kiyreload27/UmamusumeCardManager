@@ -4,11 +4,11 @@ Updated for CustomTkinter
 """
 
 import tkinter as tk
-from tkinter import ttk
 import customtkinter as ctk
 import sys
 import os
-from PIL import Image, ImageTk
+import logging
+from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -140,12 +140,11 @@ class CardListFrame(ctk.CTkFrame):
         )
         owned_check.pack(side=tk.LEFT)
         
-        # Shortcuts
-        # Shortcuts
+        # Keyboard shortcut: Ctrl+F focuses search
         try:
             self.winfo_toplevel().bind('<Control-f>', lambda e: self.search_entry.focus_set())
         except AttributeError:
-            pass # In case toplevel isn't ready or doesn't support bind yet
+            pass
         
         # Card count label
         self.count_label = ctk.CTkLabel(
@@ -156,20 +155,9 @@ class CardListFrame(ctk.CTkFrame):
         )
         self.count_label.pack(pady=(5, 5))
         
-        # Card list (Modern Grid/List replacing Treeview)
-        self.scroll_container = ctk.CTkScrollableFrame(left_frame, fg_color="transparent")
-        self.scroll_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
-        
-        # We will use a 2-column grid in the scroll container
-        self.scroll_container.columnconfigure(0, weight=1)
-        self.scroll_container.columnconfigure(1, weight=1)
-        
-        # Store references to card widgets so they can be destroyed on refresh
-        self.card_widgets = []
-        
-        # Pagination controls
+        # Pagination controls (placed ABOVE scroll area so it's always visible)
         self.pagination_frame = ctk.CTkFrame(left_frame, fg_color="transparent")
-        self.pagination_frame.pack(fill=tk.X, pady=(5, 10))
+        self.pagination_frame.pack(fill=tk.X, pady=(0, 5))
         
         self.btn_prev = create_styled_button(self.pagination_frame, text="◀ Prev", command=self.prev_page, width=80, style_type="secondary")
         self.btn_prev.pack(side=tk.LEFT, padx=10)
@@ -179,6 +167,17 @@ class CardListFrame(ctk.CTkFrame):
         
         self.btn_next = create_styled_button(self.pagination_frame, text="Next ▶", command=self.next_page, width=80, style_type="secondary")
         self.btn_next.pack(side=tk.RIGHT, padx=10)
+        
+        # Card list (fills remaining space below pagination)
+        self.scroll_container = ctk.CTkScrollableFrame(left_frame, fg_color="transparent")
+        self.scroll_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+        
+        # We will use a 2-column grid in the scroll container
+        self.scroll_container.columnconfigure(0, weight=1)
+        self.scroll_container.columnconfigure(1, weight=1)
+        
+        # Store references to card widgets so they can be destroyed on refresh
+        self.card_widgets = []
         
         # === Right Panel Contents (Details) ===
         self.create_details_panel()
@@ -382,8 +381,8 @@ class CardListFrame(ctk.CTkFrame):
                         pil_img.thumbnail((80, 80), Image.Resampling.LANCZOS)
                         img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(80, 80))
                         self.icon_cache[card_id] = img
-                    except:
-                        pass
+                    except (OSError, SyntaxError, ValueError) as e:
+                        logging.debug(f"Failed to load card icon {image_path}: {e}")
                         
             img_label = ctk.CTkLabel(card_frame, text="", image=img if img else None, width=80, height=80, corner_radius=8)
             img_label.pack(side=tk.LEFT, padx=10, pady=10)
