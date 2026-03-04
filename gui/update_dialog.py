@@ -16,10 +16,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from updater.update_checker import check_for_updates, download_update, apply_update, get_current_version
 from gui.theme import (
-    BG_DARK, BG_MEDIUM, BG_LIGHT, BG_HIGHLIGHT,
+    BG_DARK, BG_MEDIUM, BG_LIGHT, BG_HIGHLIGHT, BG_ELEVATED,
     ACCENT_PRIMARY, ACCENT_SECONDARY, ACCENT_SUCCESS, ACCENT_ERROR,
     TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
-    FONT_HEADER, FONT_SUBHEADER, FONT_BODY, FONT_BODY_BOLD, FONT_SMALL,
+    FONT_HEADER, FONT_SUBHEADER, FONT_BODY, FONT_BODY_BOLD, FONT_SMALL, FONT_TINY,
+    SPACING_SM, SPACING_MD, SPACING_LG, SPACING_XL,
+    RADIUS_MD, RADIUS_LG,
     create_styled_button
 )
 
@@ -75,18 +77,19 @@ class UpdateDialog:
     
     def setup_ui(self):
         """Set up the dialog UI."""
-        # Main container (CTk has its own bg, so we don't strictly need a frame, but for padding)
+        self.dialog.configure(fg_color=BG_DARK)
+
         main_frame = ctk.CTkFrame(self.dialog, fg_color="transparent")
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=SPACING_LG, pady=SPACING_LG)
         
         # Title
         self.title_label = ctk.CTkLabel(
             main_frame, 
-            text="🔄 Checking for Updates...",
+            text="🔄  Checking for Updates...",
             font=FONT_HEADER,
             text_color=ACCENT_PRIMARY
         )
-        self.title_label.pack(pady=(0, 10))
+        self.title_label.pack(pady=(0, SPACING_SM))
         
         # Status message
         self.status_label = ctk.CTkLabel(
@@ -96,11 +99,11 @@ class UpdateDialog:
             text_color=TEXT_MUTED,
             wraplength=460
         )
-        self.status_label.pack(pady=(0, 10))
+        self.status_label.pack(pady=(0, SPACING_SM))
         
         # Version info frame
-        self.version_frame = ctk.CTkFrame(main_frame, fg_color=BG_MEDIUM)
-        self.version_frame.pack(fill=tk.X, pady=(0, 15), padx=5)
+        self.version_frame = ctk.CTkFrame(main_frame, fg_color=BG_MEDIUM, corner_radius=RADIUS_MD)
+        self.version_frame.pack(fill=tk.X, pady=(0, SPACING_MD), padx=SPACING_XS)
         
         self.current_version_label = ctk.CTkLabel(
             self.version_frame,
@@ -134,9 +137,11 @@ class UpdateDialog:
             fg_color=BG_MEDIUM,
             text_color=TEXT_SECONDARY,
             font=FONT_SMALL,
-            border_width=0
+            border_width=1,
+            border_color=BG_LIGHT,
+            corner_radius=RADIUS_MD
         )
-        self.notes_text.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
+        self.notes_text.pack(fill=tk.BOTH, expand=True, pady=(0, SPACING_MD))
         self.notes_text.insert("1.0", "Checking for release notes...")
         self.notes_text.configure(state=tk.DISABLED)
         
@@ -162,7 +167,7 @@ class UpdateDialog:
         
         # Button frame
         self.button_frame = ctk.CTkFrame(self.dialog, fg_color="transparent")
-        self.button_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=20, pady=20)
+        self.button_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=SPACING_LG, pady=SPACING_LG)
         
         # Close button
         self.close_button = create_styled_button(
