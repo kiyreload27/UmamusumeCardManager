@@ -191,6 +191,8 @@ class RaceCalendarViewFrame(ctk.CTkFrame):
 
         self.selected_races = {}
         self._image_refs = {}
+        self._race_image_cache = {}  # track_image_path -> CTkImage
+        self._stat_change_after_id = None
         self.calendar_tabs = None
         self.slot_frames = {}
 
@@ -303,6 +305,9 @@ class RaceCalendarViewFrame(ctk.CTkFrame):
             tab = self.calendar_tabs.add(year)
             self._build_year_grid(tab, year)
 
+        # Refresh calendar when switching year tabs (lazy refresh)
+        self.calendar_tabs.configure(command=self._on_year_tab_changed)
+
     def _build_year_grid(self, parent_tab, year):
         """Build the 4x6 grid of half-months for a specific year"""
         scroll = ctk.CTkScrollableFrame(parent_tab, fg_color="transparent")
@@ -368,7 +373,21 @@ class RaceCalendarViewFrame(ctk.CTkFrame):
             self.char_name_label.configure(text="No characters found")
 
     def _on_stat_change(self, _=None):
-        self._refresh_calendar()
+        """Debounced aptitude change — wait 150ms to avoid per-click full re-render"""
+        if self._stat_change_after_id is not None:
+            self.after_cancel(self._stat_change_after_id)
+        self._stat_change_after_id = self.after(150, self._do_stat_refresh)
+
+    def _do_stat_refresh(self):
+        self._stat_change_after_id = None
+        # Only refresh the currently visible tab to keep UI snappy;
+        # other tabs will refresh when switched to via _on_year_tab_changed.
+        if self.calendar_tabs:
+            visible_year = self.calendar_tabs.get()
+            for month in MONTHS:
+                for half in HALF_MONTHS:
+                    date_str = format_half_month(month, half)
+                    self._refresh_slot(visible_year, date_str)
 
     def _on_character_select_id(self, char_id):
         char = next((c for c in self.characters if c[0] == char_id), None)
@@ -473,6 +492,16 @@ class RaceCalendarViewFrame(ctk.CTkFrame):
             del self.selected_races[(year, date_str)]
         self._refresh_slot(year, date_str)
 
+    def _on_year_tab_changed(self, *_):
+        """Refresh slots in the newly visible year tab"""
+        if not self.calendar_tabs:
+            return
+        year = self.calendar_tabs.get()
+        for month in MONTHS:
+            for half in HALF_MONTHS:
+                date_str = format_half_month(month, half)
+                self._refresh_slot(year, date_str)
+
     def _refresh_calendar(self):
         for year in YEARS:
             for month in MONTHS:
@@ -533,10 +562,47 @@ class RaceCalendarViewFrame(ctk.CTkFrame):
             ).pack()
 
             short_name = name[:14] + "…" if len(name) > 14 else name
-            ctk.CTkLabel(
-                card, text=short_name,
-                font=FONT_TINY, text_color=TEXT_PRIMARY
-            ).pack(pady=(0, SPACING_XS))
+
+            # Track image (small, beside race name)
+            track_img_path = race[14] if len(race) > 14 else None
+            if track_img_path:
+                cached = self._race_image_cache.get(track_img_path)
+                if not cached:
+                    from utils import resolve_image_path
+                    resolved = resolve_image_path(track_img_path)
+                    if resolved and os.path.exists(resolved):
+                        try:
+                            pil_img = Image.open(resolved)
+                            pil_img.thumbnail((40, 28), Image.Resampling.LANCZOS)
+                            cached = ctk.CTkImage(
+                                light_image=pil_img, dark_image=pil_img,
+                                size=(40, 28)
+                            )
+                            self._race_image_cache[track_img_path] = cached
+                        except Exception:
+                            cached = None
+
+                if cached:
+                    img_row = ctk.CTkFrame(card, fg_color="transparent")
+                    img_row.pack(pady=(SPACING_XS, 0))
+                    ctk.CTkLabel(
+                        img_row, text="", image=cached,
+                        width=40, height=28
+                    ).pack(side=tk.LEFT, padx=(0, SPACING_XS))
+                    ctk.CTkLabel(
+                        img_row, text=short_name,
+                        font=FONT_TINY, text_color=TEXT_PRIMARY
+                    ).pack(side=tk.LEFT)
+                else:
+                    ctk.CTkLabel(
+                        card, text=short_name,
+                        font=FONT_TINY, text_color=TEXT_PRIMARY
+                    ).pack(pady=(0, SPACING_XS))
+            else:
+                ctk.CTkLabel(
+                    card, text=short_name,
+                    font=FONT_TINY, text_color=TEXT_PRIMARY
+                ).pack(pady=(0, SPACING_XS))
 
             # Terrain + distance badges
             terrain_text = race[7] or ""

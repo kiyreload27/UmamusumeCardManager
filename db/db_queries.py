@@ -83,7 +83,10 @@ def get_conn():
         run_migrations()
         check_for_updates()
         
-    return sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    return conn
 
 def run_migrations():
     """Ensure database schema is up to date by adding missing columns"""
@@ -1914,36 +1917,42 @@ def get_character_count():
 # ============================================
 
 def get_all_races(search_term=None, grade_filter=None, terrain_filter=None, distance_filter=None):
-    """Get all active races with optional filtering"""
+    """Get all active races with optional filtering.
+    Returns a 15-column tuple: (race_id, name_en, name_jp, grade, racetrack, direction,
+    participants, terrain, distance_type, distance_meters, season, time_of_day,
+    race_date, race_class, track_image_path)
+    """
     conn = get_conn()
     cur = conn.cursor()
     try:
         query = """
-            SELECT race_id, name_en, name_jp, grade, racetrack, direction,
-                   participants, terrain, distance_type, distance_meters,
-                   season, time_of_day, race_date, race_class
-            FROM races
-            WHERE is_active = 1
+            SELECT r.race_id, r.name_en, r.name_jp, r.grade, r.racetrack, r.direction,
+                   r.participants, r.terrain, r.distance_type, r.distance_meters,
+                   r.season, r.time_of_day, r.race_date, r.race_class,
+                   t.image_path as track_image_path
+            FROM races r
+            LEFT JOIN tracks t ON r.racetrack = t.name
+            WHERE r.is_active = 1
         """
         params = []
         
         if search_term:
-            query += " AND (name_en LIKE ? OR name_jp LIKE ? OR racetrack LIKE ?)"
+            query += " AND (r.name_en LIKE ? OR r.name_jp LIKE ? OR r.racetrack LIKE ?)"
             params.extend([f"%{search_term}%", f"%{search_term}%", f"%{search_term}%"])
         
         if grade_filter:
-            query += " AND grade = ?"
+            query += " AND r.grade = ?"
             params.append(grade_filter)
         
         if terrain_filter:
-            query += " AND terrain = ?"
+            query += " AND r.terrain = ?"
             params.append(terrain_filter)
         
         if distance_filter:
-            query += " AND distance_type = ?"
+            query += " AND r.distance_type = ?"
             params.append(distance_filter)
         
-        query += " ORDER BY grade, distance_meters"
+        query += " ORDER BY r.grade, r.distance_meters"
         
         cur.execute(query, params)
         rows = cur.fetchall()

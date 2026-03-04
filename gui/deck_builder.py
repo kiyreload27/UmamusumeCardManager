@@ -238,6 +238,10 @@ class DeckBuilderFrame(ctk.CTkFrame):
 
         self._card_render_gen = 0
         self._card_render_queue = []
+        # Persistent card data keyed by card_id so we can look up level even
+        # after the render queue has been consumed chunk-by-chunk.
+        self._all_rendered_cards = {}
+        self._search_after_id = None
 
         self.setup_ui()
         self.refresh_decks()
@@ -280,7 +284,7 @@ class DeckBuilderFrame(ctk.CTkFrame):
             placeholder_text="Search..."
         )
         self.search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, SPACING_SM))
-        self.search_entry.bind('<KeyRelease>', lambda e: self.filter_cards())
+        self.search_entry.bind('<KeyRelease>', self._schedule_filter)
 
         types = ["All", "Speed", "Stamina", "Power", "Guts", "Wisdom", "Friend", "Group"]
         type_combo = ctk.CTkComboBox(
@@ -501,9 +505,8 @@ class DeckBuilderFrame(ctk.CTkFrame):
             # Replace existing card
             remove_card_from_deck(self.current_deck_id, slot_index)
 
-        # Use the card's owned level from the Card Library; fall back to rarity max
-        card_data = next((c for c in self._card_render_queue if c[0] == card_id), None)
-        level = self._get_card_level(card_data)
+        # Use the card's owned level from the persistent card dict
+        level = self._get_card_level(card_id)
 
         add_card_to_deck(self.current_deck_id, card_id, slot_index, level)
         self.load_deck()
@@ -582,13 +585,22 @@ class DeckBuilderFrame(ctk.CTkFrame):
                 fg_color=BG_ELEVATED if is_sel else BG_DARK
             )
 
+    def _schedule_filter(self, _=None):
+        """Debounce filter so we don't query the DB on every keystroke"""
+        if self._search_after_id is not None:
+            self.after_cancel(self._search_after_id)
+        self._search_after_id = self.after(300, self.filter_cards)
+
     def filter_cards(self):
+        self._search_after_id = None
         self._card_render_gen += 1
         my_gen = self._card_render_gen
 
         for widget in self.av_card_widgets:
             widget.destroy()
         self.av_card_widgets.clear()
+        # Clear persistent lookup so stale cards from old filters are gone
+        self._all_rendered_cards.clear()
 
         type_filter = self.type_var.get() if self.type_var.get() != "All" else None
         search_text = self.search_var.get()
@@ -603,11 +615,13 @@ class DeckBuilderFrame(ctk.CTkFrame):
         if gen != self._card_render_gen or not self._card_render_queue:
             return
 
-        chunk = self._card_render_queue[:5]
-        self._card_render_queue = self._card_render_queue[5:]
+        chunk = self._card_render_queue[:10]
+        self._card_render_queue = self._card_render_queue[10:]
 
         for card in chunk:
             card_id, name, rarity, card_type, max_level, image_path, is_owned, owned_level = card
+            # Store in persistent dict so level lookup always works later
+            self._all_rendered_cards[card_id] = card
 
             row_frame = ctk.CTkFrame(
                 self.card_scroll, fg_color=BG_DARK,
@@ -664,7 +678,7 @@ class DeckBuilderFrame(ctk.CTkFrame):
             make_draggable(row_frame)
 
         if self._card_render_queue and gen == self._card_render_gen:
-            self.after(15, lambda: self._process_card_queue(gen))
+            self.after(20, lambda: self._process_card_queue(gen))
 
     # --- Deck CRUD ---
 
@@ -726,9 +740,19 @@ class DeckBuilderFrame(ctk.CTkFrame):
                 self.update_deck_count()
                 self.update_effects_breakdown()
 
-    def _get_card_level(self, card_data):
+    def _get_card_level(self, card_id_or_data):
         """Get the appropriate level for a card when adding to deck.
+        Accepts either a card_id (int) or a card data tuple.
         Uses owned level from Card Library; falls back to rarity-based max."""
+        # Resolve card_data from persistent dict if given an id
+        if isinstance(card_id_or_data, int):
+            card_data = self._all_rendered_cards.get(card_id_or_data)
+        else:
+            card_data = card_id_or_data
+            # Also update the persistent cache with this data
+            if card_data:
+                self._all_rendered_cards[card_data[0]] = card_data
+
         if card_data:
             # card_data from get_all_cards: (card_id, name, rarity, card_type, max_level, image_path, is_owned, owned_level)
             owned_level = card_data[7]  # owned_level from Card Library
@@ -758,9 +782,8 @@ class DeckBuilderFrame(ctk.CTkFrame):
             messagebox.showinfo("Duplicate", "This card is already in the deck.")
             return
 
-        # Look up owned level from the card browser data
-        card_data = next((c for c in self._card_render_queue if c[0] == card_id), None)
-        level = self._get_card_level(card_data)
+        # Look up owned level from the persistent card dict (never wiped during render)
+        level = self._get_card_level(card_id)
 
         for i in range(6):
             if self.deck_slots[i] is None:
