@@ -1,6 +1,6 @@
 """
 Main Window for Umamusume Support Card Manager
-Premium interface with grouped sidebar navigation and refined content area
+Premium interface with collapsible sidebar navigation and responsive content area
 """
 
 import tkinter as tk
@@ -20,16 +20,19 @@ from gui.deck_builder import DeckBuilderFrame
 from gui.race_calendar_view import RaceCalendarViewFrame
 from gui.update_dialog import show_update_dialog
 from gui.backup_dialog import show_backup_dialog
+from gui.training_timeline import TrainingTimelineFrame
+from gui.upgrade_planner import UpgradePlannerFrame
 from gui.theme import (
     configure_styles, create_styled_button, create_sidebar_button,
     create_badge, create_divider,
     BG_DARKEST, BG_DARK, BG_MEDIUM, BG_LIGHT, BG_HIGHLIGHT, BG_ELEVATED,
     ACCENT_PRIMARY, ACCENT_SECONDARY, ACCENT_TERTIARY,
     TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, TEXT_DISABLED,
-    FONT_DISPLAY, FONT_TITLE, FONT_HEADER, FONT_BODY, FONT_BODY_BOLD, 
+    FONT_DISPLAY, FONT_TITLE, FONT_HEADER, FONT_BODY, FONT_BODY_BOLD,
     FONT_SMALL, FONT_TINY,
     SPACING_XS, SPACING_SM, SPACING_MD, SPACING_LG, SPACING_XL,
     RADIUS_MD, RADIUS_LG,
+    SIDEBAR_WIDTH_EXPANDED, SIDEBAR_WIDTH_COLLAPSED,
 )
 from utils import resolve_image_path
 from version import VERSION
@@ -40,8 +43,9 @@ NAV_GROUPS = [
     {
         "label": "COLLECTION",
         "items": [
+            ("Dashboard", "📊", "Dashboard"),
             ("Cards", "📋", "Card Library"),
-            ("Effects", "📊", "Effect Search"),
+            ("Effects", "🔎", "Effect Search"),
         ]
     },
     {
@@ -50,6 +54,8 @@ NAV_GROUPS = [
             ("Deck", "🎴", "Deck Builder"),
             ("Skills", "🔍", "Skill Search"),
             ("DeckSkills", "📜", "Deck Skills"),
+            ("Timeline", "📅", "Training Timeline"),
+            ("Upgrade", "📈", "Upgrade Planner"),
         ]
     },
     {
@@ -63,20 +69,23 @@ NAV_GROUPS = [
 
 
 class MainWindow:
-    """Main application window with premium sidebar navigation"""
+    """Main application window with collapsible sidebar navigation"""
 
     def __init__(self):
         self.root = ctk.CTk()
         self.root.title("Umamusume Support Card Manager")
 
-        # Screen resolution check
+        # Responsive initial size
         screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
         if screen_width >= 1920:
             self.root.geometry("1600x900")
+        elif screen_width >= 1280:
+            self.root.geometry("1280x800")
         else:
-            self.root.geometry("1400x850")
+            self.root.geometry("1024x700")
 
-        self.root.minsize(1350, 800)
+        self.root.minsize(900, 600)
 
         try:
             icon_path = resolve_image_path("1_Special Week.png")
@@ -98,6 +107,9 @@ class MainWindow:
         self.views = {}
         self.sidebar_buttons = {}
         self.nav_indicators = {}
+        self.sidebar_expanded = True
+        self.nav_labels = {}       # view_id -> label widget (hidden when collapsed)
+        self.group_labels = []     # group label widgets (hidden when collapsed)
 
         self.create_sidebar()
         self.create_main_area()
@@ -105,14 +117,10 @@ class MainWindow:
         # Load views
         self.init_views()
 
-        # Start on default view
-        self.show_view("Cards")
-        
+        # Start on default view (Dashboard)
+        self.show_view("Dashboard")
+
         # Keyboard shortcuts for view switching
-        for idx, group in enumerate(NAV_GROUPS):
-            for item_idx, (view_id, icon, label) in enumerate(group["items"]):
-                pass  # We'll bind below with a counter
-        
         shortcut_idx = 1
         for group in NAV_GROUPS:
             for view_id, icon, label in group["items"]:
@@ -124,59 +132,65 @@ class MainWindow:
                     shortcut_idx += 1
 
     def create_sidebar(self):
-        """Build the left navigation sidebar with grouped items"""
+        """Build the left navigation sidebar with collapse toggle"""
         self.sidebar_frame = ctk.CTkFrame(
-            self.root, width=250, corner_radius=0, fg_color=BG_DARK
+            self.root, width=SIDEBAR_WIDTH_EXPANDED, corner_radius=0, fg_color=BG_DARK
         )
         self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
         self.sidebar_frame.grid_propagate(False)
 
-        # ─── App Branding ───
-        branding_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
-        branding_frame.pack(pady=(SPACING_LG, SPACING_SM), padx=SPACING_LG, fill="x")
+        # ─── Top: Toggle + Branding ───
+        top_row = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
+        top_row.pack(fill="x", padx=SPACING_SM, pady=(SPACING_SM, 0))
 
-        # App name with accent color
-        title_frame = ctk.CTkFrame(branding_frame, fg_color="transparent")
-        title_frame.pack(fill="x")
-        
+        # Collapse toggle button
+        self.toggle_btn = ctk.CTkButton(
+            top_row, text="☰", width=36, height=36,
+            font=FONT_HEADER, fg_color="transparent",
+            hover_color=BG_HIGHLIGHT, text_color=TEXT_MUTED,
+            corner_radius=RADIUS_MD,
+            command=self.toggle_sidebar
+        )
+        self.toggle_btn.pack(side=tk.LEFT)
+
+        # Branding (hidden when collapsed)
+        self.branding_frame = ctk.CTkFrame(top_row, fg_color="transparent")
+        self.branding_frame.pack(side=tk.LEFT, fill="x", expand=True, padx=(SPACING_XS, 0))
+
         ctk.CTkLabel(
-            title_frame, text="Umamusume",
-            font=FONT_HEADER, text_color=TEXT_PRIMARY, anchor="w"
+            self.branding_frame, text="Umamusume",
+            font=FONT_BODY_BOLD, text_color=TEXT_PRIMARY, anchor="w"
         ).pack(side=tk.LEFT)
-        
-        # Version badge
-        ver_badge = ctk.CTkLabel(
-            title_frame, text=f"v{VERSION}",
+
+        ctk.CTkLabel(
+            self.branding_frame, text=f"v{VERSION}",
             font=FONT_TINY, text_color=TEXT_MUTED,
             fg_color=BG_LIGHT, corner_radius=6,
-            height=20, width=50
-        )
-        ver_badge.pack(side=tk.RIGHT)
-
-        ctk.CTkLabel(
-            branding_frame, text="Support Card Manager",
-            font=FONT_SMALL, text_color=ACCENT_PRIMARY, anchor="w"
-        ).pack(fill="x", pady=(2, 0))
+            height=18, width=40
+        ).pack(side=tk.RIGHT)
 
         # Thin separator
         ctk.CTkFrame(
             self.sidebar_frame, fg_color=BG_LIGHT, height=1
-        ).pack(fill="x", padx=SPACING_LG, pady=(SPACING_MD, SPACING_SM))
+        ).pack(fill="x", padx=SPACING_SM, pady=(SPACING_SM, SPACING_XS))
 
         # ─── Navigation Groups ───
         self.nav_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
-        self.nav_frame.pack(fill="x", padx=12, pady=SPACING_SM)
+        self.nav_frame.pack(fill="x", padx=SPACING_XS, pady=SPACING_XS)
 
         for group_idx, group in enumerate(NAV_GROUPS):
-            # Group label
-            ctk.CTkLabel(
+            # Group label (hidden when collapsed)
+            grp_label = ctk.CTkLabel(
                 self.nav_frame, text=group["label"],
                 font=FONT_TINY, text_color=TEXT_DISABLED, anchor="w"
-            ).pack(fill="x", padx=SPACING_SM, pady=(SPACING_MD if group_idx > 0 else SPACING_SM, SPACING_XS))
+            )
+            grp_label.pack(fill="x", padx=SPACING_SM,
+                           pady=(SPACING_MD if group_idx > 0 else SPACING_XS, SPACING_XS))
+            self.group_labels.append(grp_label)
 
             for view_id, icon, label in group["items"]:
                 # Button container with indicator strip
-                row_frame = ctk.CTkFrame(self.nav_frame, fg_color="transparent", height=44)
+                row_frame = ctk.CTkFrame(self.nav_frame, fg_color="transparent", height=40)
                 row_frame.pack(fill="x", pady=1)
                 row_frame.pack_propagate(False)
 
@@ -185,49 +199,91 @@ class MainWindow:
                     row_frame, fg_color="transparent",
                     width=3, corner_radius=2
                 )
-                indicator.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 0))
+                indicator.pack(side=tk.LEFT, fill=tk.Y)
                 self.nav_indicators[view_id] = indicator
 
-                btn = create_sidebar_button(
+                # In expanded mode: icon + label. In collapsed: just icon
+                btn = ctk.CTkButton(
                     row_frame,
                     text=f"  {icon}  {label}",
-                    command=lambda vid=view_id: self.show_view(vid)
+                    command=lambda vid=view_id: self.show_view(vid),
+                    fg_color="transparent",
+                    hover_color=BG_LIGHT,
+                    text_color=TEXT_MUTED,
+                    font=FONT_BODY_BOLD,
+                    corner_radius=RADIUS_MD,
+                    anchor="w",
+                    height=40,
+                    border_width=0
                 )
                 btn.pack(fill="both", expand=True, padx=(2, 0))
                 self.sidebar_buttons[view_id] = btn
+                # Store full and short text for toggle
+                btn._full_text = f"  {icon}  {label}"
+                btn._icon_text = f" {icon}"
 
         # ─── Spacer ───
         ctk.CTkFrame(self.sidebar_frame, fg_color="transparent").pack(fill="both", expand=True)
 
-        # ─── Bottom Section: Stats + Update ───
-        bottom_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
-        bottom_frame.pack(fill="x", padx=SPACING_LG, pady=SPACING_LG)
+        # ─── Bottom Section: Stats + Buttons ───
+        self.bottom_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
+        self.bottom_frame.pack(fill="x", padx=SPACING_SM, pady=SPACING_SM)
 
-        # Quick stats as compact badges
-        stats_row = ctk.CTkFrame(bottom_frame, fg_color="transparent")
-        stats_row.pack(fill="x", pady=(0, SPACING_MD))
-
+        # Quick stats
         self.stats_label = ctk.CTkLabel(
-            stats_row, text="Loading...",
+            self.bottom_frame, text="Loading...",
             font=FONT_TINY, text_color=TEXT_MUTED, justify="left", anchor="w"
         )
-        self.stats_label.pack(fill="x")
+        self.stats_label.pack(fill="x", pady=(0, SPACING_SM))
 
         # Backup button
-        create_styled_button(
-            bottom_frame, text="💾  Backup / Restore",
-            command=self.show_backup_dialog, style_type='ghost',
-            height=36
-        ).pack(fill="x", pady=(0, SPACING_XS))
+        self.backup_btn = ctk.CTkButton(
+            self.bottom_frame, text="💾  Backup",
+            command=self.show_backup_dialog,
+            font=FONT_TINY, height=30,
+            fg_color="transparent", hover_color=BG_LIGHT,
+            text_color=TEXT_MUTED, corner_radius=RADIUS_MD,
+        )
+        self.backup_btn.pack(fill="x", pady=(0, 2))
 
         # Update button
-        create_styled_button(
-            bottom_frame, text="🔄  Check Updates",
-            command=self.show_update_dialog, style_type='ghost',
-            height=36
-        ).pack(fill="x")
+        self.update_btn = ctk.CTkButton(
+            self.bottom_frame, text="🔄  Updates",
+            command=self.show_update_dialog,
+            font=FONT_TINY, height=30,
+            fg_color="transparent", hover_color=BG_LIGHT,
+            text_color=TEXT_MUTED, corner_radius=RADIUS_MD,
+        )
+        self.update_btn.pack(fill="x")
 
         self.refresh_stats()
+
+    def toggle_sidebar(self):
+        """Toggle sidebar between expanded and collapsed modes"""
+        self.sidebar_expanded = not self.sidebar_expanded
+
+        if self.sidebar_expanded:
+            width = SIDEBAR_WIDTH_EXPANDED
+            self.branding_frame.pack(side=tk.LEFT, fill="x", expand=True, padx=(SPACING_XS, 0))
+            for lbl in self.group_labels:
+                lbl.pack(fill="x", padx=SPACING_SM)
+            for vid, btn in self.sidebar_buttons.items():
+                btn.configure(text=btn._full_text, anchor="w")
+            self.stats_label.pack(fill="x", pady=(0, SPACING_SM))
+            self.backup_btn.configure(text="💾  Backup")
+            self.update_btn.configure(text="🔄  Updates")
+        else:
+            width = SIDEBAR_WIDTH_COLLAPSED
+            self.branding_frame.pack_forget()
+            for lbl in self.group_labels:
+                lbl.pack_forget()
+            for vid, btn in self.sidebar_buttons.items():
+                btn.configure(text=btn._icon_text, anchor="center")
+            self.stats_label.pack_forget()
+            self.backup_btn.configure(text="💾")
+            self.update_btn.configure(text="🔄")
+
+        self.sidebar_frame.configure(width=width)
 
     def create_main_area(self):
         """Create the right content area shell"""
@@ -242,7 +298,7 @@ class MainWindow:
         self.view_container = ctk.CTkFrame(self.content_shell, fg_color="transparent")
         self.view_container.grid(
             row=0, column=0, sticky="nsew",
-            padx=SPACING_LG, pady=SPACING_LG
+            padx=SPACING_MD, pady=SPACING_MD
         )
         self.view_container.grid_rowconfigure(0, weight=1)
         self.view_container.grid_columnconfigure(0, weight=1)
@@ -250,6 +306,7 @@ class MainWindow:
     def init_views(self):
         """Setup view constructors to lazy-load on demand to prevent handle exhaustion"""
         self.view_classes = {
+            "Dashboard": lambda: self._create_dashboard(),
             "Cards": lambda: CardListFrame(
                 self.view_container,
                 on_card_selected_callback=self.on_card_selected,
@@ -270,9 +327,22 @@ class MainWindow:
                 navigate_to_card_callback=self.navigate_to_card,
                 navigate_to_skill_callback=self.navigate_to_skill
             ),
+            "Timeline": lambda: TrainingTimelineFrame(
+                self.view_container,
+                navigate_to_card_callback=self.navigate_to_card
+            ),
+            "Upgrade": lambda: UpgradePlannerFrame(self.view_container),
             "Tracks": lambda: TrackViewFrame(self.view_container),
             "Calendar": lambda: RaceCalendarViewFrame(self.view_container)
         }
+
+    def _create_dashboard(self):
+        """Create the Collection Progress Dashboard inline"""
+        from gui.collection_dashboard import CollectionDashboard
+        return CollectionDashboard(
+            self.view_container,
+            navigate_to_cards_callback=lambda: self.show_view("Cards")
+        )
 
     def show_view(self, view_id):
         """Switch to a specific view by name with visual feedback"""
@@ -361,8 +431,8 @@ class MainWindow:
         by_rarity = stats.get('by_rarity', {})
 
         stat_lines = [
-            f"📋 {total} Cards  ·  ✅ {owned} Owned",
-            f"SSR {by_rarity.get('SSR', 0)}  ·  SR {by_rarity.get('SR', 0)}  ·  R {by_rarity.get('R', 0)}"
+            f"📋 {total} Cards · ✅ {owned} Owned",
+            f"SSR {by_rarity.get('SSR', 0)} · SR {by_rarity.get('SR', 0)} · R {by_rarity.get('R', 0)}"
         ]
         if hasattr(self, 'stats_label'):
             self.stats_label.configure(text="\n".join(stat_lines))
@@ -370,9 +440,10 @@ class MainWindow:
     def show_backup_dialog(self):
         def on_restore():
             self.refresh_stats()
-            # Reload cards view if it exists
             if "Cards" in self.views:
                 self.views["Cards"].filter_cards()
+            if "Dashboard" in self.views:
+                self.views["Dashboard"].refresh()
         show_backup_dialog(self.root, on_restore_callback=on_restore)
 
     def show_update_dialog(self):

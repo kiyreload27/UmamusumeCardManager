@@ -93,6 +93,10 @@ RADIUS_LG  = 14
 RADIUS_XL  = 20
 RADIUS_FULL = 100  # Pill shape
 
+# Sidebar
+SIDEBAR_WIDTH_EXPANDED  = 220
+SIDEBAR_WIDTH_COLLAPSED = 60
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # TYPOGRAPHY — Clear typographic scale
 # ═══════════════════════════════════════════════════════════════════════════════

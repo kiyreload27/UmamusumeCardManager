@@ -2,6 +2,37 @@
 
 All notable changes to the Umamusume Support Card Manager will be documented in this file.
 
+## [18.0.0] - 2026-03-04
+
+### 🎨 Complete UI/UX Overhaul
+- **Responsive Sizing**: The app dynamically scales to screens, gracefully handling both full-screen and smaller 900x600 windows.
+- **Collapsible Sidebar**: New toggle ("☰") minimizes the sidebar to icons only, freeing up precious screen real-estate.
+- **Adaptive Layouts**:
+  - The **Card Library** list panel and details panel can now dynamically resize.
+  - Added a collapsible detail panel (◀/▶ button) that lets the card grid expand to use the full window width.
+- **Aesthetic Improvements**: Rounded corners, new themed accents, and better typography spacing across all views.
+
+### 📊 Collection Progress Dashboard (Phase 4)
+- **New Default View**: The app now launches to a comprehensive dashboard summarizing your collection.
+- Includes total card counts, ownership percentage, and missing card tracking.
+- Visual completion progress bars breakdown your collection by:
+  - **Rarity** (SSR, SR, R)
+  - **Card Type** (Speed, Stamina, Power, Guts, Intelligence, Group)
+
+### 📅 Training Event Timeline (Phase 4)
+- New **Planning > Timeline** view to explore training events for specific cards.
+- Visual timeline with distinct nodes for events, branching choices, and skill acquisition paths.
+- Color-coded choices highlight stat gains and unique skill unlocks.
+
+### 📈 Card Upgrade Planner (Phase 4)
+- New **Planning > Upgrade** view to compare card stats at different levels (e.g., Lv30 vs Lv50).
+- Side-by-side diff table instantly shows stat improvements (green) and losses (red).
+- Displays the level requirements for unlocking Unique Effects.
+
+### 🐛 Bug Fixes
+- **Deck Builder**: Fixed an issue where dropping a card into a deck slot would incorrectly override the card's level to 50 regardless of rarity/ownership.
+- **Race Calendar**: Fixed a bug where characters were missing from the selection screen due to the database sync overriding new characters. Characters are now synced properly, and image paths correctly point to `assets/characters`.
+
 ## [17.0.0] - 2026-03-04
 
 ### 🚀 New Features

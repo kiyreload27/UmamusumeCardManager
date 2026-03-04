@@ -202,36 +202,44 @@ def check_for_updates():
         
     if getattr(sys, 'frozen', False):
         bundled_seed_path = os.path.join(sys._MEIPASS, "database", "umamusume_seed.db")
-        if not os.path.exists(bundled_seed_path):
-            return 
+    else:
+        bundled_seed_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "database", "umamusume_seed.db")
+
+    if not os.path.exists(bundled_seed_path):
+        return 
+        
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        
+        # Check for metadata table
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='system_metadata'")
+        if not cur.fetchone():
+            # No metadata, likely old version. Create it.
+            cur.execute("CREATE TABLE IF NOT EXISTS system_metadata (key TEXT PRIMARY KEY, value TEXT)")
+            cur.execute("INSERT OR REPLACE INTO system_metadata (key, value) VALUES (?, ?)", ('app_version', "0.0.0"))
+            conn.commit()
+            db_version = "0.0.0"
+        else:
+            cur.execute("SELECT value FROM system_metadata WHERE key='app_version'")
+            row = cur.fetchone()
+            db_version = row[0] if row else "0.0.0"
+        
+        # Compare versions or check if characters/races are empty
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='characters'")
+        has_chars_table = cur.fetchone()
+        chars_empty = True
+        if has_chars_table:
+            cur.execute("SELECT COUNT(*) FROM characters")
+            chars_empty = (cur.fetchone()[0] == 0)
+
+        if db_version != VERSION or chars_empty:
+            sync_from_seed(bundled_seed_path)
             
-        try:
-            conn = sqlite3.connect(DB_PATH)
-            cur = conn.cursor()
-            
-            # Check for metadata table
-            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='system_metadata'")
-            if not cur.fetchone():
-                # No metadata, likely old version. Create it.
-                cur.execute("CREATE TABLE IF NOT EXISTS system_metadata (key TEXT PRIMARY KEY, value TEXT)")
-                cur.execute("INSERT OR REPLACE INTO system_metadata (key, value) VALUES (?, ?)", ('app_version', "0.0.0"))
-                conn.commit()
-                db_version = "0.0.0"
-            else:
-                cur.execute("SELECT value FROM system_metadata WHERE key='app_version'")
-                row = cur.fetchone()
-                db_version = row[0] if row else "0.0.0"
-            
-            # Compare versions
-            if db_version != VERSION:
-                sync_from_seed(bundled_seed_path)
-                
-            conn.close()
-        except Exception as e:
-            import traceback
-            print(f"Update check failed: {e}\n{traceback.format_exc()}")
-            import traceback
-            print(f"Update check failed: {e}\n{traceback.format_exc()}")
+        conn.close()
+    except Exception as e:
+        import traceback
+        print(f"Update check failed: {e}\n{traceback.format_exc()}")
 
 def sync_from_seed(seed_path):
     """Merge new data from seed into user database"""
@@ -867,6 +875,43 @@ def get_all_event_skills(card_id):
     conn.close()
     return results
 
+
+def get_card_events(card_id):
+    """
+    Get all events and format them for the timeline view.
+    Since the DB only has skills, we represent skills as choices/effects.
+    """
+    raw_events = get_events(card_id)
+    if not raw_events:
+        return []
+        
+    # getting exactly the required dictionary format for training_timeline.py
+    # all_skills expects a dictionary grouped by event_name, returning [{'card_id': card_id, 'source': 'Event', 'skill_name': event_name, 'details': '(skills...)'}]
+    # wait, get_all_event_skills returns a list of dicts. We have to parse its returning dict list.
+    all_skills_list = get_all_event_skills(card_id)
+    skill_map = {}
+    for item in all_skills_list:
+        skill_map[item['skill_name']] = item['details']
+        
+    formatted = []
+    
+    for _, event_name, event_type in raw_events:
+        ev_dict = {
+            'name': f"[{event_type}] {event_name}" if event_type else event_name,
+            'choices': []
+        }
+        
+        if event_name in skill_map and skill_map[event_name]:
+            details = skill_map[event_name] # e.g. "(Skill1, Skill2)" or "( (OR) Skill1 (OR) Skill2 )"
+            ev_dict['choices'].append({
+                'label': 'Skill Outcome',
+                'effects': details.strip("()")
+            })
+                
+        formatted.append(ev_dict)
+        
+    return formatted
+
 # ============================================
 # Owned Cards (Collection) Queries
 # ============================================
@@ -1323,6 +1368,53 @@ def get_database_stats():
     
     conn.close()
     return stats
+
+def get_collection_stats():
+    """Get detailed collection stats for dashboard: owned/total by rarity and type."""
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    # Total counts
+    cur.execute("SELECT COUNT(*) FROM support_cards")
+    total = cur.fetchone()[0]
+    
+    cur.execute("""
+        SELECT COUNT(*) FROM owned_cards oc
+        JOIN support_cards sc ON oc.card_id = sc.card_id
+    """)
+    owned = cur.fetchone()[0]
+    
+    # By rarity
+    cur.execute("""
+        SELECT sc.rarity, COUNT(*) as total,
+               SUM(CASE WHEN oc.card_id IS NOT NULL THEN 1 ELSE 0 END) as owned
+        FROM support_cards sc
+        LEFT JOIN owned_cards oc ON sc.card_id = oc.card_id
+        GROUP BY sc.rarity
+    """)
+    by_rarity = {}
+    for rarity, t, o in cur.fetchall():
+        by_rarity[rarity] = {'total': t, 'owned': o}
+    
+    # By type
+    cur.execute("""
+        SELECT sc.card_type, COUNT(*) as total,
+               SUM(CASE WHEN oc.card_id IS NOT NULL THEN 1 ELSE 0 END) as owned
+        FROM support_cards sc
+        LEFT JOIN owned_cards oc ON sc.card_id = oc.card_id
+        GROUP BY sc.card_type
+    """)
+    by_type = {}
+    for card_type, t, o in cur.fetchall():
+        by_type[card_type] = {'total': t, 'owned': o}
+    
+    conn.close()
+    return {
+        'total': total,
+        'owned': owned,
+        'by_rarity': by_rarity,
+        'by_type': by_type
+    }
 
 def repair_orphaned_data():
     """

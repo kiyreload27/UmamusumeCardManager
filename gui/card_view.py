@@ -160,14 +160,20 @@ class CardListFrame(ctk.CTkFrame):
 
     def create_widgets(self):
         """Create the card list interface"""
-        # Left panel - Card list with filters
-        self.left_frame = ctk.CTkFrame(self, fg_color=BG_DARK, corner_radius=RADIUS_LG, 
-                                   border_width=1, border_color=BG_LIGHT, width=560)
-        self.left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=False, padx=(0, SPACING_SM))
+        # Use grid for responsive two-column layout
+        self.grid_rowconfigure(0, weight=1)
+        self.grid_columnconfigure(0, weight=1)  # left: card list
+        self.grid_columnconfigure(1, weight=2)  # right: details
 
-        # Right panel - Card details
+        # Left panel - Card list with filters (no fixed width)
+        self.left_frame = ctk.CTkFrame(self, fg_color=BG_DARK, corner_radius=RADIUS_LG,
+                                   border_width=1, border_color=BG_LIGHT)
+        self.left_frame.grid(row=0, column=0, sticky='nsew', padx=(0, SPACING_XS))
+
+        # Right panel - Card details (collapsible)
+        self.details_visible = True
         self.details_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
-        self.details_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        self.details_frame.grid(row=0, column=1, sticky='nsew')
 
         # === Recently Viewed Strip ===
         self.recent_frame = ctk.CTkFrame(self.left_frame, fg_color="transparent")
@@ -188,11 +194,21 @@ class CardListFrame(ctk.CTkFrame):
             search_frame,
             textvariable=self.search_var,
             placeholder_text="🔍  Search cards...",
-            width=200, height=38,
+            height=38,
             fg_color=BG_MEDIUM, border_color=BG_LIGHT,
             corner_radius=RADIUS_MD
         )
-        self.search_entry.pack(fill=tk.X, expand=True)
+        self.search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # Detail panel toggle button
+        self.detail_toggle_btn = ctk.CTkButton(
+            search_frame, text="◀", width=32, height=38,
+            font=FONT_BODY, fg_color=BG_MEDIUM,
+            hover_color=BG_HIGHLIGHT, text_color=TEXT_MUTED,
+            corner_radius=RADIUS_MD,
+            command=self._toggle_detail_panel
+        )
+        self.detail_toggle_btn.pack(side=tk.RIGHT, padx=(SPACING_XS, 0))
         self.search_entry.bind('<KeyRelease>', lambda e: self.filter_cards())
         # Arrow keys in search field navigate the card list
         self.search_entry.bind('<Down>', lambda e: self._handle_arrow_key('down'))
@@ -1073,3 +1089,15 @@ class CardListFrame(ctk.CTkFrame):
             self.tag_combo.configure(values=["All Tags"] + tags)
         except Exception:
             pass
+
+    def _toggle_detail_panel(self):
+        """Toggle the visibility of the right detail panel"""
+        self.details_visible = not self.details_visible
+        if self.details_visible:
+            self.details_frame.grid(row=0, column=1, sticky='nsew')
+            self.grid_columnconfigure(1, weight=2)
+            self.detail_toggle_btn.configure(text="◀")
+        else:
+            self.details_frame.grid_remove()
+            self.grid_columnconfigure(1, weight=0)
+            self.detail_toggle_btn.configure(text="▶")

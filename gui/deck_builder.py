@@ -501,7 +501,19 @@ class DeckBuilderFrame(ctk.CTkFrame):
             # Replace existing card
             remove_card_from_deck(self.current_deck_id, slot_index)
 
-        add_card_to_deck(self.current_deck_id, card_id, slot_index, 50)
+        # Get the card's native max level, or what the user owns it at
+        card_data = next((c for c in self._card_render_queue if c[0] == card_id), None)
+        default_level = 50
+        if card_data:
+            rarity = card_data[2]
+            if rarity == 'SSR':
+                default_level = 50
+            elif rarity == 'SR':
+                default_level = 45
+            else:
+                default_level = 40
+
+        add_card_to_deck(self.current_deck_id, card_id, slot_index, default_level)
         self.load_deck()
 
     # --- Deck Export/Import ---
