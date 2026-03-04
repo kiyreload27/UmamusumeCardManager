@@ -860,6 +860,24 @@ def set_card_owned(card_id, owned=True, level=50):
     conn.commit()
     conn.close()
 
+def set_cards_owned_bulk(card_ids, owned=True, level=50):
+    """Set multiple cards as owned or not owned in a single transaction"""
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    if owned:
+        for card_id in card_ids:
+            cur.execute("""
+                INSERT OR REPLACE INTO owned_cards (card_id, level)
+                VALUES (?, ?)
+            """, (card_id, level))
+    else:
+        placeholders = ','.join(['?' for _ in card_ids])
+        cur.execute(f"DELETE FROM owned_cards WHERE card_id IN ({placeholders})", card_ids)
+    
+    conn.commit()
+    conn.close()
+
 def update_owned_card_level(card_id, level):
     """Update the level of an owned card"""
     conn = get_conn()

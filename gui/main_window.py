@@ -245,12 +245,22 @@ class MainWindow:
             "Cards": lambda: CardListFrame(
                 self.view_container,
                 on_card_selected_callback=self.on_card_selected,
-                on_stats_updated_callback=self.refresh_stats
+                on_stats_updated_callback=self.refresh_stats,
+                navigate_to_card_callback=self.navigate_to_card
             ),
-            "Effects": lambda: EffectsFrame(self.view_container),
+            "Effects": lambda: EffectsFrame(
+                self.view_container,
+                navigate_to_card_callback=self.navigate_to_card
+            ),
             "Deck": lambda: DeckBuilderFrame(self.view_container),
-            "Skills": lambda: SkillSearchFrame(self.view_container),
-            "DeckSkills": lambda: DeckSkillsFrame(self.view_container),
+            "Skills": lambda: SkillSearchFrame(
+                self.view_container,
+                navigate_to_card_callback=self.navigate_to_card
+            ),
+            "DeckSkills": lambda: DeckSkillsFrame(
+                self.view_container,
+                navigate_to_card_callback=self.navigate_to_card
+            ),
             "Tracks": lambda: TrackViewFrame(self.view_container),
             "Calendar": lambda: RaceCalendarViewFrame(self.view_container)
         }
@@ -308,6 +318,12 @@ class MainWindow:
                     view_label = label
                     break
         self.root.title(f"Umamusume • {view_label}" if view_label else "Umamusume Support Card Manager")
+
+    def navigate_to_card(self, card_id):
+        """Navigate to the Cards view and select a specific card (cross-view linking)"""
+        self.show_view("Cards")
+        if "Cards" in self.views:
+            self.views["Cards"].navigate_to_card(card_id)
 
     def on_card_selected(self, card_id, card_name, level=None):
         if level is not None:

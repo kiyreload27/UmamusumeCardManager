@@ -36,8 +36,9 @@ QUICK_FILTERS = [
 class EffectsFrame(ctk.CTkFrame):
     """Frame for searching effects across owned cards"""
 
-    def __init__(self, parent):
+    def __init__(self, parent, navigate_to_card_callback=None):
         super().__init__(parent, fg_color="transparent")
+        self.navigate_to_card = navigate_to_card_callback
         self.icon_cache = {}
         self.result_widgets = []
         self.create_widgets()
@@ -206,14 +207,18 @@ class EffectsFrame(ctk.CTkFrame):
             info_frame = ctk.CTkFrame(card_frame, fg_color="transparent")
             info_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=SPACING_SM, padx=(0, SPACING_SM))
 
-            # Card name + level badge
+            # Card name + level badge — clickable for cross-view linking
             header_box = ctk.CTkFrame(info_frame, fg_color="transparent")
             header_box.pack(fill=tk.X)
 
-            ctk.CTkLabel(
+            name_label = ctk.CTkLabel(
                 header_box, text=card_name,
-                font=FONT_BODY_BOLD, text_color=TEXT_PRIMARY, anchor="w"
-            ).pack(side=tk.LEFT)
+                font=FONT_BODY_BOLD, text_color=ACCENT_PRIMARY, anchor="w",
+                cursor="hand2"
+            )
+            name_label.pack(side=tk.LEFT)
+            if self.navigate_to_card:
+                name_label.bind("<Button-1>", lambda e, cid=card_id: self.navigate_to_card(cid))
 
             ctk.CTkLabel(
                 header_box, text=f"Lv{level}",

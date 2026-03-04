@@ -29,8 +29,9 @@ from gui.theme import (
 class SkillSearchFrame(ctk.CTkFrame):
     """Frame for searching skills and finding cards that have them"""
 
-    def __init__(self, parent):
+    def __init__(self, parent, navigate_to_card_callback=None):
         super().__init__(parent, fg_color="transparent")
+        self.navigate_to_card = navigate_to_card_callback
         self.all_skills = []
         self.icon_cache = {}
         self.current_skill = None
@@ -290,14 +291,18 @@ class SkillSearchFrame(ctk.CTkFrame):
             info = ctk.CTkFrame(card_frame, fg_color="transparent")
             info.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=SPACING_XS, padx=(0, SPACING_SM))
 
-            # Top row: Name + type badge
+            # Top row: Name (clickable) + type badge
             hdr = ctk.CTkFrame(info, fg_color="transparent")
             hdr.pack(fill=tk.X)
 
-            ctk.CTkLabel(
+            name_label = ctk.CTkLabel(
                 hdr, text=card.get('name', 'Unknown'),
-                font=FONT_BODY_BOLD, text_color=TEXT_PRIMARY, anchor="w"
-            ).pack(side=tk.LEFT)
+                font=FONT_BODY_BOLD, text_color=ACCENT_PRIMARY, anchor="w",
+                cursor="hand2"
+            )
+            name_label.pack(side=tk.LEFT)
+            if self.navigate_to_card:
+                name_label.bind("<Button-1>", lambda e, cid=card_id: self.navigate_to_card(cid))
 
             # Type + rarity badges
             meta_text = f"{get_type_icon(card_type)} {card_type}"

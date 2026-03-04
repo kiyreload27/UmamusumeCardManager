@@ -1,6 +1,7 @@
 """
 Card List View - Browse and search support cards with ownership management
-Premium redesign with card grid, inline detail panel, and modern filter bar
+Premium redesign with card grid, inline detail panel, modern filter bar,
+recently viewed strip, bulk ownership toggle, and keyboard navigation
 """
 
 import tkinter as tk
@@ -12,7 +13,11 @@ from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from db.db_queries import get_all_cards, get_card_by_id, get_effects_at_level, set_card_owned, is_card_owned, update_owned_card_level
+from db.db_queries import (
+    get_all_cards, get_card_by_id, get_effects_at_level,
+    set_card_owned, is_card_owned, update_owned_card_level,
+    set_cards_owned_bulk
+)
 from utils import resolve_image_path
 from gui.theme import (
     BG_DARKEST, BG_DARK, BG_MEDIUM, BG_LIGHT, BG_HIGHLIGHT, BG_ELEVATED,
@@ -29,14 +34,20 @@ from gui.theme import (
     EFFECT_DESCRIPTIONS, Tooltip, create_styled_entry
 )
 
+# Module-level recently viewed list shared across instances
+_recent_cards = []  # list of card_id, max 10
+MAX_RECENT = 10
+
 
 class CardListFrame(ctk.CTkFrame):
     """Frame containing card list with search/filter, ownership, and details panel"""
 
-    def __init__(self, parent, on_card_selected_callback=None, on_stats_updated_callback=None):
+    def __init__(self, parent, on_card_selected_callback=None, on_stats_updated_callback=None,
+                 navigate_to_card_callback=None):
         super().__init__(parent, fg_color="transparent")
         self.on_card_selected = on_card_selected_callback
         self.on_stats_updated = on_stats_updated_callback
+        self.navigate_to_card_callback = navigate_to_card_callback
         self.cards = []
         self.current_card_id = None
         self.selected_level = 50
@@ -48,20 +59,119 @@ class CardListFrame(ctk.CTkFrame):
         self.items_per_page = 40
         self.filtered_cards = []
 
+        # Keyboard navigation state
+        self.selected_index = -1  # index within current page
+
+        # Bulk selection state
+        self.bulk_mode = False
+        self.bulk_selected_ids = set()
+        self.card_checkboxes = {}  # card_id -> checkbox var
+
         # Create main layout
         self.create_widgets()
         self.load_cards()
 
+        # Bind keyboard events
+        self._bind_keyboard()
+
+    def _bind_keyboard(self):
+        """Bind keyboard shortcuts for navigation"""
+        try:
+            top = self.winfo_toplevel()
+            top.bind('<Control-f>', lambda e: self.search_entry.focus_set())
+            top.bind('<Escape>', lambda e: self._handle_escape())
+        except (AttributeError, tk.TclError):
+            pass
+
+    def _handle_escape(self):
+        """Handle Escape key — clear search, exit bulk mode, or reset filters"""
+        if self.bulk_mode:
+            self._toggle_bulk_mode()
+            return
+        if self.search_var.get():
+            self.search_var.set("")
+            self.filter_cards()
+            return
+        self.reset_filters()
+
+    def _handle_arrow_key(self, direction):
+        """Handle Up/Down arrow key navigation in the card list"""
+        if not self.filtered_cards:
+            return
+
+        page_size = self.items_per_page
+        page_cards_count = min(page_size, len(self.filtered_cards) - self.current_page * page_size)
+
+        if direction == 'down':
+            # Two columns, so down moves by 2 (next row)
+            self.selected_index += 2
+            if self.selected_index >= page_cards_count:
+                # Go to next page
+                max_page = max(0, (len(self.filtered_cards) - 1) // self.items_per_page)
+                if self.current_page < max_page:
+                    self.current_page += 1
+                    self.selected_index = 0
+                    self.populate_tree()
+                else:
+                    self.selected_index = page_cards_count - 1
+                return
+        elif direction == 'up':
+            self.selected_index -= 2
+            if self.selected_index < 0:
+                if self.current_page > 0:
+                    self.current_page -= 1
+                    new_count = min(page_size, len(self.filtered_cards) - self.current_page * page_size)
+                    self.selected_index = new_count - 1
+                    self.populate_tree()
+                else:
+                    self.selected_index = 0
+                return
+        elif direction == 'left':
+            self.selected_index = max(0, self.selected_index - 1)
+        elif direction == 'right':
+            self.selected_index = min(page_cards_count - 1, self.selected_index + 1)
+
+        self._highlight_selected()
+
+    def _highlight_selected(self):
+        """Highlight the selected card widget"""
+        for i, widget in enumerate(self.card_widgets):
+            if i == self.selected_index:
+                widget.configure(border_color=ACCENT_PRIMARY, border_width=2)
+            else:
+                # Restore original border
+                card_idx = self.current_page * self.items_per_page + i
+                if card_idx < len(self.filtered_cards):
+                    card = self.filtered_cards[card_idx]
+                    is_owned = card[6]
+                    widget.configure(
+                        border_color=ACCENT_SUCCESS if is_owned else BG_LIGHT,
+                        border_width=1
+                    )
+
+    def _handle_enter(self):
+        """Handle Enter key — select the highlighted card"""
+        if self.selected_index >= 0 and self.selected_index < len(self.card_widgets):
+            card_idx = self.current_page * self.items_per_page + self.selected_index
+            if card_idx < len(self.filtered_cards):
+                card_id = self.filtered_cards[card_idx][0]
+                self.on_select(card_id)
+
     def create_widgets(self):
         """Create the card list interface"""
         # Left panel - Card list with filters
-        left_frame = ctk.CTkFrame(self, fg_color=BG_DARK, corner_radius=RADIUS_LG, 
+        self.left_frame = ctk.CTkFrame(self, fg_color=BG_DARK, corner_radius=RADIUS_LG, 
                                    border_width=1, border_color=BG_LIGHT, width=560)
-        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=False, padx=(0, SPACING_SM))
+        self.left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=False, padx=(0, SPACING_SM))
 
         # Right panel - Card details
         self.details_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
         self.details_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+
+        # === Recently Viewed Strip ===
+        self.recent_frame = ctk.CTkFrame(self.left_frame, fg_color="transparent")
+        self.recent_frame.pack(fill=tk.X, padx=SPACING_MD, pady=(SPACING_SM, 0))
+        self._build_recent_strip()
 
         # === Filter Variables ===
         self.rarity_var = tk.StringVar(value="All")
@@ -70,8 +180,8 @@ class CardListFrame(ctk.CTkFrame):
         self.search_var = tk.StringVar(value="")
 
         # === Search Bar ===
-        search_frame = ctk.CTkFrame(left_frame, fg_color="transparent")
-        search_frame.pack(fill=tk.X, padx=SPACING_MD, pady=(SPACING_LG, SPACING_SM))
+        search_frame = ctk.CTkFrame(self.left_frame, fg_color="transparent")
+        search_frame.pack(fill=tk.X, padx=SPACING_MD, pady=(SPACING_SM, SPACING_SM))
 
         self.search_entry = ctk.CTkEntry(
             search_frame,
@@ -83,9 +193,13 @@ class CardListFrame(ctk.CTkFrame):
         )
         self.search_entry.pack(fill=tk.X, expand=True)
         self.search_entry.bind('<KeyRelease>', lambda e: self.filter_cards())
+        # Arrow keys in search field navigate the card list
+        self.search_entry.bind('<Down>', lambda e: self._handle_arrow_key('down'))
+        self.search_entry.bind('<Up>', lambda e: self._handle_arrow_key('up'))
+        self.search_entry.bind('<Return>', lambda e: self._handle_enter())
 
         # === Filter Chips Row ===
-        filter_frame = ctk.CTkFrame(left_frame, fg_color="transparent")
+        filter_frame = ctk.CTkFrame(self.left_frame, fg_color="transparent")
         filter_frame.pack(fill=tk.X, padx=SPACING_MD, pady=(0, SPACING_SM))
 
         # Rarity pills
@@ -126,8 +240,8 @@ class CardListFrame(ctk.CTkFrame):
             command=self.reset_filters
         ).pack(side=tk.RIGHT)
 
-        # Owned checkbox + count label row
-        meta_frame = ctk.CTkFrame(left_frame, fg_color="transparent")
+        # Owned checkbox + count label + bulk mode toggle
+        meta_frame = ctk.CTkFrame(self.left_frame, fg_color="transparent")
         meta_frame.pack(fill=tk.X, padx=SPACING_MD, pady=(0, SPACING_SM))
 
         ctk.CTkCheckBox(
@@ -138,20 +252,66 @@ class CardListFrame(ctk.CTkFrame):
             corner_radius=4
         ).pack(side=tk.LEFT)
 
+        # Bulk mode toggle button
+        self.bulk_toggle_btn = ctk.CTkButton(
+            meta_frame, text="☐ Select",
+            width=70, height=24, font=FONT_TINY,
+            fg_color=BG_MEDIUM, hover_color=BG_HIGHLIGHT,
+            text_color=TEXT_MUTED, corner_radius=RADIUS_SM,
+            command=self._toggle_bulk_mode
+        )
+        self.bulk_toggle_btn.pack(side=tk.LEFT, padx=(SPACING_SM, 0))
+
         self.count_label = ctk.CTkLabel(
             meta_frame, text="0 cards",
             font=FONT_TINY, text_color=TEXT_DISABLED
         )
         self.count_label.pack(side=tk.RIGHT)
 
-        # Keyboard shortcut
-        try:
-            self.winfo_toplevel().bind('<Control-f>', lambda e: self.search_entry.focus_set())
-        except AttributeError:
-            pass
+        # === Bulk Action Bar (hidden by default) ===
+        self.bulk_action_frame = ctk.CTkFrame(self.left_frame, fg_color=BG_MEDIUM, corner_radius=RADIUS_SM)
+        # Not packed initially — shown only in bulk mode
+
+        self.bulk_count_label = ctk.CTkLabel(
+            self.bulk_action_frame, text="0 selected",
+            font=FONT_SMALL, text_color=TEXT_PRIMARY
+        )
+        self.bulk_count_label.pack(side=tk.LEFT, padx=SPACING_SM)
+
+        ctk.CTkButton(
+            self.bulk_action_frame, text="All",
+            width=40, height=26, font=FONT_TINY,
+            fg_color=BG_LIGHT, hover_color=BG_HIGHLIGHT,
+            text_color=TEXT_MUTED, corner_radius=RADIUS_SM,
+            command=self._select_all
+        ).pack(side=tk.LEFT, padx=2)
+
+        ctk.CTkButton(
+            self.bulk_action_frame, text="None",
+            width=40, height=26, font=FONT_TINY,
+            fg_color=BG_LIGHT, hover_color=BG_HIGHLIGHT,
+            text_color=TEXT_MUTED, corner_radius=RADIUS_SM,
+            command=self._deselect_all
+        ).pack(side=tk.LEFT, padx=2)
+
+        ctk.CTkButton(
+            self.bulk_action_frame, text="✓ Mark Owned",
+            width=90, height=26, font=FONT_TINY,
+            fg_color=ACCENT_SUCCESS, hover_color="#2dd36f",
+            text_color="#ffffff", corner_radius=RADIUS_SM,
+            command=lambda: self._bulk_set_owned(True)
+        ).pack(side=tk.RIGHT, padx=(2, SPACING_SM))
+
+        ctk.CTkButton(
+            self.bulk_action_frame, text="✗ Unown",
+            width=70, height=26, font=FONT_TINY,
+            fg_color=ACCENT_ERROR, hover_color="#ff4961",
+            text_color="#ffffff", corner_radius=RADIUS_SM,
+            command=lambda: self._bulk_set_owned(False)
+        ).pack(side=tk.RIGHT, padx=2)
 
         # === Pagination ===
-        self.pagination_frame = ctk.CTkFrame(left_frame, fg_color="transparent")
+        self.pagination_frame = ctk.CTkFrame(self.left_frame, fg_color="transparent")
         self.pagination_frame.pack(fill=tk.X, padx=SPACING_MD, pady=(0, SPACING_XS))
 
         self.btn_prev = ctk.CTkButton(
@@ -179,7 +339,7 @@ class CardListFrame(ctk.CTkFrame):
         self.btn_next.pack(side=tk.RIGHT)
 
         # === Card Grid (scrollable) ===
-        self.scroll_container = ctk.CTkScrollableFrame(left_frame, fg_color="transparent")
+        self.scroll_container = ctk.CTkScrollableFrame(self.left_frame, fg_color="transparent")
         self.scroll_container.pack(fill=tk.BOTH, expand=True, padx=SPACING_SM, pady=(0, SPACING_SM))
         self.scroll_container.columnconfigure(0, weight=1)
         self.scroll_container.columnconfigure(1, weight=1)
@@ -188,6 +348,146 @@ class CardListFrame(ctk.CTkFrame):
 
         # === Details Panel ===
         self.create_details_panel()
+
+    # ------- Recently Viewed Strip -------
+
+    def _build_recent_strip(self):
+        """Build or rebuild the recently viewed cards strip"""
+        for child in self.recent_frame.winfo_children():
+            child.destroy()
+
+        if not _recent_cards:
+            self.recent_frame.pack_forget()
+            return
+
+        self.recent_frame.pack(fill=tk.X, padx=SPACING_MD, pady=(SPACING_SM, 0))
+
+        # Section label
+        ctk.CTkLabel(
+            self.recent_frame, text="🕒 Recent",
+            font=FONT_TINY, text_color=TEXT_DISABLED
+        ).pack(side=tk.LEFT, padx=(0, SPACING_XS))
+
+        for card_id in _recent_cards:
+            img = self.icon_cache.get(card_id)
+            if not img:
+                # Try to load a small thumb from cache
+                card = get_card_by_id(card_id)
+                if card:
+                    resolved = resolve_image_path(card[6])  # image_path
+                    if resolved and os.path.exists(resolved):
+                        try:
+                            pil_img = Image.open(resolved)
+                            pil_img.thumbnail((32, 32), Image.Resampling.LANCZOS)
+                            img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(32, 32))
+                            self.icon_cache[card_id] = img
+                        except (OSError, SyntaxError, ValueError):
+                            pass
+
+            btn = ctk.CTkButton(
+                self.recent_frame, text="", image=img if img else None,
+                width=36, height=36, fg_color=BG_MEDIUM,
+                hover_color=BG_HIGHLIGHT, corner_radius=RADIUS_SM,
+                command=lambda cid=card_id: self.on_select(cid)
+            )
+            btn.pack(side=tk.LEFT, padx=1)
+
+            # Tooltip with card name 
+            card_data = get_card_by_id(card_id)
+            if card_data:
+                Tooltip(btn, card_data[1])
+
+    def _add_to_recent(self, card_id):
+        """Add a card to the recently viewed list"""
+        global _recent_cards
+        if card_id in _recent_cards:
+            _recent_cards.remove(card_id)
+        _recent_cards.insert(0, card_id)
+        _recent_cards = _recent_cards[:MAX_RECENT]
+        self._build_recent_strip()
+
+    # ------- Bulk Selection -------
+
+    def _toggle_bulk_mode(self):
+        """Toggle bulk selection mode"""
+        self.bulk_mode = not self.bulk_mode
+        if self.bulk_mode:
+            self.bulk_toggle_btn.configure(
+                text="☑ Select", fg_color=ACCENT_PRIMARY, text_color=TEXT_PRIMARY
+            )
+            self.bulk_action_frame.pack(
+                fill=tk.X, padx=SPACING_MD, pady=(0, SPACING_SM),
+                before=self.pagination_frame
+            )
+        else:
+            self.bulk_toggle_btn.configure(
+                text="☐ Select", fg_color=BG_MEDIUM, text_color=TEXT_MUTED
+            )
+            self.bulk_action_frame.pack_forget()
+            self.bulk_selected_ids.clear()
+            self.card_checkboxes.clear()
+
+        self.populate_tree()
+
+    def _select_all(self):
+        """Select all cards on current page"""
+        start_idx = self.current_page * self.items_per_page
+        end_idx = start_idx + self.items_per_page
+        page_cards = self.filtered_cards[start_idx:end_idx]
+        for card in page_cards:
+            card_id = card[0]
+            self.bulk_selected_ids.add(card_id)
+            if card_id in self.card_checkboxes:
+                self.card_checkboxes[card_id].set(True)
+        self._update_bulk_count()
+
+    def _deselect_all(self):
+        """Deselect all cards"""
+        self.bulk_selected_ids.clear()
+        for var in self.card_checkboxes.values():
+            var.set(False)
+        self._update_bulk_count()
+
+    def _on_bulk_checkbox(self, card_id):
+        """Handle individual checkbox toggle"""
+        if card_id in self.card_checkboxes:
+            if self.card_checkboxes[card_id].get():
+                self.bulk_selected_ids.add(card_id)
+            else:
+                self.bulk_selected_ids.discard(card_id)
+        self._update_bulk_count()
+
+    def _update_bulk_count(self):
+        """Update the bulk selection count label"""
+        self.bulk_count_label.configure(text=f"{len(self.bulk_selected_ids)} selected")
+
+    def _bulk_set_owned(self, owned):
+        """Bulk set owned status"""
+        if not self.bulk_selected_ids:
+            return
+        card_ids = list(self.bulk_selected_ids)
+        set_cards_owned_bulk(card_ids, owned=owned)
+        self.bulk_selected_ids.clear()
+        self.card_checkboxes.clear()
+        self.filter_cards()
+        if self.on_stats_updated:
+            self.on_stats_updated()
+
+    # ------- Navigation to specific card -------
+
+    def navigate_to_card(self, card_id):
+        """Navigate to and select a specific card by ID, adjusting page if needed"""
+        # Find the card in the full unfiltered list
+        self.reset_filters()
+        # Find position of card_id in filtered_cards
+        for idx, card in enumerate(self.filtered_cards):
+            if card[0] == card_id:
+                self.current_page = idx // self.items_per_page
+                self.selected_index = idx % self.items_per_page
+                self.populate_tree()
+                self.on_select(card_id)
+                self._highlight_selected()
+                return
 
     def _set_rarity(self, rarity):
         self.rarity_var.set(rarity)
@@ -309,18 +609,21 @@ class CardListFrame(ctk.CTkFrame):
         )
         self.filtered_cards = self.cards
         self.current_page = 0
+        self.selected_index = -1
         self.populate_tree()
         self.count_label.configure(text=f"{len(self.cards)} cards")
 
     def prev_page(self):
         if self.current_page > 0:
             self.current_page -= 1
+            self.selected_index = -1
             self.populate_tree()
 
     def next_page(self):
         max_page = max(0, (len(self.filtered_cards) - 1) // self.items_per_page)
         if self.current_page < max_page:
             self.current_page += 1
+            self.selected_index = -1
             self.populate_tree()
 
     def populate_tree(self):
@@ -328,6 +631,7 @@ class CardListFrame(ctk.CTkFrame):
         for widget in self.card_widgets:
             widget.destroy()
         self.card_widgets.clear()
+        self.card_checkboxes.clear()
 
         start_idx = self.current_page * self.items_per_page
         end_idx = start_idx + self.items_per_page
@@ -364,6 +668,18 @@ class CardListFrame(ctk.CTkFrame):
                 widget.bind("<Button-1>", lambda e, id=cid: self.on_select(id))
                 for child in widget.winfo_children():
                     make_clickable(child, cid)
+
+            # Bulk checkbox (if in bulk mode)
+            if self.bulk_mode:
+                cb_var = tk.BooleanVar(value=(card_id in self.bulk_selected_ids))
+                self.card_checkboxes[card_id] = cb_var
+                cb = ctk.CTkCheckBox(
+                    card_frame, text="", variable=cb_var,
+                    command=lambda cid=card_id: self._on_bulk_checkbox(cid),
+                    checkbox_width=18, checkbox_height=18,
+                    corner_radius=4, width=20
+                )
+                cb.pack(side=tk.LEFT, padx=(SPACING_XS, 0), pady=SPACING_XS)
 
             # Image
             img = self.icon_cache.get(card_id)
@@ -419,7 +735,8 @@ class CardListFrame(ctk.CTkFrame):
                     font=FONT_TINY, text_color=ACCENT_SUCCESS
                 ).pack(side=tk.RIGHT)
 
-            make_clickable(card_frame)
+            if not self.bulk_mode:
+                make_clickable(card_frame)
 
             col += 1
             if col > 1:
@@ -463,6 +780,9 @@ class CardListFrame(ctk.CTkFrame):
 
             self.current_card_id = card_id
             self.update_effects_display()
+
+            # Add to recently viewed
+            self._add_to_recent(card_id)
 
             if self.on_card_selected:
                 self.on_card_selected(card_id, name, self.selected_level)

@@ -31,8 +31,9 @@ from gui.theme import (
 class DeckSkillsFrame(ctk.CTkFrame):
     """Frame for viewing combined skills of a deck or individual cards"""
 
-    def __init__(self, parent):
+    def __init__(self, parent, navigate_to_card_callback=None):
         super().__init__(parent, fg_color="transparent")
+        self.navigate_to_card = navigate_to_card_callback
         self.icon_cache = {}
         self.current_mode = "Deck"
         self.card_blocks = []
@@ -206,10 +207,15 @@ class DeckSkillsFrame(ctk.CTkFrame):
         info = ctk.CTkFrame(header, fg_color="transparent")
         info.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        ctk.CTkLabel(
+        # Card name — clickable for cross-view linking
+        name_label = ctk.CTkLabel(
             info, text=name,
-            font=FONT_SUBHEADER, text_color=TEXT_PRIMARY, anchor="w"
-        ).pack(fill=tk.X)
+            font=FONT_SUBHEADER, text_color=ACCENT_PRIMARY, anchor="w",
+            cursor="hand2"
+        )
+        name_label.pack(fill=tk.X)
+        if self.navigate_to_card:
+            name_label.bind("<Button-1>", lambda e, cid=card_id: self.navigate_to_card(cid))
 
         owned_text = " · Owned ✓" if is_owned else ""
         ctk.CTkLabel(
