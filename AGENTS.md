@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This file provides guidance to WARP (warp.dev) when working with code in this repository.
+This file provides guidance to AI agents (Warp, Gemini, etc.) when working with code in this repository.
 
 ## Project Overview
 
@@ -59,12 +59,13 @@ Each scraper uses Playwright to render JavaScript-heavy GameTora pages, then ext
 - `race_scraper.py`: Scrapes individual race details (grade, terrain, participants, etc.).
 
 ### GUI (`gui/`)
-Built with **CustomTkinter** (ctk) for modern widgets, with **ttk Treeview** for data tables. Each tab is a separate frame class.
+Built with **CustomTkinter** (ctk) for modern widgets. Uses a sidebar navigation layout with grouped sections. Views are lazily loaded on first access.
 
-- `main_window.py`: Root window, tab creation, cross-tab communication via callbacks (e.g., `on_card_selected` updates effects and deck skills views).
-- `theme.py`: Centralized color palette, fonts, and widget factory functions (`create_styled_button`, `create_styled_entry`, `create_card_frame`). All color constants (`BG_DARK`, `ACCENT_PRIMARY`, `TEXT_PRIMARY`, etc.) are defined here.
-- Tab views: `card_view.py`, `effects_view.py`, `deck_builder.py`, `hints_skills_view.py`, `deck_skills_view.py`, `track_view.py`, `character_view.py`, `race_view.py`
+- `main_window.py`: Root window with grouped sidebar navigation (Collection / Planning / Reference), dynamic window title, keyboard shortcuts (`Ctrl+1-7`), and cross-view communication via callbacks.
+- `theme.py`: Centralized design system — indigo/violet color palette, glassmorphism surface layers (`BG_DARKEST` through `BG_ELEVATED`), spacing tokens (`SPACING_XS` through `SPACING_2XL`), radius tokens (`RADIUS_SM` through `RADIUS_FULL`), typography scale (`FONT_DISPLAY` through `FONT_MONO`), race grade colors (`GRADE_COLORS`), and 10+ widget factory functions (`create_styled_button`, `create_styled_entry`, `create_card_frame`, `create_glass_frame`, `create_section_header`, `create_badge`, `create_stat_bar`, `create_divider`, `create_icon_label`, etc.).
+- Views: `card_view.py` (card library with segmented level control, ownership toggle), `effects_view.py` (effect search with quick-filter chips), `deck_builder.py` (6-slot deck with effects breakdown table), `hints_skills_view.py` (skill search with source badges), `deck_skills_view.py` (deck skill breakdown by card), `track_view.py` (3-panel track/course browser), `race_calendar_view.py` (character aptitude calendar with grade-colored race slots).
 - `update_dialog.py`: In-app update flow (check GitHub releases, download, self-replace via batch script).
+- Legacy: `deck_view.py` (small helper popup, largely unused).
 
 ### Versioning
 `version.py` is the single source of truth for `VERSION`, `APP_NAME`, and `GITHUB_REPO`. The version is embedded in the seed DB during build and compared at runtime for data sync.
@@ -83,6 +84,7 @@ Many modules check `getattr(sys, 'frozen', False)` to switch between development
 ## Conventions
 - All DB access goes through functions in `db/db_queries.py` — never use raw `sqlite3.connect()` in GUI code.
 - New DB columns are added via try/except `ALTER TABLE` migrations in `run_migrations()` (idempotent pattern).
-- GUI widget styling must use constants and factories from `gui/theme.py`.
+- GUI widget styling **must** use constants and factories from `gui/theme.py`. Never hardcode colors, fonts, or spacing — use the token system (`BG_DARK`, `SPACING_SM`, `RADIUS_MD`, `FONT_BODY`, etc.).
+- Views use chunked rendering (processing widgets in batches of 5-10 via `after()`) with generation counters for cancellation to maintain UI responsiveness.
 - Scraper image filenames use the pattern `{gametora_stable_id}_{safe_card_name}.png`.
 - `config/settings.py` exists but is mostly unused at runtime — `db_queries.py` and individual modules define their own paths and constants.
