@@ -133,6 +133,122 @@ def run_migrations():
     except sqlite3.OperationalError:
         pass
     
+    # 6. Create tracks table (needed for old DBs upgrading to newer versions)
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS tracks (
+                track_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                location TEXT,
+                image_path TEXT,
+                image_url TEXT,
+                gametora_url TEXT UNIQUE,
+                is_active INTEGER DEFAULT 1
+            )
+        """)
+    except sqlite3.OperationalError:
+        pass
+
+    # 7. Create courses table
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS courses (
+                course_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                track_id INTEGER,
+                distance INTEGER,
+                surface TEXT,
+                direction TEXT,
+                corner_count INTEGER,
+                final_straight_length TEXT,
+                slope_info TEXT,
+                weather_data TEXT,
+                phases_json TEXT,
+                corners_json TEXT,
+                straights_json TEXT,
+                other_json TEXT,
+                raw_metadata_json TEXT,
+                gametora_url TEXT UNIQUE,
+                map_image_path TEXT,
+                is_active INTEGER DEFAULT 1,
+                FOREIGN KEY (track_id) REFERENCES tracks(track_id)
+            )
+        """)
+    except sqlite3.OperationalError:
+        pass
+
+    # 8. Create scraper_meta table
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS scraper_meta (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scraper_type TEXT UNIQUE,
+                last_run_timestamp TEXT
+            )
+        """)
+    except sqlite3.OperationalError:
+        pass
+
+    # 9. Create characters table (critical for Race Calendar)
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS characters (
+                character_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                gametora_id TEXT UNIQUE,
+                gametora_url TEXT,
+                image_path TEXT,
+                turf_aptitude TEXT,
+                dirt_aptitude TEXT,
+                short_aptitude TEXT,
+                mile_aptitude TEXT,
+                medium_aptitude TEXT,
+                long_aptitude TEXT,
+                runner_aptitude TEXT,
+                leader_aptitude TEXT,
+                betweener_aptitude TEXT,
+                chaser_aptitude TEXT,
+                is_active INTEGER DEFAULT 1
+            )
+        """)
+    except sqlite3.OperationalError:
+        pass
+
+    # 10. Create races table (critical for Race Calendar)
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS races (
+                race_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name_en TEXT NOT NULL,
+                name_jp TEXT,
+                grade TEXT,
+                racetrack TEXT,
+                direction TEXT,
+                participants INTEGER,
+                terrain TEXT,
+                distance_type TEXT,
+                distance_meters INTEGER,
+                season TEXT,
+                time_of_day TEXT,
+                race_date TEXT,
+                race_class TEXT,
+                gametora_url TEXT UNIQUE,
+                is_active INTEGER DEFAULT 1
+            )
+        """)
+    except sqlite3.OperationalError:
+        pass
+
+    # 11. Create system_metadata table (needed for version tracking)
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS system_metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        """)
+    except sqlite3.OperationalError:
+        pass
+    
     conn.commit()
     repair_image_paths(conn)
     conn.close()

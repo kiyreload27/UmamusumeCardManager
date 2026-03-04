@@ -122,8 +122,8 @@ class CardSlot(ctk.CTkFrame):
             self.on_drop(self.index, card_id)
 
     def toggle_controls(self, visible):
-        state = 'readonly' if visible else 'disabled'
-        self.level_combo.configure(state=state)
+        # Level combo is always disabled — level is set by the Card Library
+        self.level_combo.configure(state='disabled')
         if not visible:
             self.remove_btn.pack_forget()
             self.level_combo.pack_forget()
@@ -501,19 +501,11 @@ class DeckBuilderFrame(ctk.CTkFrame):
             # Replace existing card
             remove_card_from_deck(self.current_deck_id, slot_index)
 
-        # Get the card's native max level, or what the user owns it at
+        # Use the card's owned level from the Card Library; fall back to rarity max
         card_data = next((c for c in self._card_render_queue if c[0] == card_id), None)
-        default_level = 50
-        if card_data:
-            rarity = card_data[2]
-            if rarity == 'SSR':
-                default_level = 50
-            elif rarity == 'SR':
-                default_level = 45
-            else:
-                default_level = 40
+        level = self._get_card_level(card_data)
 
-        add_card_to_deck(self.current_deck_id, card_id, slot_index, default_level)
+        add_card_to_deck(self.current_deck_id, card_id, slot_index, level)
         self.load_deck()
 
     # --- Deck Export/Import ---
@@ -734,6 +726,24 @@ class DeckBuilderFrame(ctk.CTkFrame):
                 self.update_deck_count()
                 self.update_effects_breakdown()
 
+    def _get_card_level(self, card_data):
+        """Get the appropriate level for a card when adding to deck.
+        Uses owned level from Card Library; falls back to rarity-based max."""
+        if card_data:
+            # card_data from get_all_cards: (card_id, name, rarity, card_type, max_level, image_path, is_owned, owned_level)
+            owned_level = card_data[7]  # owned_level from Card Library
+            if owned_level:
+                return owned_level
+            # Not owned — use rarity-based max
+            rarity = card_data[2]
+            if rarity == 'SSR':
+                return 50
+            elif rarity == 'SR':
+                return 45
+            else:
+                return 40
+        return 50  # ultimate fallback
+
     def add_selected_to_deck(self):
         if not self.current_deck_id:
             messagebox.showwarning("No Deck", "Select or create a deck first.")
@@ -748,9 +758,13 @@ class DeckBuilderFrame(ctk.CTkFrame):
             messagebox.showinfo("Duplicate", "This card is already in the deck.")
             return
 
+        # Look up owned level from the card browser data
+        card_data = next((c for c in self._card_render_queue if c[0] == card_id), None)
+        level = self._get_card_level(card_data)
+
         for i in range(6):
             if self.deck_slots[i] is None:
-                add_card_to_deck(self.current_deck_id, card_id, i, 50)
+                add_card_to_deck(self.current_deck_id, card_id, i, level)
                 self.load_deck()
                 return
 
