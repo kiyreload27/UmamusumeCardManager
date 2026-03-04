@@ -258,17 +258,14 @@ def repair_image_paths(conn):
     print("Checking for missing image paths to repair...")
     cur = conn.cursor()
     
-    # Find cards with missing image paths but have a URL
-    cur.execute("SELECT card_id, name, gametora_url FROM support_cards WHERE image_path IS NULL OR image_path = ''")
-    to_repair = cur.fetchall()
+    # Find ALL cards to check for absolute/corrupted paths
+    cur.execute("SELECT card_id, name, gametora_url, image_path FROM support_cards")
+    all_cards = cur.fetchall()
     
-    if not to_repair:
-        return
-        
     import re
     repaired_count = 0
     
-    for card_id, name, url in to_repair:
+    for card_id, name, url, current_path in all_cards:
         if not url: continue
         
         # Extract ID from URL (e.g., 30154 from .../supports/30154-mejiro-ramonu)
@@ -277,12 +274,14 @@ def repair_image_paths(conn):
             stable_id = match.group(1)
             # Create safe filename matching scraper logic
             safe_name = re.sub(r'[<>:"/\\\\|?*]', '_', name)
-            filename = f"{stable_id}_{safe_name}.png"
+            correct_relative_path = f"images/{stable_id}_{safe_name}.png"
             
-            # Update DB with images/filename
-            cur.execute("UPDATE support_cards SET image_path = ? WHERE card_id = ?", 
-                       (f"images/{filename}", card_id))
-            repaired_count += 1
+            # If path is missing, absolute, or doesn't match the standard relative format
+            if not current_path or os.path.isabs(current_path) or current_path != correct_relative_path:
+                # Update DB with images/filename
+                cur.execute("UPDATE support_cards SET image_path = ? WHERE card_id = ?", 
+                           (correct_relative_path, card_id))
+                repaired_count += 1
             
     # Also repair character image paths
     cur.execute("SELECT character_id, name, image_path, gametora_id FROM characters")
