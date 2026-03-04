@@ -44,10 +44,8 @@ TABS = [
     ("Deck",       "🎴 Deck Builder"),
     ("Skills",     "🔍 Skills"),
     ("DeckSkills", "📜 Deck Skills"),
-    ("Timeline",   "📅 Timeline"),
-    ("Upgrade",    "📈 Upgrade"),
     ("Tracks",     "🏟️ Tracks"),
-    ("Calendar",   "📅 Races"),
+    ("Calendar",   "📅 Race Calendar"),
 ]
 
 
@@ -175,7 +173,7 @@ class MainWindow:
             text_color=TEXT_MUTED,
             text_color_disabled=TEXT_DISABLED,
             corner_radius=0,
-            anchor="nw",
+            anchor="n",
         )
         self.tabview.grid(row=1, column=0, sticky="nsew", padx=0, pady=0)
 

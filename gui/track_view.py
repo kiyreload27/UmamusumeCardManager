@@ -257,8 +257,42 @@ class TrackViewFrame(ctk.CTkFrame):
         inner = ctk.CTkFrame(card, fg_color="transparent")
         inner.pack(fill=tk.X, padx=SPACING_SM, pady=SPACING_SM)
 
+        # Thumbnail image (cached)
+        thumb = self.track_thumbnails.get(track_id)
+        if not thumb and image_path:
+            resolved = resolve_track_image(image_path)
+            if resolved and os.path.exists(resolved):
+                try:
+                    pil_img = Image.open(resolved)
+                    pil_img.thumbnail((56, 38), Image.Resampling.LANCZOS)
+                    thumb = ctk.CTkImage(
+                        light_image=pil_img, dark_image=pil_img,
+                        size=(56, 38)
+                    )
+                    self.track_thumbnails[track_id] = thumb
+                except Exception:
+                    pass
+
+        if thumb:
+            lbl = ctk.CTkLabel(
+                inner, text="", image=thumb,
+                width=56, height=38, corner_radius=RADIUS_SM
+            )
+            lbl.pack(side=tk.LEFT, padx=(0, SPACING_SM))
+        else:
+            # Placeholder tile with track initials
+            initials = name[:2].upper()
+            ctk.CTkLabel(
+                inner, text=initials, width=56, height=38,
+                fg_color=BG_DARK, corner_radius=RADIUS_SM,
+                font=FONT_BODY_BOLD, text_color=TEXT_MUTED
+            ).pack(side=tk.LEFT, padx=(0, SPACING_SM))
+
+        text_col = ctk.CTkFrame(inner, fg_color="transparent")
+        text_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
         name_label = ctk.CTkLabel(
-            inner, text=name,
+            text_col, text=name,
             font=FONT_BODY_BOLD, text_color=TEXT_PRIMARY, anchor='w'
         )
         name_label.pack(fill=tk.X)
@@ -269,7 +303,7 @@ class TrackViewFrame(ctk.CTkFrame):
         subtitle_parts.append(f"{course_count} course{'s' if course_count != 1 else ''}")
 
         ctk.CTkLabel(
-            inner, text=" · ".join(subtitle_parts),
+            text_col, text=" · ".join(subtitle_parts),
             font=FONT_TINY, text_color=TEXT_MUTED, anchor='w'
         ).pack(fill=tk.X)
 
@@ -281,6 +315,8 @@ class TrackViewFrame(ctk.CTkFrame):
         name_label.bind('<Button-1>', on_click)
         for child in inner.winfo_children():
             child.bind('<Button-1>', on_click)
+            for gc in child.winfo_children():
+                gc.bind('<Button-1>', on_click)
 
         self._bind_scroll_recursive(card, self.track_scroll)
 
@@ -293,6 +329,7 @@ class TrackViewFrame(ctk.CTkFrame):
         card.bind('<Enter>', on_enter)
         card.bind('<Leave>', on_leave)
         card._track_id = track_id
+
 
     def select_track(self, track_id):
         self.current_track_id = track_id

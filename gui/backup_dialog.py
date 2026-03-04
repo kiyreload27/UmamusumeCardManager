@@ -31,7 +31,7 @@ class BackupDialog(ctk.CTkToplevel):
     def __init__(self, parent, on_restore_callback=None):
         super().__init__(parent)
         self.title("Backup & Restore")
-        self.geometry("480x420")
+        self.geometry("480x500")
         self.resizable(False, False)
         self.on_restore = on_restore_callback
 
@@ -101,10 +101,13 @@ class BackupDialog(ctk.CTkToplevel):
             font=FONT_TINY, text_color=ACCENT_WARNING
         ).pack(anchor="w", pady=(SPACING_XS, SPACING_SM))
 
-        create_styled_button(
-            import_inner, text="Import from File...",
-            command=self._import, style_type='ghost',
-            width=180, height=36
+        ctk.CTkButton(
+            import_inner, text="📂  Restore from File...",
+            command=self._import,
+            fg_color=BG_ELEVATED, hover_color=BG_HIGHLIGHT,
+            text_color=ACCENT_WARNING, border_color=ACCENT_WARNING,
+            border_width=1, corner_radius=RADIUS_MD,
+            font=FONT_BODY_BOLD, width=200, height=36
         ).pack(anchor="w")
 
         # === Status ===

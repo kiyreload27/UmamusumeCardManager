@@ -149,13 +149,22 @@ class CardSlot(ctk.CTkFrame):
             valid_levels = [40, 35, 30, 25, 20]
             max_lvl = 40
 
-        self.level_combo.configure(values=[str(l) for l in valid_levels])
+        # Force level into a valid value for this rarity BEFORE touching the widget
+        try:
+            level = int(level)
+        except (TypeError, ValueError):
+            level = max_lvl
         if level not in valid_levels:
             level = max_lvl
 
+        level_str = str(level)
+
+        # Set the StringVar FIRST so configure(values=...) and configure(state=...) never
+        # have a chance to re-render with the stale default "50"
+        self.level_var.set(level_str)
+
         display_name = name if len(name) < 14 else name[:11] + "…"
         self.name_label.configure(text=display_name, text_color=TEXT_PRIMARY)
-        self.level_combo.set(str(level))
 
         # Rarity-colored top border
         rarity_border = {
@@ -167,7 +176,16 @@ class CardSlot(ctk.CTkFrame):
         )
 
         self._load_image(image_path)
+
+        # Now configure the combobox values and show controls
+        self.level_combo.configure(values=[str(l) for l in valid_levels])
         self.toggle_controls(True)
+
+        # Set AGAIN after toggle_controls (which calls configure(state=disabled)) to
+        # ensure the widget cannot have reverted to its previous StringVar state
+        self.level_var.set(level_str)
+        self.level_combo.set(level_str)
+
 
     def reset(self):
         self._is_occupied = False
@@ -293,6 +311,24 @@ class DeckBuilderFrame(ctk.CTkFrame):
             command=lambda e: self.filter_cards()
         )
         type_combo.pack(side=tk.LEFT)
+
+        # Rarity filter row
+        rarity_frame = ctk.CTkFrame(left_panel, fg_color="transparent")
+        rarity_frame.pack(fill=tk.X, padx=SPACING_LG, pady=(0, SPACING_SM))
+
+        ctk.CTkLabel(
+            rarity_frame, text="Rarity:",
+            font=FONT_TINY, text_color=TEXT_MUTED
+        ).pack(side=tk.LEFT, padx=(0, SPACING_XS))
+
+        self.rarity_seg = ctk.CTkSegmentedButton(
+            rarity_frame,
+            values=["All", "SSR", "SR", "R"],
+            command=lambda _: self.filter_cards(),
+            font=FONT_TINY, height=26
+        )
+        self.rarity_seg.set("All")
+        self.rarity_seg.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         owned_frame = ctk.CTkFrame(left_panel, fg_color="transparent")
         owned_frame.pack(fill=tk.X, padx=SPACING_LG, pady=(0, SPACING_SM))
@@ -603,11 +639,15 @@ class DeckBuilderFrame(ctk.CTkFrame):
         self._all_rendered_cards.clear()
 
         type_filter = self.type_var.get() if self.type_var.get() != "All" else None
+        # Read directly from the segmented button widget (CTkSegmentedButton does NOT
+        # write back to a StringVar, so we must call .get() on the widget itself)
+        rarity_sel = self.rarity_seg.get()
+        rarity_filter = rarity_sel if rarity_sel != "All" else None
         search_text = self.search_var.get()
         search = search_text if search_text else None
         owned_only = self.owned_only_var.get()
 
-        cards = get_all_cards(type_filter=type_filter, search_term=search, owned_only=owned_only)
+        cards = get_all_cards(rarity_filter=rarity_filter, type_filter=type_filter, search_term=search, owned_only=owned_only)
         self._card_render_queue = list(cards[:40])
         self._process_card_queue(my_gen)
 
@@ -710,6 +750,11 @@ class DeckBuilderFrame(ctk.CTkFrame):
         for card in deck_cards:
             slot_pos, level, card_id, name, rarity, card_type, image_path = card
             if 0 <= slot_pos < 6:
+                # Repair legacy bad levels (e.g. R card stored at level 50)
+                corrected_level = min(level, self._rarity_max_level(rarity))
+                if corrected_level != level:
+                    add_card_to_deck(self.current_deck_id, card_id, slot_pos, corrected_level)
+                    level = corrected_level
                 self.deck_slots[slot_pos] = card_id
                 self.card_slots[slot_pos].set_card(
                     (card_id, name, rarity, card_type, image_path, level)
@@ -740,33 +785,39 @@ class DeckBuilderFrame(ctk.CTkFrame):
                 self.update_deck_count()
                 self.update_effects_breakdown()
 
+    @staticmethod
+    def _rarity_max_level(rarity):
+        """Return the maximum valid level for a given rarity"""
+        if rarity == 'SSR':
+            return 50
+        elif rarity == 'SR':
+            return 45
+        return 40  # R and fallback
+
     def _get_card_level(self, card_id_or_data):
         """Get the appropriate level for a card when adding to deck.
         Accepts either a card_id (int) or a card data tuple.
-        Uses owned level from Card Library; falls back to rarity-based max."""
+        Uses owned level from Card Library; falls back to rarity-based max.
+        ALWAYS caps the result by the rarity-based maximum."""
         # Resolve card_data from persistent dict if given an id
         if isinstance(card_id_or_data, int):
             card_data = self._all_rendered_cards.get(card_id_or_data)
         else:
             card_data = card_id_or_data
-            # Also update the persistent cache with this data
             if card_data:
                 self._all_rendered_cards[card_data[0]] = card_data
 
         if card_data:
-            # card_data from get_all_cards: (card_id, name, rarity, card_type, max_level, image_path, is_owned, owned_level)
-            owned_level = card_data[7]  # owned_level from Card Library
-            if owned_level:
-                return owned_level
-            # Not owned — use rarity-based max
+            # card_data: (card_id, name, rarity, card_type, max_level, image_path, is_owned, owned_level)
             rarity = card_data[2]
-            if rarity == 'SSR':
-                return 50
-            elif rarity == 'SR':
-                return 45
-            else:
-                return 40
-        return 50  # ultimate fallback
+            max_level = self._rarity_max_level(rarity)
+            owned_level = card_data[7]
+            if owned_level:
+                # Cap: a card physically can't exceed its rarity max regardless of what's
+                # stored in the library (user may have typed 50 for an SR/R by mistake)
+                return min(int(owned_level), max_level)
+            return max_level
+        return 50  # ultimate fallback (unknown card)
 
     def add_selected_to_deck(self):
         if not self.current_deck_id:
@@ -838,6 +889,15 @@ class DeckBuilderFrame(ctk.CTkFrame):
             if info:
                 card_id, level = info
                 card_name = self.card_slots[i].name_label.cget("text")
+                # Cap level to the card's rarity max before DB lookup
+                # (guards against old deck_slots rows with level=50 for SR/R cards)
+                rarity = None
+                for row in self._all_rendered_cards.values():
+                    if row[0] == card_id:
+                        rarity = row[2]
+                        break
+                if rarity:
+                    level = min(level, self._rarity_max_level(rarity))
                 effects = get_effects_at_level(card_id, level)
                 for name, value in effects:
                     if name == "Unique Effect":
