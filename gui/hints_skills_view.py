@@ -16,7 +16,7 @@ from db.db_queries import get_all_unique_skills, get_cards_with_skill, get_card_
 from utils import resolve_image_path
 from gui.theme import (
     BG_DARKEST, BG_DARK, BG_MEDIUM, BG_LIGHT, BG_HIGHLIGHT, BG_ELEVATED,
-    ACCENT_PRIMARY, ACCENT_SECONDARY, ACCENT_TERTIARY, ACCENT_SUCCESS, ACCENT_WARNING,
+    ACCENT_PRIMARY, ACCENT_SECONDARY, ACCENT_TERTIARY, ACCENT_SUCCESS, ACCENT_WARNING, ACCENT_INFO,
     TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, TEXT_DISABLED,
     FONT_HEADER, FONT_SUBHEADER, FONT_BODY, FONT_BODY_BOLD, FONT_SMALL, FONT_TINY,
     SPACING_XS, SPACING_SM, SPACING_MD, SPACING_LG, SPACING_XL,
@@ -121,8 +121,6 @@ class SkillSearchFrame(ctk.CTkFrame):
         # Results scroll
         self.results_scroll = ctk.CTkScrollableFrame(right_frame, fg_color="transparent")
         self.results_scroll.pack(fill=tk.BOTH, expand=True, padx=SPACING_SM, pady=(0, SPACING_SM))
-        self.results_scroll.columnconfigure(0, weight=1)
-        self.results_scroll.columnconfigure(1, weight=1)
 
         # Stats
         self.stats_label = ctk.CTkLabel(
@@ -267,10 +265,7 @@ class SkillSearchFrame(ctk.CTkFrame):
                 self.results_scroll, fg_color=bg_color,
                 corner_radius=RADIUS_MD, border_width=1, border_color=border_color
             )
-            card_frame.grid(
-                row=self._card_render_row, column=self._card_render_col,
-                sticky="nsew", padx=SPACING_XS, pady=SPACING_XS
-            )
+            card_frame.pack(fill=tk.X, padx=SPACING_XS, pady=SPACING_XS)
             self.result_widgets.append(card_frame)
 
             # Image
@@ -288,14 +283,14 @@ class SkillSearchFrame(ctk.CTkFrame):
 
             ctk.CTkLabel(
                 card_frame, text="", image=img if img else None,
-                width=60, height=60, corner_radius=RADIUS_SM
+                width=50, height=50, corner_radius=RADIUS_SM
             ).pack(side=tk.LEFT, padx=SPACING_SM, pady=SPACING_SM)
 
             # Info
             info = ctk.CTkFrame(card_frame, fg_color="transparent")
-            info.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=SPACING_SM, padx=(0, SPACING_SM))
+            info.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=SPACING_XS, padx=(0, SPACING_SM))
 
-            # Name & meta
+            # Top row: Name + type badge
             hdr = ctk.CTkFrame(info, fg_color="transparent")
             hdr.pack(fill=tk.X)
 
@@ -311,35 +306,27 @@ class SkillSearchFrame(ctk.CTkFrame):
                 font=FONT_TINY, text_color=get_rarity_color(rarity)
             ).pack(side=tk.RIGHT)
 
-            # Source badge + details
-            det = ctk.CTkFrame(
-                info, fg_color=BG_MEDIUM, corner_radius=RADIUS_SM
-            )
-            det.pack(fill=tk.X, pady=(SPACING_XS, 0), ipady=SPACING_XS)
-
-            source = card.get('source', 'Event')
+            # Source badge
+            source = card.get('source', '')
             golden = card.get('is_gold', False)
             if golden:
                 source = f"✨ GOLDEN {source.replace('✨ GOLDEN ', '')}"
 
-            source_color = ACCENT_WARNING if golden else (ACCENT_SECONDARY if 'Event' in source else ACCENT_INFO)
-            ctk.CTkLabel(
-                det, text=source, font=FONT_TINY,
-                text_color=source_color, anchor="w"
-            ).pack(fill=tk.X, padx=SPACING_SM)
+            if source:
+                source_color = ACCENT_WARNING if golden else (ACCENT_SECONDARY if 'Event' in source else ACCENT_INFO)
+                ctk.CTkLabel(
+                    info, text=source, font=FONT_TINY,
+                    text_color=source_color, anchor="w"
+                ).pack(fill=tk.X)
 
+            # Details text
             details_text = card.get('details', '')
             if details_text:
                 ctk.CTkLabel(
-                    det, text=details_text,
+                    info, text=details_text,
                     font=FONT_TINY, text_color=TEXT_MUTED,
-                    anchor="w", justify="left", wraplength=220
-                ).pack(fill=tk.X, padx=SPACING_SM)
-
-            self._card_render_col += 1
-            if self._card_render_col > 1:
-                self._card_render_col = 0
-                self._card_render_row += 1
+                    anchor="w", justify="left", wraplength=500
+                ).pack(fill=tk.X)
 
         if self._card_render_queue and gen == self._card_render_gen:
             self.after(10, lambda: self._process_card_queue(gen))

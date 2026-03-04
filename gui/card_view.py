@@ -56,7 +56,7 @@ class CardListFrame(ctk.CTkFrame):
         """Create the card list interface"""
         # Left panel - Card list with filters
         left_frame = ctk.CTkFrame(self, fg_color=BG_DARK, corner_radius=RADIUS_LG, 
-                                   border_width=1, border_color=BG_LIGHT, width=440)
+                                   border_width=1, border_color=BG_LIGHT, width=560)
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=False, padx=(0, SPACING_SM))
 
         # Right panel - Card details
@@ -206,18 +206,18 @@ class CardListFrame(ctk.CTkFrame):
         detail_scroll.pack(fill=tk.BOTH, expand=True)
 
         # Image area with elevated background
-        image_wrapper = ctk.CTkFrame(detail_scroll, fg_color=BG_MEDIUM, corner_radius=RADIUS_LG)
-        image_wrapper.pack(pady=SPACING_LG, padx=SPACING_XL)
+        image_wrapper = ctk.CTkFrame(detail_scroll, fg_color=BG_MEDIUM, corner_radius=RADIUS_MD)
+        image_wrapper.pack(pady=(SPACING_SM, SPACING_XS), padx=SPACING_LG)
 
-        self.image_label = ctk.CTkLabel(image_wrapper, text="", height=180, width=180)
-        self.image_label.pack(padx=SPACING_MD, pady=SPACING_MD)
+        self.image_label = ctk.CTkLabel(image_wrapper, text="", height=120, width=120)
+        self.image_label.pack(padx=SPACING_SM, pady=SPACING_SM)
 
-        # Card name - display size
+        # Card name
         self.detail_name = ctk.CTkLabel(
             detail_scroll, text="Select a card",
-            font=FONT_DISPLAY, text_color=TEXT_PRIMARY
+            font=FONT_HEADER, text_color=TEXT_PRIMARY
         )
-        self.detail_name.pack(pady=(0, SPACING_XS))
+        self.detail_name.pack(pady=(0, 2))
 
         # Info badges row
         self.detail_info_frame = ctk.CTkFrame(detail_scroll, fg_color="transparent")
@@ -231,7 +231,7 @@ class CardListFrame(ctk.CTkFrame):
 
         # Ownership toggle
         owned_frame = ctk.CTkFrame(detail_scroll, fg_color="transparent")
-        owned_frame.pack(pady=SPACING_SM)
+        owned_frame.pack(pady=SPACING_XS)
 
         self.owned_var = tk.BooleanVar(value=False)
         self.owned_checkbox = ctk.CTkSwitch(
@@ -248,12 +248,12 @@ class CardListFrame(ctk.CTkFrame):
 
         # Level selector section
         level_section = ctk.CTkFrame(detail_scroll, fg_color="transparent")
-        level_section.pack(fill=tk.X, padx=SPACING_XL, pady=SPACING_MD)
+        level_section.pack(fill=tk.X, padx=SPACING_LG, pady=SPACING_XS)
 
         ctk.CTkLabel(
             level_section, text="Card Level",
-            font=FONT_SMALL, text_color=TEXT_MUTED
-        ).pack(anchor="w", pady=(0, SPACING_XS))
+            font=FONT_TINY, text_color=TEXT_MUTED
+        ).pack(anchor="w", pady=(0, 2))
 
         # Segmented level control
         self.level_btn_frame = ctk.CTkFrame(level_section, fg_color="transparent")
@@ -267,17 +267,17 @@ class CardListFrame(ctk.CTkFrame):
 
         # Effects section
         effects_header = ctk.CTkFrame(detail_scroll, fg_color="transparent")
-        effects_header.pack(fill=tk.X, padx=SPACING_XL, pady=(SPACING_MD, SPACING_XS))
+        effects_header.pack(fill=tk.X, padx=SPACING_LG, pady=(SPACING_SM, SPACING_XS))
 
         self.effects_level_label = ctk.CTkLabel(
             effects_header, text="📊  Effects at Level 50",
-            font=FONT_SUBHEADER, text_color=ACCENT_PRIMARY
+            font=FONT_BODY_BOLD, text_color=ACCENT_PRIMARY
         )
         self.effects_level_label.pack(side=tk.LEFT)
 
         # Effects text area
-        self.effects_text = create_styled_text(detail_scroll, height=20)
-        self.effects_text.pack(fill=tk.BOTH, expand=True, padx=SPACING_XL, pady=(0, SPACING_XL))
+        self.effects_text = create_styled_text(detail_scroll, height=14)
+        self.effects_text.pack(fill=tk.BOTH, expand=True, padx=SPACING_LG, pady=(0, SPACING_LG))
         self.effects_text.configure(state="disabled")
 
     def load_cards(self):
@@ -372,25 +372,25 @@ class CardListFrame(ctk.CTkFrame):
                 if resolved_path and os.path.exists(resolved_path):
                     try:
                         pil_img = Image.open(resolved_path)
-                        pil_img.thumbnail((72, 72), Image.Resampling.LANCZOS)
-                        img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(72, 72))
+                        pil_img.thumbnail((44, 44), Image.Resampling.LANCZOS)
+                        img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(44, 44))
                         self.icon_cache[card_id] = img
                     except (OSError, SyntaxError, ValueError) as e:
                         logging.debug(f"Failed to load card icon {image_path}: {e}")
 
             img_label = ctk.CTkLabel(
                 card_frame, text="", image=img if img else None,
-                width=72, height=72, corner_radius=RADIUS_SM
+                width=44, height=44, corner_radius=RADIUS_SM
             )
-            img_label.pack(side=tk.LEFT, padx=SPACING_SM, pady=SPACING_SM)
+            img_label.pack(side=tk.LEFT, padx=SPACING_XS, pady=SPACING_XS)
 
             # Info container
             info_frame = ctk.CTkFrame(card_frame, fg_color="transparent")
-            info_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=SPACING_SM, padx=(0, SPACING_SM))
+            info_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=SPACING_XS, padx=(0, SPACING_XS))
 
             ctk.CTkLabel(
                 info_frame, text=display_name,
-                font=FONT_BODY_BOLD, text_color=TEXT_PRIMARY,
+                font=FONT_SMALL, text_color=TEXT_PRIMARY,
                 anchor="w", justify="left"
             ).pack(fill=tk.X)
 
@@ -476,7 +476,7 @@ class CardListFrame(ctk.CTkFrame):
                 img = ctk.CTkImage(
                     light_image=Image.open(resolved_path),
                     dark_image=Image.open(resolved_path),
-                    size=(180, 180)
+                    size=(120, 120)
                 )
                 self.image_label.configure(image=img, text="")
             except Exception:
