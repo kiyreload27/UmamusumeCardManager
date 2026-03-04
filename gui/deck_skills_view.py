@@ -31,9 +31,10 @@ from gui.theme import (
 class DeckSkillsFrame(ctk.CTkFrame):
     """Frame for viewing combined skills of a deck or individual cards"""
 
-    def __init__(self, parent, navigate_to_card_callback=None):
+    def __init__(self, parent, navigate_to_card_callback=None, navigate_to_skill_callback=None):
         super().__init__(parent, fg_color="transparent")
         self.navigate_to_card = navigate_to_card_callback
+        self.navigate_to_skill = navigate_to_skill_callback
         self.icon_cache = {}
         self.current_mode = "Deck"
         self.card_blocks = []
@@ -266,10 +267,17 @@ class DeckSkillsFrame(ctk.CTkFrame):
             else:
                 src_color = TEXT_MUTED
 
-            ctk.CTkLabel(
+            skill_name_label = ctk.CTkLabel(
                 left_col, text=f"{prefix}{skill['name']}",
-                font=FONT_BODY_BOLD, text_color=c_name, anchor="w"
-            ).pack(fill=tk.X)
+                font=FONT_BODY_BOLD, text_color=c_name, anchor="w",
+                cursor="hand2" if self.navigate_to_skill else ""
+            )
+            skill_name_label.pack(fill=tk.X)
+            if self.navigate_to_skill:
+                skill_name_label.bind(
+                    "<Button-1>",
+                    lambda e, sn=skill['name']: self.navigate_to_skill(sn)
+                )
 
             # Source as colored badge
             ctk.CTkLabel(

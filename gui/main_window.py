@@ -19,6 +19,7 @@ from gui.track_view import TrackViewFrame
 from gui.deck_builder import DeckBuilderFrame
 from gui.race_calendar_view import RaceCalendarViewFrame
 from gui.update_dialog import show_update_dialog
+from gui.backup_dialog import show_backup_dialog
 from gui.theme import (
     configure_styles, create_styled_button, create_sidebar_button,
     create_badge, create_divider,
@@ -212,6 +213,13 @@ class MainWindow:
         )
         self.stats_label.pack(fill="x")
 
+        # Backup button
+        create_styled_button(
+            bottom_frame, text="💾  Backup / Restore",
+            command=self.show_backup_dialog, style_type='ghost',
+            height=36
+        ).pack(fill="x", pady=(0, SPACING_XS))
+
         # Update button
         create_styled_button(
             bottom_frame, text="🔄  Check Updates",
@@ -259,7 +267,8 @@ class MainWindow:
             ),
             "DeckSkills": lambda: DeckSkillsFrame(
                 self.view_container,
-                navigate_to_card_callback=self.navigate_to_card
+                navigate_to_card_callback=self.navigate_to_card,
+                navigate_to_skill_callback=self.navigate_to_skill
             ),
             "Tracks": lambda: TrackViewFrame(self.view_container),
             "Calendar": lambda: RaceCalendarViewFrame(self.view_container)
@@ -325,6 +334,15 @@ class MainWindow:
         if "Cards" in self.views:
             self.views["Cards"].navigate_to_card(card_id)
 
+    def navigate_to_skill(self, skill_name):
+        """Navigate to the Skills view and search for a specific skill"""
+        self.show_view("Skills")
+        if "Skills" in self.views:
+            view = self.views["Skills"]
+            view.search_var.set(skill_name)
+            view.filter_skills()
+            view.on_skill_selected(skill_name)
+
     def on_card_selected(self, card_id, card_name, level=None):
         if level is not None:
             self.last_selected_levels[card_id] = level
@@ -348,6 +366,14 @@ class MainWindow:
         ]
         if hasattr(self, 'stats_label'):
             self.stats_label.configure(text="\n".join(stat_lines))
+
+    def show_backup_dialog(self):
+        def on_restore():
+            self.refresh_stats()
+            # Reload cards view if it exists
+            if "Cards" in self.views:
+                self.views["Cards"].filter_cards()
+        show_backup_dialog(self.root, on_restore_callback=on_restore)
 
     def show_update_dialog(self):
         show_update_dialog(self.root)

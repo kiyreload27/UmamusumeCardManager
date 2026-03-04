@@ -1109,6 +1109,72 @@ def import_user_data(data):
     conn.close()
     return summary
 
+def export_single_deck(deck_id):
+    """Export a single deck as a JSON-serializable dict with card URLs for portability."""
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    cur.execute("SELECT deck_name FROM user_decks WHERE deck_id = ?", (deck_id,))
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        return None
+    
+    deck_data = {'name': row[0], 'slots': []}
+    
+    cur.execute("""
+        SELECT ds.slot_position, ds.level, sc.gametora_url, sc.name, sc.rarity, sc.card_type
+        FROM deck_slots ds
+        JOIN support_cards sc ON ds.card_id = sc.card_id
+        WHERE ds.deck_id = ?
+        ORDER BY ds.slot_position
+    """, (deck_id,))
+    
+    for slot_pos, level, url, name, rarity, card_type in cur.fetchall():
+        deck_data['slots'].append({
+            'position': slot_pos,
+            'level': level,
+            'url': url,
+            'name': name,
+            'rarity': rarity,
+            'card_type': card_type
+        })
+    
+    conn.close()
+    return deck_data
+
+def import_single_deck(deck_data):
+    """
+    Import a single deck from a dict. Creates a new deck.
+    Returns (deck_id, matched_count, total_slots).
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    # Build URL -> card_id mapping
+    cur.execute("SELECT card_id, gametora_url FROM support_cards")
+    url_to_id = {r[1]: r[0] for r in cur.fetchall() if r[1]}
+    
+    deck_name = deck_data.get('name', 'Imported Deck')
+    cur.execute("INSERT INTO user_decks (deck_name) VALUES (?)", (deck_name,))
+    deck_id = cur.lastrowid
+    
+    matched = 0
+    total = len(deck_data.get('slots', []))
+    
+    for slot in deck_data.get('slots', []):
+        card_id = url_to_id.get(slot.get('url'))
+        if card_id:
+            cur.execute(
+                "INSERT INTO deck_slots (deck_id, card_id, slot_position, level) VALUES (?, ?, ?, ?)",
+                (deck_id, card_id, slot['position'], slot.get('level', 50))
+            )
+            matched += 1
+    
+    conn.commit()
+    conn.close()
+    return deck_id, matched, total
+
 # ============================================
 # Deck Queries
 # ============================================

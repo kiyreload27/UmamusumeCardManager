@@ -16,7 +16,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from db.db_queries import (
     get_all_cards, get_card_by_id, get_effects_at_level,
     set_card_owned, is_card_owned, update_owned_card_level,
-    set_cards_owned_bulk
+    set_cards_owned_bulk, get_card_notes, set_card_notes,
+    get_all_tags, get_all_effect_names
 )
 from utils import resolve_image_path
 from gui.theme import (
@@ -239,6 +240,37 @@ class CardListFrame(ctk.CTkFrame):
             corner_radius=RADIUS_SM,
             command=self.reset_filters
         ).pack(side=tk.RIGHT)
+
+        # === Advanced Filter Row (Effect + Tag) ===
+        adv_filter_frame = ctk.CTkFrame(self.left_frame, fg_color="transparent")
+        adv_filter_frame.pack(fill=tk.X, padx=SPACING_MD, pady=(0, SPACING_SM))
+
+        # Effect filter
+        self.effect_var = tk.StringVar(value="All Effects")
+        self.effect_combo = ctk.CTkComboBox(
+            adv_filter_frame,
+            variable=self.effect_var,
+            values=["All Effects"],
+            width=150, height=28,
+            font=FONT_TINY,
+            command=lambda e: self.filter_cards()
+        )
+        self.effect_combo.pack(side=tk.LEFT, padx=(0, SPACING_SM))
+
+        # Tag filter
+        self.tag_var = tk.StringVar(value="All Tags")
+        self.tag_combo = ctk.CTkComboBox(
+            adv_filter_frame,
+            variable=self.tag_var,
+            values=["All Tags"],
+            width=130, height=28,
+            font=FONT_TINY,
+            command=lambda e: self.filter_cards()
+        )
+        self.tag_combo.pack(side=tk.LEFT)
+
+        # Load effect names and tags into dropdowns
+        self._refresh_filter_dropdowns()
 
         # Owned checkbox + count label + bulk mode toggle
         meta_frame = ctk.CTkFrame(self.left_frame, fg_color="transparent")
@@ -580,6 +612,52 @@ class CardListFrame(ctk.CTkFrame):
         self.effects_text.pack(fill=tk.BOTH, expand=True, padx=SPACING_LG, pady=(0, SPACING_LG))
         self.effects_text.configure(state="disabled")
 
+        # === Notes & Tags Section ===
+        notes_header = ctk.CTkFrame(detail_scroll, fg_color="transparent")
+        notes_header.pack(fill=tk.X, padx=SPACING_LG, pady=(SPACING_SM, SPACING_XS))
+
+        ctk.CTkLabel(
+            notes_header, text="📝  Notes & Tags",
+            font=FONT_BODY_BOLD, text_color=ACCENT_PRIMARY
+        ).pack(side=tk.LEFT)
+
+        save_note_btn = ctk.CTkButton(
+            notes_header, text="Save", width=50, height=24,
+            font=FONT_TINY, fg_color=ACCENT_SUCCESS, hover_color="#2dd36f",
+            text_color="#ffffff", corner_radius=RADIUS_SM,
+            command=self._save_notes
+        )
+        save_note_btn.pack(side=tk.RIGHT)
+
+        # Tags entry
+        tags_row = ctk.CTkFrame(detail_scroll, fg_color="transparent")
+        tags_row.pack(fill=tk.X, padx=SPACING_LG, pady=(0, SPACING_XS))
+
+        ctk.CTkLabel(
+            tags_row, text="Tags:",
+            font=FONT_TINY, text_color=TEXT_MUTED, width=35
+        ).pack(side=tk.LEFT)
+
+        self.tags_entry = ctk.CTkEntry(
+            tags_row, placeholder_text="e.g. speed,stamina,top-tier",
+            height=28, font=FONT_TINY,
+            fg_color=BG_MEDIUM, border_color=BG_LIGHT,
+            corner_radius=RADIUS_SM
+        )
+        self.tags_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=SPACING_XS)
+
+        # Tag chips display
+        self.tag_chips_frame = ctk.CTkFrame(detail_scroll, fg_color="transparent")
+        self.tag_chips_frame.pack(fill=tk.X, padx=SPACING_LG, pady=(0, SPACING_XS))
+
+        # Note text
+        self.note_text = ctk.CTkTextbox(
+            detail_scroll, height=60, font=FONT_SMALL,
+            fg_color=BG_MEDIUM, border_color=BG_LIGHT,
+            border_width=1, corner_radius=RADIUS_SM
+        )
+        self.note_text.pack(fill=tk.X, padx=SPACING_LG, pady=(0, SPACING_LG))
+
     def load_cards(self):
         """Load all cards from database"""
         self.cards = get_all_cards()
@@ -592,6 +670,8 @@ class CardListFrame(ctk.CTkFrame):
         self.search_var.set("")
         self.rarity_var.set("All")
         self.type_var.set("All")
+        self.effect_var.set("All Effects")
+        self.tag_var.set("All Tags")
         self.owned_only_var.set(False)
         self.filter_cards()
 
@@ -603,9 +683,13 @@ class CardListFrame(ctk.CTkFrame):
         search = search_text if search_text else None
         owned_only = self.owned_only_var.get()
 
+        effect = self.effect_var.get() if self.effect_var.get() != "All Effects" else None
+        tag = self.tag_var.get() if self.tag_var.get() != "All Tags" else None
+
         self.cards = get_all_cards(
             rarity_filter=rarity, type_filter=card_type,
-            search_term=search, owned_only=owned_only
+            search_term=search, owned_only=owned_only,
+            effect_filter=effect, tag_filter=tag
         )
         self.filtered_cards = self.cards
         self.current_page = 0
@@ -781,6 +865,9 @@ class CardListFrame(ctk.CTkFrame):
             self.current_card_id = card_id
             self.update_effects_display()
 
+            # Load notes & tags for this card
+            self._load_notes(card_id)
+
             # Add to recently viewed
             self._add_to_recent(card_id)
 
@@ -910,3 +997,79 @@ class CardListFrame(ctk.CTkFrame):
             self.effects_text.insert(tk.END, f"  Available levels: {self.valid_levels}")
 
         self.effects_text.configure(state="disabled")
+
+    # ------- Notes & Tags -------
+
+    def _load_notes(self, card_id):
+        """Load notes and tags for a card into the UI"""
+        note, tags = get_card_notes(card_id)
+
+        # Update note text
+        self.note_text.delete('1.0', tk.END)
+        if note:
+            self.note_text.insert(tk.END, note)
+
+        # Update tags entry
+        self.tags_entry.delete(0, tk.END)
+        if tags:
+            self.tags_entry.insert(0, tags)
+
+        # Render tag chips
+        self._render_tag_chips(tags)
+
+    def _save_notes(self):
+        """Save notes and tags for the current card"""
+        if not self.current_card_id:
+            return
+        note = self.note_text.get('1.0', tk.END).strip()
+        tags = self.tags_entry.get().strip()
+
+        # Normalize tags: strip whitespace around commas
+        if tags:
+            tags = ','.join(t.strip() for t in tags.split(',') if t.strip())
+
+        set_card_notes(self.current_card_id, note, tags)
+        self._render_tag_chips(tags)
+        self._refresh_filter_dropdowns()
+
+    def _render_tag_chips(self, tags_str):
+        """Render tag chips from a comma-separated string"""
+        for child in self.tag_chips_frame.winfo_children():
+            child.destroy()
+
+        if not tags_str:
+            return
+
+        tag_colors = [ACCENT_PRIMARY, ACCENT_SECONDARY, ACCENT_SUCCESS, ACCENT_WARNING]
+        for i, tag in enumerate(tags_str.split(',')):
+            tag = tag.strip()
+            if not tag:
+                continue
+            color = tag_colors[i % len(tag_colors)]
+            chip = ctk.CTkButton(
+                self.tag_chips_frame, text=f"🏷 {tag}",
+                font=FONT_TINY, width=0, height=22,
+                fg_color=BG_MEDIUM, hover_color=BG_HIGHLIGHT,
+                text_color=color, corner_radius=RADIUS_FULL,
+                command=lambda t=tag: self._filter_by_tag(t)
+            )
+            chip.pack(side=tk.LEFT, padx=2)
+
+    def _filter_by_tag(self, tag):
+        """Filter cards by clicking on a tag chip"""
+        self.tag_var.set(tag)
+        self.filter_cards()
+
+    def _refresh_filter_dropdowns(self):
+        """Refresh effect and tag filter dropdown values"""
+        try:
+            effects = get_all_effect_names()
+            self.effect_combo.configure(values=["All Effects"] + effects)
+        except Exception:
+            pass
+
+        try:
+            tags = get_all_tags()
+            self.tag_combo.configure(values=["All Tags"] + tags)
+        except Exception:
+            pass

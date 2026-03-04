@@ -56,14 +56,40 @@ All notable changes to the Umamusume Support Card Manager will be documented in 
 - Added `export_user_data()` and `import_user_data()` for backup/restore
 - Added `get_all_effect_names()` for populating the effect filter dropdown
 - Extended `get_all_cards()` to support `effect_filter` parameter
+- Added `export_single_deck()` and `import_single_deck()` for per-deck JSON export/import
 - Added `navigate_to_card()` cross-view navigation to `MainWindow`
+- Added `navigate_to_skill()` for cross-view skill navigation
 - All views now accept `navigate_to_card_callback` parameter
+- `DeckSkillsFrame` now accepts `navigate_to_skill_callback` — skill names are clickable
 
-### 📁 Files Changed
+### 🎴 Deck Enhancements
+
+#### Deck Comparison
+- Compare two decks side-by-side with an effects diff table
+- Green/red color-coded differences show which deck is better for each effect
+- Accessible via **⚖️ Compare** button in the Deck Builder
+
+#### Export/Import Decks
+- **� Export** any deck to a portable `.json` file
+- **📥 Import** a deck file to create a new deck (matches cards by URL)
+- Great for sharing deck builds with friends
+
+#### Cards With This Skill (from Deck View)
+- Skill names in the Deck Skills view are now **clickable**
+- Clicking a skill name switches to the Skill Search view and shows all cards with that skill
+
+#### Drag-and-Drop Deck Building
+- **Drag cards** from the browser directly onto deck slots
+- Slots highlight when a card is hovered over them
+- Drop onto an occupied slot to replace that card
+
+### �📁 Files Changed
 - `gui/card_view.py` — Recently viewed, keyboard nav, bulk ownership, notes/tags UI, effect filter
-- `gui/main_window.py` — Cross-view navigation, backup button, sidebar updates
+- `gui/main_window.py` — Cross-view navigation, backup button, skill navigation
 - `gui/effects_view.py` — Clickable card names
 - `gui/hints_skills_view.py` — Clickable card names
-- `gui/deck_skills_view.py` — Clickable card names
+- `gui/deck_skills_view.py` — Clickable card names + clickable skill names
 - `gui/backup_dialog.py` — **NEW** — Backup/restore dialog
-- `db/db_queries.py` — Bulk ownership, notes/tags, backup/restore, effect filter queries
+- `gui/deck_comparison.py` — **NEW** — Side-by-side deck comparison
+- `gui/deck_builder.py` — Drag-and-drop, export/import, comparison button
+- `db/db_queries.py` — Bulk ownership, notes/tags, backup/restore, effect filter, deck export/import

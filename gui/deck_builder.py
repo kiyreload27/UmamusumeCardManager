@@ -1,12 +1,13 @@
 """
 Deck Builder Frame
 Build decks with 6 cards and view combined effects with breakdown
-Premium redesign with visual slot cards and stat breakdown
+Premium redesign with visual slot cards, drag-and-drop, export/import, and comparison
 """
 
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, filedialog
 import customtkinter as ctk
+import json
 import sys
 import os
 from PIL import Image
@@ -16,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from db.db_queries import (
     get_all_cards, get_all_decks, create_deck, delete_deck,
     add_card_to_deck, remove_card_from_deck, get_deck_cards,
-    get_effects_at_level
+    get_effects_at_level, export_single_deck, import_single_deck
 )
 from utils import resolve_image_path
 from gui.theme import (
@@ -29,12 +30,13 @@ from gui.theme import (
     get_type_color, get_type_icon, get_rarity_color,
     create_styled_button, create_styled_entry, create_card_frame
 )
+from gui.deck_comparison import show_deck_comparison
 import tkinter.simpledialog
 
 
 class CardSlot(ctk.CTkFrame):
     """Visual component for a single card slot with premium styling"""
-    def __init__(self, parent, index, remove_callback, level_callback):
+    def __init__(self, parent, index, remove_callback, level_callback, on_drop_callback=None):
         super().__init__(
             parent, fg_color=BG_DARK, border_width=1,
             border_color=BG_LIGHT, corner_radius=RADIUS_MD
@@ -42,9 +44,14 @@ class CardSlot(ctk.CTkFrame):
         self.index = index
         self.remove_callback = remove_callback
         self.level_callback = level_callback
+        self.on_drop = on_drop_callback
         self.image_ref = None
         self._is_occupied = False
         self.setup_ui()
+
+        # Drop target – accept drags
+        self.bind("<Enter>", self._on_drag_enter)
+        self.bind("<Leave>", self._on_drag_leave)
 
     def setup_ui(self):
         self.columnconfigure(0, weight=1)
@@ -98,6 +105,21 @@ class CardSlot(ctk.CTkFrame):
         )
 
         self.toggle_controls(False)
+
+    def _on_drag_enter(self, event):
+        """Visual feedback when a card is dragged over this slot"""
+        if not self._is_occupied:
+            self.configure(border_color=ACCENT_PRIMARY, border_width=2)
+
+    def _on_drag_leave(self, event):
+        """Remove visual feedback"""
+        if not self._is_occupied:
+            self.configure(border_color=BG_LIGHT, border_width=1)
+
+    def accept_drop(self, card_id):
+        """Called when a card is dropped on this slot"""
+        if self.on_drop:
+            self.on_drop(self.index, card_id)
 
     def toggle_controls(self, visible):
         state = 'readonly' if visible else 'disabled'
@@ -200,7 +222,7 @@ class CardSlot(ctk.CTkFrame):
 
 
 class DeckBuilderFrame(ctk.CTkFrame):
-    """Deck builder with combined effects breakdown"""
+    """Deck builder with combined effects breakdown, drag-and-drop, export/import, and comparison"""
 
     def __init__(self, parent):
         super().__init__(parent, fg_color="transparent")
@@ -209,6 +231,10 @@ class DeckBuilderFrame(ctk.CTkFrame):
         self.icon_cache = {}
         self.av_card_widgets = []
         self.selected_av_card_id = None
+
+        # Drag state
+        self._drag_card_id = None
+        self._drag_indicator = None
 
         self._card_render_gen = 0
         self._card_render_queue = []
@@ -234,6 +260,12 @@ class DeckBuilderFrame(ctk.CTkFrame):
             header, text="📋  Available Cards",
             font=FONT_HEADER, text_color=TEXT_PRIMARY
         ).pack(side=tk.LEFT)
+
+        # Drag hint
+        ctk.CTkLabel(
+            header, text="drag → slot",
+            font=FONT_TINY, text_color=TEXT_DISABLED
+        ).pack(side=tk.RIGHT)
 
         # Filters
         filter_frame = ctk.CTkFrame(left_panel, fg_color="transparent")
@@ -322,13 +354,45 @@ class DeckBuilderFrame(ctk.CTkFrame):
         )
         self.deck_count_label.pack(side=tk.RIGHT)
 
+        # Action buttons row (Compare, Export, Import)
+        action_row = ctk.CTkFrame(deck_ctrl, fg_color="transparent")
+        action_row.pack(fill=tk.X, padx=SPACING_LG, pady=(0, SPACING_MD))
+
+        ctk.CTkButton(
+            action_row, text="⚖️ Compare",
+            command=self._show_comparison,
+            font=FONT_TINY, width=90, height=28,
+            fg_color=BG_MEDIUM, hover_color=BG_HIGHLIGHT,
+            text_color=TEXT_MUTED, corner_radius=RADIUS_SM
+        ).pack(side=tk.LEFT, padx=(0, SPACING_XS))
+
+        ctk.CTkButton(
+            action_row, text="📤 Export",
+            command=self._export_deck,
+            font=FONT_TINY, width=80, height=28,
+            fg_color=BG_MEDIUM, hover_color=BG_HIGHLIGHT,
+            text_color=TEXT_MUTED, corner_radius=RADIUS_SM
+        ).pack(side=tk.LEFT, padx=(0, SPACING_XS))
+
+        ctk.CTkButton(
+            action_row, text="📥 Import",
+            command=self._import_deck,
+            font=FONT_TINY, width=80, height=28,
+            fg_color=BG_MEDIUM, hover_color=BG_HIGHLIGHT,
+            text_color=TEXT_MUTED, corner_radius=RADIUS_SM
+        ).pack(side=tk.LEFT)
+
         # Card Slots Row
         self.slots_frame = ctk.CTkFrame(right_panel, fg_color="transparent")
         self.slots_frame.pack(fill=tk.X, pady=(0, SPACING_SM))
 
         self.card_slots = []
         for i in range(6):
-            slot = CardSlot(self.slots_frame, i, self.remove_from_slot, self.on_slot_level_changed)
+            slot = CardSlot(
+                self.slots_frame, i,
+                self.remove_from_slot, self.on_slot_level_changed,
+                on_drop_callback=self._on_card_dropped
+            )
             slot.grid(row=0, column=i, padx=SPACING_XS, pady=SPACING_XS, sticky='nsew')
             self.slots_frame.columnconfigure(i, weight=1)
             self.card_slots.append(slot)
@@ -375,7 +439,135 @@ class DeckBuilderFrame(ctk.CTkFrame):
 
         self.after(200, self.filter_cards)
 
-    # --- Logic Methods ---
+    # --- Drag and Drop ---
+
+    def _start_drag(self, card_id, event):
+        """Start dragging a card from the browser"""
+        self._drag_card_id = card_id
+        # Bind global mouse events for drag
+        self.winfo_toplevel().bind("<B1-Motion>", self._on_drag_motion)
+        self.winfo_toplevel().bind("<ButtonRelease-1>", self._on_drag_release)
+
+    def _on_drag_motion(self, event):
+        """Update drag indicator position"""
+        if not self._drag_card_id:
+            return
+        # Change cursor to indicate dragging
+        try:
+            self.winfo_toplevel().configure(cursor="hand2")
+        except tk.TclError:
+            pass
+
+    def _on_drag_release(self, event):
+        """End drag — check if dropped on a slot"""
+        if not self._drag_card_id:
+            return
+
+        card_id = self._drag_card_id
+        self._drag_card_id = None
+
+        try:
+            self.winfo_toplevel().configure(cursor="")
+            self.winfo_toplevel().unbind("<B1-Motion>")
+            self.winfo_toplevel().unbind("<ButtonRelease-1>")
+        except tk.TclError:
+            pass
+
+        # Check which slot the mouse is over
+        x, y = event.x_root, event.y_root
+        for slot in self.card_slots:
+            try:
+                sx = slot.winfo_rootx()
+                sy = slot.winfo_rooty()
+                sw = slot.winfo_width()
+                sh = slot.winfo_height()
+                if sx <= x <= sx + sw and sy <= y <= sy + sh:
+                    slot.accept_drop(card_id)
+                    return
+            except tk.TclError:
+                pass
+
+    def _on_card_dropped(self, slot_index, card_id):
+        """Handle a card being dropped on a slot"""
+        if not self.current_deck_id:
+            messagebox.showwarning("No Deck", "Select or create a deck first.")
+            return
+
+        if card_id in self.deck_slots:
+            messagebox.showinfo("Duplicate", "This card is already in the deck.")
+            return
+
+        if self.deck_slots[slot_index] is not None:
+            # Replace existing card
+            remove_card_from_deck(self.current_deck_id, slot_index)
+
+        add_card_to_deck(self.current_deck_id, card_id, slot_index, 50)
+        self.load_deck()
+
+    # --- Deck Export/Import ---
+
+    def _export_deck(self):
+        """Export current deck to JSON"""
+        if not self.current_deck_id:
+            messagebox.showwarning("No Deck", "Select a deck to export.")
+            return
+
+        deck_data = export_single_deck(self.current_deck_id)
+        if not deck_data:
+            return
+
+        filepath = filedialog.asksaveasfilename(
+            parent=self,
+            title="Export Deck",
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json")],
+            initialfile=f"deck_{deck_data['name'].replace(' ', '_')}.json"
+        )
+        if not filepath:
+            return
+
+        deck_data['_format'] = 'uma_deck_v1'
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(deck_data, f, indent=2, ensure_ascii=False)
+
+        messagebox.showinfo("Exported", f"Deck '{deck_data['name']}' exported with {len(deck_data['slots'])} cards.")
+
+    def _import_deck(self):
+        """Import a deck from JSON"""
+        filepath = filedialog.askopenfilename(
+            parent=self,
+            title="Import Deck",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+        )
+        if not filepath:
+            return
+
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                deck_data = json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            messagebox.showerror("Error", f"Invalid file: {e}")
+            return
+
+        deck_id, matched, total = import_single_deck(deck_data)
+        self.current_deck_id = deck_id
+        self.refresh_decks()
+        self.deck_combo.set(f"{deck_id}: {deck_data.get('name', 'Imported')}")
+        self.load_deck()
+
+        messagebox.showinfo(
+            "Imported",
+            f"Deck '{deck_data.get('name')}' imported.\n"
+            f"Matched {matched}/{total} cards."
+        )
+
+    # --- Comparison ---
+
+    def _show_comparison(self):
+        """Open deck comparison dialog"""
+        show_deck_comparison(self.winfo_toplevel(), current_deck_id=self.current_deck_id)
+
+    # --- Card Selection & Rendering ---
 
     def _select_av_card(self, card_id):
         self.selected_av_card_id = card_id
@@ -427,6 +619,12 @@ class DeckBuilderFrame(ctk.CTkFrame):
                 for child in w.winfo_children():
                     make_clickable(child, id)
 
+            def make_draggable(w, id=card_id):
+                """Enable drag from card browser items"""
+                w.bind("<B1-Motion>", lambda e, c=id: self._start_drag(c, e))
+                for child in w.winfo_children():
+                    make_draggable(child, id)
+
             # Image
             img = self.icon_cache.get(card_id)
             if not img:
@@ -459,9 +657,12 @@ class DeckBuilderFrame(ctk.CTkFrame):
             ).pack(fill=tk.X)
 
             make_clickable(row_frame)
+            make_draggable(row_frame)
 
         if self._card_render_queue and gen == self._card_render_gen:
             self.after(15, lambda: self._process_card_queue(gen))
+
+    # --- Deck CRUD ---
 
     def refresh_decks(self):
         decks = get_all_decks()
@@ -634,9 +835,6 @@ class DeckBuilderFrame(ctk.CTkFrame):
                 f"{total:.0f}%" if is_percent
                 else (f"+{total:.0f}" if total > 0 else str(int(total)))
             )
-
-            # Row bg alternation
-            row_bg = BG_DARK if row_idx % 2 == 0 else "transparent"
 
             ctk.CTkLabel(
                 self.table_scroll, text=effect_name,
