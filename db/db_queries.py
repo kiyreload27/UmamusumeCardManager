@@ -119,6 +119,20 @@ def run_migrations():
     except sqlite3.OperationalError:
         pass # Column already exists
         
+    # 5. Create user_notes table for card notes and tags
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS user_notes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                card_id INTEGER NOT NULL UNIQUE,
+                note TEXT DEFAULT '',
+                tags TEXT DEFAULT '',
+                FOREIGN KEY (card_id) REFERENCES support_cards(card_id)
+            )
+        """)
+    except sqlite3.OperationalError:
+        pass
+    
     conn.commit()
     repair_image_paths(conn)
     conn.close()
@@ -497,6 +511,17 @@ def init_database():
         )
     """)
     
+    # ── User notes table ──
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS user_notes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            card_id INTEGER NOT NULL UNIQUE,
+            note TEXT DEFAULT '',
+            tags TEXT DEFAULT '',
+            FOREIGN KEY (card_id) REFERENCES support_cards(card_id)
+        )
+    """)
+    
     # ── Track tables (additive only — no existing tables modified) ──
     cur.execute("""
         CREATE TABLE IF NOT EXISTS tracks (
@@ -600,9 +625,12 @@ def init_database():
 # Card Queries
 # ============================================
 
-def get_all_cards(rarity_filter=None, type_filter=None, search_term=None, owned_only=False):
+def get_all_cards(rarity_filter=None, type_filter=None, search_term=None, owned_only=False,
+                  effect_filter=None, tag_filter=None):
     """
-    Get all support cards with optional filtering
+    Get all support cards with optional filtering.
+    effect_filter: filter cards that have a specific effect name at any level
+    tag_filter: filter cards that have a specific user tag
     """
     conn = get_conn()
     cur = conn.cursor()
@@ -631,6 +659,14 @@ def get_all_cards(rarity_filter=None, type_filter=None, search_term=None, owned_
     
     if owned_only:
         query += " AND oc.card_id IS NOT NULL"
+    
+    if effect_filter:
+        query += " AND sc.card_id IN (SELECT DISTINCT card_id FROM support_effects WHERE effect_name = ?)"
+        params.append(effect_filter)
+    
+    if tag_filter:
+        query += " AND sc.card_id IN (SELECT card_id FROM user_notes WHERE (',' || tags || ',') LIKE ?)"
+        params.append(f"%,{tag_filter},%")
     
     query += " ORDER BY sc.rarity DESC, sc.name"
     
@@ -913,6 +949,165 @@ def get_owned_count():
     count = cur.fetchone()[0]
     conn.close()
     return count
+
+# ============================================
+# Notes & Tags Queries
+# ============================================
+
+def get_card_notes(card_id):
+    """Get notes and tags for a card. Returns (note, tags) or ('', '')"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT note, tags FROM user_notes WHERE card_id = ?", (card_id,))
+    row = cur.fetchone()
+    conn.close()
+    return row if row else ('', '')
+
+def set_card_notes(card_id, note='', tags=''):
+    """Set notes and tags for a card. Tags is a comma-separated string."""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO user_notes (card_id, note, tags) VALUES (?, ?, ?)
+        ON CONFLICT(card_id) DO UPDATE SET note=excluded.note, tags=excluded.tags
+    """, (card_id, note, tags))
+    conn.commit()
+    conn.close()
+
+def get_all_tags():
+    """Get all unique tags across all cards, sorted."""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT tags FROM user_notes WHERE tags != ''")
+    all_tags = set()
+    for (tags_str,) in cur.fetchall():
+        for tag in tags_str.split(','):
+            tag = tag.strip()
+            if tag:
+                all_tags.add(tag)
+    conn.close()
+    return sorted(all_tags)
+
+def search_cards_by_tag(tag):
+    """Get card_ids that have a specific tag."""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT card_id FROM user_notes WHERE (',' || tags || ',') LIKE ?", (f"%,{tag},%",))
+    ids = [r[0] for r in cur.fetchall()]
+    conn.close()
+    return ids
+
+# ============================================
+# Effect Names Query
+# ============================================
+
+def get_all_effect_names():
+    """Get all unique effect names across all cards, sorted."""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT DISTINCT effect_name FROM support_effects ORDER BY effect_name")
+    names = [r[0] for r in cur.fetchall()]
+    conn.close()
+    return names
+
+# ============================================
+# Backup / Restore
+# ============================================
+
+def export_user_data():
+    """Export all user data tables as a JSON-serializable dict."""
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    data = {}
+    
+    # Owned cards — map by gametora_url for portability
+    cur.execute("""
+        SELECT sc.gametora_url, oc.level, oc.limit_break
+        FROM owned_cards oc
+        JOIN support_cards sc ON oc.card_id = sc.card_id
+    """)
+    data['owned_cards'] = [{'url': r[0], 'level': r[1], 'limit_break': r[2]} for r in cur.fetchall()]
+    
+    # Decks
+    cur.execute("SELECT deck_id, deck_name FROM user_decks")
+    decks = []
+    for deck_id, deck_name in cur.fetchall():
+        cur.execute("""
+            SELECT ds.slot_position, ds.level, sc.gametora_url
+            FROM deck_slots ds
+            JOIN support_cards sc ON ds.card_id = sc.card_id
+            WHERE ds.deck_id = ?
+            ORDER BY ds.slot_position
+        """, (deck_id,))
+        slots = [{'position': r[0], 'level': r[1], 'url': r[2]} for r in cur.fetchall()]
+        decks.append({'name': deck_name, 'slots': slots})
+    data['decks'] = decks
+    
+    # Notes/Tags — map by gametora_url
+    cur.execute("""
+        SELECT sc.gametora_url, un.note, un.tags
+        FROM user_notes un
+        JOIN support_cards sc ON un.card_id = sc.card_id
+    """)
+    data['notes'] = [{'url': r[0], 'note': r[1], 'tags': r[2]} for r in cur.fetchall()]
+    
+    conn.close()
+    return data
+
+def import_user_data(data):
+    """
+    Import user data from a backup dict. Clears existing user data and replaces.
+    Cards are matched by gametora_url for portability.
+    Returns a summary dict of what was imported.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    summary = {'owned': 0, 'decks': 0, 'notes': 0, 'skipped': 0}
+    
+    # Build URL -> card_id mapping
+    cur.execute("SELECT card_id, gametora_url FROM support_cards")
+    url_to_id = {r[1]: r[0] for r in cur.fetchall() if r[1]}
+    
+    # Clear existing user data
+    cur.execute("DELETE FROM owned_cards")
+    cur.execute("DELETE FROM deck_slots")
+    cur.execute("DELETE FROM user_decks")
+    cur.execute("DELETE FROM user_notes")
+    
+    # Import owned cards
+    for item in data.get('owned_cards', []):
+        card_id = url_to_id.get(item.get('url'))
+        if card_id:
+            cur.execute("INSERT OR REPLACE INTO owned_cards (card_id, level, limit_break) VALUES (?, ?, ?)",
+                        (card_id, item.get('level', 50), item.get('limit_break', 0)))
+            summary['owned'] += 1
+        else:
+            summary['skipped'] += 1
+    
+    # Import decks
+    for deck in data.get('decks', []):
+        cur.execute("INSERT INTO user_decks (deck_name) VALUES (?)", (deck['name'],))
+        deck_id = cur.lastrowid
+        for slot in deck.get('slots', []):
+            card_id = url_to_id.get(slot.get('url'))
+            if card_id:
+                cur.execute("INSERT INTO deck_slots (deck_id, card_id, slot_position, level) VALUES (?, ?, ?, ?)",
+                            (deck_id, card_id, slot['position'], slot.get('level', 50)))
+        summary['decks'] += 1
+    
+    # Import notes
+    for item in data.get('notes', []):
+        card_id = url_to_id.get(item.get('url'))
+        if card_id:
+            cur.execute("INSERT OR REPLACE INTO user_notes (card_id, note, tags) VALUES (?, ?, ?)",
+                        (card_id, item.get('note', ''), item.get('tags', '')))
+            summary['notes'] += 1
+    
+    conn.commit()
+    conn.close()
+    return summary
 
 # ============================================
 # Deck Queries
