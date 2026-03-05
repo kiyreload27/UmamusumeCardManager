@@ -1,6 +1,6 @@
 """
 Skill Search View - Find cards by the skills they teach
-Premium redesign with filterable skill list and rich card results
+Premium redesign with filterable skill list, keyword category bar, and rich card results
 """
 
 import tkinter as tk
@@ -25,6 +25,20 @@ from gui.theme import (
     create_styled_button, create_styled_entry
 )
 
+# Keyword-based category map: category label -> keywords to match in skill name (case-insensitive)
+SKILL_CATEGORIES = {
+    "All":         [],
+    "Speed":       ["speed", "acceleration", "escape", "start dash", "leading"],
+    "Stamina":     ["stamina", "recovery", "heal", "recover", "second wind"],
+    "Power":       ["power", "strength", "push"],
+    "Guts":        ["guts", "tenac", "endur", "persist"],
+    "Wisdom":      ["wisdom", "vision", "eye", "foresight", "strategic"],
+    "Corner":      ["corner", "curve", "bend", "turn"],
+    "Final":       ["final", "straight", "spurt", "last", "end close"],
+    "Positioning": ["position", "pass", "overtake", "outside", "inside", "between", "leader", "chaser", "runner"],
+    "Golden":      [],   # special: filtered by is_golden flag
+}
+
 
 class SkillSearchFrame(ctk.CTkFrame):
     """Frame for searching skills and finding cards that have them"""
@@ -37,6 +51,7 @@ class SkillSearchFrame(ctk.CTkFrame):
         self.current_skill = None
         self.skill_widgets = []
         self.result_widgets = []
+        self.active_category = "All"
 
         # Generation counters
         self._skill_render_gen = 0
@@ -82,6 +97,24 @@ class SkillSearchFrame(ctk.CTkFrame):
         )
         search_entry.pack(fill=tk.X, padx=SPACING_LG, pady=(0, SPACING_SM))
         self.search_var.trace_add('write', self.filter_skills)
+
+        # === Category filter bar ===
+        cat_frame = ctk.CTkFrame(left_frame, fg_color="transparent")
+        cat_frame.pack(fill=tk.X, padx=SPACING_SM, pady=(0, SPACING_XS))
+
+        self._cat_buttons = {}
+        for cat in SKILL_CATEGORIES:
+            btn = ctk.CTkButton(
+                cat_frame, text=cat,
+                font=FONT_TINY, height=22, width=0,
+                fg_color=ACCENT_PRIMARY if cat == "All" else BG_MEDIUM,
+                hover_color=BG_HIGHLIGHT,
+                text_color=TEXT_PRIMARY if cat == "All" else TEXT_MUTED,
+                corner_radius=RADIUS_FULL,
+                command=lambda c=cat: self._set_category(c)
+            )
+            btn.pack(side=tk.LEFT, padx=2, pady=2)
+            self._cat_buttons[cat] = btn
 
         # Skill list
         self.skill_list_scroll = ctk.CTkScrollableFrame(
@@ -129,10 +162,50 @@ class SkillSearchFrame(ctk.CTkFrame):
         )
         self.stats_label.pack(anchor='e', pady=SPACING_SM, padx=SPACING_LG)
 
+    def _set_category(self, category):
+        """Switch active category and re-filter skill list"""
+        self.active_category = category
+        # Update button styles
+        for cat, btn in self._cat_buttons.items():
+            if cat == category:
+                btn.configure(fg_color=ACCENT_PRIMARY, text_color=TEXT_PRIMARY)
+            else:
+                btn.configure(fg_color=BG_MEDIUM, text_color=TEXT_MUTED)
+        self.filter_skills()
+
     def load_skills(self):
         """Load all unique skills"""
         self.all_skills = get_all_unique_skills()
-        self.update_skill_list(self.all_skills)
+        self.update_skill_list(self._apply_category_filter(self.all_skills))
+
+    def _apply_category_filter(self, skills):
+        """Filter skills list by active category using keyword matching"""
+        cat = self.active_category
+        if cat == "All":
+            return skills
+
+        keywords = SKILL_CATEGORIES.get(cat, [])
+
+        if cat == "Golden":
+            # Special: only golden skills
+            result = []
+            for item in skills:
+                if isinstance(item, tuple):
+                    _, is_golden = item
+                    if is_golden:
+                        result.append(item)
+            return result
+
+        result = []
+        for item in skills:
+            if isinstance(item, tuple):
+                skill_name, _ = item
+            else:
+                skill_name = item
+            name_lower = skill_name.lower()
+            if any(kw in name_lower for kw in keywords):
+                result.append(item)
+        return result
 
     def _select_skill_widget(self, skill_name, widget):
         for w in self.skill_widgets:
@@ -149,7 +222,7 @@ class SkillSearchFrame(ctk.CTkFrame):
             w.destroy()
         self.skill_widgets.clear()
 
-        display_items = items[:60]
+        display_items = items[:120]
         self.skill_count_label.configure(text=f"{len(items)} skills")
         self._skill_render_queue = display_items[:]
         self._process_skill_queue(my_gen)
@@ -190,12 +263,14 @@ class SkillSearchFrame(ctk.CTkFrame):
 
     def filter_skills(self, *args):
         search = self.search_var.get().lower()
+        category_filtered = self._apply_category_filter(self.all_skills)
+
         if not search:
-            self.update_skill_list(self.all_skills)
+            self.update_skill_list(category_filtered)
             return
 
         filtered = []
-        for item in self.all_skills:
+        for item in category_filtered:
             if isinstance(item, tuple):
                 skill_name, is_golden = item
                 if search in skill_name.lower() or (search == "golden" and is_golden):

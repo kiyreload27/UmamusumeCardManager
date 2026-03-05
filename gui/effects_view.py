@@ -1,6 +1,6 @@
 """
 Effects Search View - Search for effects across all owned cards
-Premium redesign with quick-filter chips and visual result cards
+Premium redesign with quick-filter chips, counts, sort toggle, and visual result cards
 """
 
 import tkinter as tk
@@ -17,6 +17,7 @@ from db.db_queries import search_owned_effects
 from gui.theme import (
     BG_DARKEST, BG_DARK, BG_MEDIUM, BG_LIGHT, BG_HIGHLIGHT, BG_ELEVATED,
     ACCENT_PRIMARY, ACCENT_SECONDARY, ACCENT_SUCCESS, ACCENT_TERTIARY, ACCENT_INFO,
+    ACCENT_WARNING,
     TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, TEXT_DISABLED,
     FONT_DISPLAY, FONT_HEADER, FONT_SUBHEADER, FONT_BODY, FONT_BODY_BOLD, FONT_SMALL, FONT_TINY,
     SPACING_XS, SPACING_SM, SPACING_MD, SPACING_LG, SPACING_XL,
@@ -41,6 +42,8 @@ class EffectsFrame(ctk.CTkFrame):
         self.navigate_to_card = navigate_to_card_callback
         self.icon_cache = {}
         self.result_widgets = []
+        self.sort_high_to_low = True
+        self._chip_buttons = {}  # term -> CTkButton
         self.create_widgets()
 
     def create_widgets(self):
@@ -78,6 +81,14 @@ class EffectsFrame(ctk.CTkFrame):
         self.search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, SPACING_SM))
         self.search_entry.bind('<Return>', lambda e: self.perform_search())
 
+        # Sort toggle button
+        self.sort_btn = create_styled_button(
+            search_container, text="↓ High",
+            command=self._toggle_sort, style_type='secondary',
+            width=70
+        )
+        self.sort_btn.pack(side=tk.LEFT, padx=(0, SPACING_SM))
+
         search_btn = create_styled_button(
             search_container, text="Search",
             command=self.perform_search, style_type='accent',
@@ -85,19 +96,24 @@ class EffectsFrame(ctk.CTkFrame):
         )
         search_btn.pack(side=tk.LEFT)
 
-        # Quick filter chips
+        # Quick filter chips with match counts
         chips_frame = ctk.CTkFrame(header_frame, fg_color="transparent")
         chips_frame.pack(fill=tk.X, padx=SPACING_LG, pady=(0, SPACING_LG))
 
+        self._chip_buttons = {}
         for term in QUICK_FILTERS:
             chip = ctk.CTkButton(
                 chips_frame, text=term,
-                font=FONT_TINY, width=70, height=26,
+                font=FONT_TINY, width=80, height=26,
                 fg_color=BG_MEDIUM, hover_color=BG_HIGHLIGHT,
                 text_color=TEXT_MUTED, corner_radius=RADIUS_FULL,
                 command=lambda t=term: self._quick_search(t)
             )
             chip.pack(side=tk.LEFT, padx=2)
+            self._chip_buttons[term] = chip
+
+        # Load counts asynchronously
+        self.after(300, self._load_chip_counts)
 
         # Results Area
         results_frame = ctk.CTkFrame(
@@ -127,6 +143,27 @@ class EffectsFrame(ctk.CTkFrame):
         self.scroll_area.columnconfigure(1, weight=1)
         self.scroll_area.columnconfigure(2, weight=1)
 
+    def _load_chip_counts(self):
+        """Load match counts for each quick filter chip"""
+        for term, chip in self._chip_buttons.items():
+            try:
+                results = search_owned_effects(term)
+                count = len(results)
+                chip.configure(text=f"{term} ({count})" if count else term)
+            except Exception:
+                pass
+
+    def _toggle_sort(self):
+        """Toggle sort order between high-to-low and low-to-high"""
+        self.sort_high_to_low = not self.sort_high_to_low
+        if self.sort_high_to_low:
+            self.sort_btn.configure(text="↓ High")
+        else:
+            self.sort_btn.configure(text="↑ Low")
+        # Re-run current search if there are results showing
+        if self.result_widgets:
+            self.perform_search()
+
     def _quick_search(self, term):
         """Fill search and execute"""
         self.search_var.set(term)
@@ -139,6 +176,24 @@ class EffectsFrame(ctk.CTkFrame):
             return float(clean)
         except:
             return -999999.0
+
+    def _get_value_color(self, value_str):
+        """Return accent color based on the value type and magnitude"""
+        val_str = str(value_str)
+        if '%' in val_str:
+            try:
+                num = int(val_str.replace('%', '').replace('+', ''))
+                if num >= 20:
+                    return ACCENT_WARNING   # high % — gold
+                elif num >= 10:
+                    return ACCENT_PRIMARY   # medium % — blue/purple
+                else:
+                    return ACCENT_SECONDARY # low % — softer
+            except:
+                pass
+        elif val_str.lstrip('+-').isdigit():
+            return ACCENT_SUCCESS  # flat number — green
+        return ACCENT_INFO
 
     def perform_search(self):
         """Execute search and update results"""
@@ -162,7 +217,7 @@ class EffectsFrame(ctk.CTkFrame):
         for r in results:
             val_num = self.parse_value(r[4])
             processed.append({'data': r, 'sort_val': val_num})
-        processed.sort(key=lambda x: x['sort_val'], reverse=True)
+        processed.sort(key=lambda x: x['sort_val'], reverse=self.sort_high_to_low)
 
         # Populate grid
         row, col = 0, 0
@@ -177,6 +232,10 @@ class EffectsFrame(ctk.CTkFrame):
 
             r = item['data']
             card_id, card_name, image_path, effect_name, effect_value, level = r
+
+            # Use owned level for label — the result already reflects actual owned level
+            level_label = f"Lv{level}"
+            val_color = self._get_value_color(effect_value)
 
             card_frame = ctk.CTkFrame(
                 self.scroll_area, fg_color=BG_DARK,
@@ -207,7 +266,7 @@ class EffectsFrame(ctk.CTkFrame):
             info_frame = ctk.CTkFrame(card_frame, fg_color="transparent")
             info_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=SPACING_SM, padx=(0, SPACING_SM))
 
-            # Card name + level badge — clickable for cross-view linking
+            # Card name + owned level badge
             header_box = ctk.CTkFrame(info_frame, fg_color="transparent")
             header_box.pack(fill=tk.X)
 
@@ -220,14 +279,15 @@ class EffectsFrame(ctk.CTkFrame):
             if self.navigate_to_card:
                 name_label.bind("<Button-1>", lambda e, cid=card_id: self.navigate_to_card(cid))
 
+            # Show owned level badge
             ctk.CTkLabel(
-                header_box, text=f"Lv{level}",
-                font=FONT_TINY, text_color=TEXT_MUTED,
+                header_box, text=level_label,
+                font=FONT_TINY, text_color=ACCENT_SUCCESS,
                 fg_color=BG_MEDIUM, corner_radius=4,
-                height=18, width=35
+                height=18, width=38
             ).pack(side=tk.RIGHT)
 
-            # Effect name + value
+            # Effect name + colored value
             effect_box = ctk.CTkFrame(info_frame, fg_color="transparent")
             effect_box.pack(fill=tk.X, pady=(SPACING_XS, 0))
 
@@ -238,7 +298,7 @@ class EffectsFrame(ctk.CTkFrame):
 
             ctk.CTkLabel(
                 effect_box, text=str(effect_value),
-                font=FONT_BODY_BOLD, text_color=ACCENT_PRIMARY
+                font=FONT_BODY_BOLD, text_color=val_color
             ).pack(side=tk.RIGHT)
 
             col += 1

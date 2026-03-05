@@ -623,10 +623,13 @@ class CardListFrame(ctk.CTkFrame):
         )
         self.effects_level_label.pack(side=tk.LEFT)
 
-        # Effects text area
-        self.effects_text = create_styled_text(detail_scroll, height=14)
-        self.effects_text.pack(fill=tk.BOTH, expand=True, padx=SPACING_LG, pady=(0, SPACING_LG))
-        self.effects_text.configure(state="disabled")
+        # Effects widget area (replaces text widget for richer display)
+        self.effects_container = ctk.CTkScrollableFrame(
+            detail_scroll, fg_color=BG_MEDIUM,
+            corner_radius=RADIUS_MD, height=220
+        )
+        self.effects_container.pack(fill=tk.X, padx=SPACING_LG, pady=(0, SPACING_SM))
+        self.effects_container.columnconfigure(0, weight=1)
 
         # === Notes & Tags Section ===
         notes_header = ctk.CTkFrame(detail_scroll, fg_color="transparent")
@@ -756,13 +759,27 @@ class CardListFrame(ctk.CTkFrame):
             border_color = ACCENT_SUCCESS if is_owned else BG_LIGHT
             bg_color = BG_ELEVATED if is_owned else BG_DARK
 
+            # Outer wrapper for green left accent bar on owned cards
+            card_wrapper = ctk.CTkFrame(
+                self.scroll_container, fg_color="transparent",
+                corner_radius=RADIUS_MD
+            )
+            card_wrapper.grid(row=row, column=col, sticky="nsew", padx=4, pady=4)
+            self.card_widgets.append(card_wrapper)
+
+            if is_owned:
+                accent_bar = ctk.CTkFrame(
+                    card_wrapper, fg_color=ACCENT_SUCCESS,
+                    width=4, corner_radius=RADIUS_SM
+                )
+                accent_bar.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 0))
+
             card_frame = ctk.CTkFrame(
-                self.scroll_container, fg_color=bg_color,
+                card_wrapper, fg_color=bg_color,
                 corner_radius=RADIUS_MD, border_width=1,
                 border_color=border_color
             )
-            card_frame.grid(row=row, column=col, sticky="nsew", padx=4, pady=4)
-            self.card_widgets.append(card_frame)
+            card_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
             def make_clickable(widget, cid=card_id):
                 widget.bind("<Button-1>", lambda e, id=cid: self.on_select(id))
@@ -982,7 +999,7 @@ class CardListFrame(ctk.CTkFrame):
                 return
 
     def update_effects_display(self):
-        """Update the effects display for current card and level"""
+        """Update the effects display for current card and level — rich widget layout"""
         if not self.current_card_id:
             return
 
@@ -991,28 +1008,73 @@ class CardListFrame(ctk.CTkFrame):
 
         self.effects_level_label.configure(text=f"📊  Effects at Level {level}")
 
-        self.effects_text.configure(state="normal")
-        self.effects_text.delete('1.0', tk.END)
+        # Clear existing rows
+        for w in self.effects_container.winfo_children():
+            w.destroy()
 
-        if effects:
-            self.effects_text.insert(tk.END, f"{'─' * 40}\n")
-            self.effects_text.insert(tk.END, f"  LEVEL {level} EFFECTS\n")
-            self.effects_text.insert(tk.END, f"{'─' * 40}\n\n")
-            for name, value in effects:
-                prefix = ""
-                if '%' in str(value):
-                    try:
-                        num = int(str(value).replace('%', '').replace('+', ''))
-                        if num >= 20:
-                            prefix = "★ "
-                    except:
-                        pass
-                self.effects_text.insert(tk.END, f"  {prefix}{name:.<32} {value}\n")
-        else:
-            self.effects_text.insert(tk.END, f"  No effects data for Level {level}\n\n")
-            self.effects_text.insert(tk.END, f"  Available levels: {self.valid_levels}")
+        if not effects:
+            ctk.CTkLabel(
+                self.effects_container,
+                text=f"No effects data for Level {level}",
+                font=FONT_SMALL, text_color=TEXT_MUTED
+            ).pack(pady=SPACING_MD)
+            return
 
-        self.effects_text.configure(state="disabled")
+        for effect_name, effect_value in effects:
+            val_str = str(effect_value)
+            is_unique = 'Unique' in effect_name or 'unique' in effect_name
+            is_star = False
+            val_color = ACCENT_PRIMARY
+
+            if '%' in val_str:
+                try:
+                    num = int(val_str.replace('%', '').replace('+', ''))
+                    if num >= 20:
+                        is_star = True
+                        val_color = ACCENT_WARNING
+                except:
+                    pass
+            elif val_str.lstrip('+-').isdigit():
+                val_color = ACCENT_SECONDARY
+
+            if is_unique:
+                # Gold highlight block for unique effects
+                unique_frame = ctk.CTkFrame(
+                    self.effects_container,
+                    fg_color="#2a2200", corner_radius=RADIUS_SM,
+                    border_width=1, border_color="#b8820a"
+                )
+                unique_frame.pack(fill=tk.X, padx=SPACING_XS, pady=(SPACING_XS, 2))
+                ctk.CTkLabel(
+                    unique_frame, text="⭐  Unique Effect",
+                    font=FONT_TINY, text_color="#f0c040",
+                    anchor="w"
+                ).pack(fill=tk.X, padx=SPACING_SM, pady=(SPACING_XS, 0))
+                ctk.CTkLabel(
+                    unique_frame, text=val_str,
+                    font=FONT_SMALL, text_color="#f5e090",
+                    anchor="w", wraplength=320, justify="left"
+                ).pack(fill=tk.X, padx=SPACING_SM, pady=(0, SPACING_XS))
+            else:
+                row = ctk.CTkFrame(
+                    self.effects_container, fg_color="transparent"
+                )
+                row.pack(fill=tk.X, padx=SPACING_XS, pady=1)
+
+                prefix = "★ " if is_star else "   "
+                ctk.CTkLabel(
+                    row,
+                    text=f"{prefix}{effect_name}",
+                    font=FONT_BODY_BOLD if is_star else FONT_SMALL,
+                    text_color=TEXT_PRIMARY if is_star else TEXT_SECONDARY,
+                    anchor="w"
+                ).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+                ctk.CTkLabel(
+                    row, text=val_str,
+                    font=FONT_BODY_BOLD, text_color=val_color,
+                    anchor="e", width=60
+                ).pack(side=tk.RIGHT)
 
     # ------- Notes & Tags -------
 

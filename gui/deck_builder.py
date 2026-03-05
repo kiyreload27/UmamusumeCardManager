@@ -450,6 +450,16 @@ class DeckBuilderFrame(ctk.CTkFrame):
             stats_header, text="📊  Combined Effects",
             font=FONT_SUBHEADER, text_color=TEXT_PRIMARY
         ).pack(side=tk.LEFT)
+
+        # Deck Score badge
+        self.score_badge = ctk.CTkLabel(
+            stats_header, text="Score: —",
+            font=FONT_BODY_BOLD, text_color=ACCENT_WARNING,
+            fg_color=BG_MEDIUM, corner_radius=RADIUS_FULL,
+            height=28, width=110
+        )
+        self.score_badge.pack(side=tk.LEFT, padx=(SPACING_SM, 0))
+
         ctk.CTkLabel(
             stats_header, text="✨ Unique Effects",
             font=FONT_SMALL, text_color=ACCENT_SECONDARY
@@ -964,3 +974,28 @@ class DeckBuilderFrame(ctk.CTkFrame):
                 ).grid(row=row_idx, column=2+i, sticky="nsew", padx=SPACING_XS, pady=1)
 
             row_idx += 1
+
+        # Compute Deck Score = Friendship Bonus ×2 + Training Bonus + Hint Rate + Race Bonus
+        def _parse_num(v):
+            try:
+                return float(str(v).replace('%', '').replace('+', ''))
+            except:
+                return 0.0
+
+        def _get_total(effect_key):
+            for name, vals in all_effects.items():
+                if effect_key.lower() in name.lower():
+                    return sum(_parse_num(v) for v in vals if v and v != '-')
+            return 0.0
+
+        friendship = _get_total('Friendship')
+        training   = _get_total('Training')
+        hint_rate   = _get_total('Hint Rate')
+        race_bonus  = _get_total('Race Bonus')
+        score = int(friendship * 2 + training + hint_rate + race_bonus)
+
+        if score > 0:
+            color = ACCENT_SUCCESS if score >= 300 else (ACCENT_WARNING if score >= 150 else TEXT_MUTED)
+            self.score_badge.configure(text=f"⭐ Score: {score}", text_color=color)
+        else:
+            self.score_badge.configure(text="Score: —", text_color=TEXT_MUTED)

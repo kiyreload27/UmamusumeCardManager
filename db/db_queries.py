@@ -252,6 +252,23 @@ def run_migrations():
     except sqlite3.OperationalError:
         pass
     
+    # 12. Create race_schedules table for saving per-character race calendars
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS race_schedules (
+                schedule_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                character_id INTEGER NOT NULL,
+                year_type TEXT NOT NULL,
+                slot_key TEXT NOT NULL,
+                race_id INTEGER,
+                FOREIGN KEY (character_id) REFERENCES characters(character_id),
+                FOREIGN KEY (race_id) REFERENCES races(race_id),
+                UNIQUE(character_id, year_type, slot_key)
+            )
+        """)
+    except sqlite3.OperationalError:
+        pass
+
     conn.commit()
     repair_image_paths(conn)
     conn.close()
@@ -1973,3 +1990,64 @@ def get_race_count():
         count = 0
     conn.close()
     return count
+
+
+# ============================================
+# Race Schedule Queries (per-character persistence)
+# ============================================
+
+def save_race_schedule(character_id, year_type, slot_key, race_id):
+    """Save a race selection for a specific character/year/slot.
+    Pass race_id=None to clear that slot."""
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        if race_id is None:
+            cur.execute("""
+                DELETE FROM race_schedules
+                WHERE character_id=? AND year_type=? AND slot_key=?
+            """, (character_id, year_type, slot_key))
+        else:
+            cur.execute("""
+                INSERT OR REPLACE INTO race_schedules
+                    (character_id, year_type, slot_key, race_id)
+                VALUES (?, ?, ?, ?)
+            """, (character_id, year_type, slot_key, race_id))
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+    conn.close()
+
+
+def load_race_schedule(character_id, year_type):
+    """Load all saved race selections for a character + year_type.
+    Returns dict: slot_key -> race_id"""
+    conn = get_conn()
+    cur = conn.cursor()
+    result = {}
+    try:
+        cur.execute("""
+            SELECT slot_key, race_id FROM race_schedules
+            WHERE character_id=? AND year_type=?
+        """, (character_id, year_type))
+        for slot_key, race_id in cur.fetchall():
+            result[slot_key] = race_id
+    except sqlite3.OperationalError:
+        pass
+    conn.close()
+    return result
+
+
+def clear_race_schedule(character_id, year_type):
+    """Clear all saved race selections for a character + year_type."""
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            DELETE FROM race_schedules
+            WHERE character_id=? AND year_type=?
+        """, (character_id, year_type))
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+    conn.close()

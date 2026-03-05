@@ -12,7 +12,7 @@ import logging
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from db.db_queries import get_all_characters, get_all_races
+from db.db_queries import get_all_characters, get_all_races, save_race_schedule, load_race_schedule, clear_race_schedule
 from gui.theme import (
     BG_DARKEST, BG_DARK, BG_MEDIUM, BG_LIGHT, BG_HIGHLIGHT, BG_ELEVATED,
     ACCENT_PRIMARY, ACCENT_SECONDARY, ACCENT_TERTIARY,
@@ -195,6 +195,7 @@ class RaceCalendarViewFrame(ctk.CTkFrame):
         self._stat_change_after_id = None
         self.calendar_tabs = None
         self.slot_frames = {}
+        self._apt_combos = {}  # apt_name -> CTkComboBox
 
         self.create_widgets()
         self.load_data()
@@ -266,9 +267,12 @@ class RaceCalendarViewFrame(ctk.CTkFrame):
                 values=['S', 'A', 'B', 'C', 'D', 'E', 'F', 'G'],
                 variable=var, width=55, height=28,
                 font=FONT_TINY,
-                command=self._on_stat_change
+                command=lambda val, an=apt_name: self._on_apt_change(val, an)
             )
             combo.pack()
+            self._apt_combos[apt_name] = combo
+            # Set initial color
+            self._update_apt_combo_color(apt_name, var.get())
 
         # ─── CALENDAR SECTION ───
         cal_container = ctk.CTkFrame(
@@ -287,10 +291,17 @@ class RaceCalendarViewFrame(ctk.CTkFrame):
             font=FONT_HEADER, text_color=ACCENT_PRIMARY
         ).pack(side=tk.LEFT)
 
+        # Save & Clear schedule buttons
         create_styled_button(
-            header, text="➕  Request Race",
-            command=self._request_new_race,
-            style_type="ghost", height=32
+            header, text="💾  Save Schedule",
+            command=self._save_schedule,
+            style_type="success", height=32, width=130
+        ).pack(side=tk.RIGHT, padx=(SPACING_XS, 0))
+
+        create_styled_button(
+            header, text="🗑  Clear Schedule",
+            command=self._clear_schedule,
+            style_type="ghost", height=32, width=130
         ).pack(side=tk.RIGHT)
 
         # Year tabs
@@ -372,6 +383,18 @@ class RaceCalendarViewFrame(ctk.CTkFrame):
         else:
             self.char_name_label.configure(text="No characters found")
 
+    def _on_apt_change(self, val, apt_name):
+        """Handle aptitude combo change — update color then refresh calendar"""
+        self._update_apt_combo_color(apt_name, val)
+        self._on_stat_change()
+
+    def _update_apt_combo_color(self, apt_name, grade):
+        """Color the aptitude combo text based on grade rank"""
+        combo = self._apt_combos.get(apt_name)
+        if combo:
+            color = GRADE_RANK_COLORS.get(grade, TEXT_MUTED)
+            combo.configure(text_color=color)
+
     def _on_stat_change(self, _=None):
         """Debounced aptitude change — wait 150ms to avoid per-click full re-render"""
         if self._stat_change_after_id is not None:
@@ -424,7 +447,13 @@ class RaceCalendarViewFrame(ctk.CTkFrame):
         self.aptitudes['Medium'].set(c[8] or 'G')
         self.aptitudes['Long'].set(c[9] or 'G')
 
+        # Update aptitude combo colors
+        for apt_name, var in self.aptitudes.items():
+            self._update_apt_combo_color(apt_name, var.get())
+
         self.selected_races.clear()
+        # Load saved schedule from DB
+        self._load_schedule_from_db()
         self._refresh_calendar()
 
     def _is_eligible(self, race_data):
@@ -500,12 +529,66 @@ class RaceCalendarViewFrame(ctk.CTkFrame):
         else:
             self.selected_races[(year, date_str)] = eligible[0]
 
+        # Auto-save this slot immediately
+        self._autosave_slot(year, date_str)
         self._refresh_slot(year, date_str)
 
     def _remove_race_from_slot(self, year, date_str):
         if (year, date_str) in self.selected_races:
             del self.selected_races[(year, date_str)]
+        self._autosave_slot(year, date_str)
         self._refresh_slot(year, date_str)
+
+    def _autosave_slot(self, year, date_str):
+        """Auto-save a single slot to DB (called on each pick or remove)"""
+        if not self.current_character:
+            return
+        char_id = self.current_character[0]
+        slot_key = f"{year}||{date_str}"
+        race = self.selected_races.get((year, date_str))
+        race_id = race[0] if race else None
+        save_race_schedule(char_id, year, slot_key, race_id)
+
+    def _save_schedule(self):
+        """Full save: persist every slot for the current character/year"""
+        if not self.current_character:
+            return
+        char_id = self.current_character[0]
+        for year in YEARS:
+            for month in MONTHS:
+                for half in HALF_MONTHS:
+                    date_str = format_half_month(month, half)
+                    slot_key = f"{year}||{date_str}"
+                    race = self.selected_races.get((year, date_str))
+                    race_id = race[0] if race else None
+                    save_race_schedule(char_id, year, slot_key, race_id)
+
+    def _clear_schedule(self):
+        """Clear all saved selections for current character across all years"""
+        if not self.current_character:
+            return
+        char_id = self.current_character[0]
+        for year in YEARS:
+            clear_race_schedule(char_id, year)
+        self.selected_races.clear()
+        self._refresh_calendar()
+
+    def _load_schedule_from_db(self):
+        """Load saved race schedule from DB into self.selected_races"""
+        if not self.current_character:
+            return
+        char_id = self.current_character[0]
+        race_by_id = {r[0]: r for r in self.races}
+        for year in YEARS:
+            saved = load_race_schedule(char_id, year)
+            for slot_key, race_id in saved.items():
+                # slot_key is "year||date_str"
+                parts = slot_key.split('||', 1)
+                if len(parts) == 2:
+                    yr, date_str = parts
+                    race = race_by_id.get(race_id)
+                    if race:
+                        self.selected_races[(yr, date_str)] = race
 
     def _on_year_tab_changed(self, *_):
         """Refresh slots in the newly visible year tab"""
@@ -661,44 +744,25 @@ class RaceCalendarViewFrame(ctk.CTkFrame):
             ).pack(side=tk.LEFT, padx=1)
 
         else:
-            # Empty slot with subtle add button
-            ctk.CTkButton(
+            # Empty slot — show reason if available
+            eligible_count = len(self._get_eligible_races_for_date(year, date_str))
+            all_for_date = [r for r in self.races if r[12] == date_str] if self.races else []
+
+            if all_for_date and eligible_count == 0 and self.current_character:
+                reason_label = ctk.CTkLabel(
+                    content, text="⛔ Apt",
+                    font=FONT_TINY, text_color=ACCENT_ERROR, height=24
+                )
+                reason_label.pack(pady=(SPACING_XS, 0))
+
+            add_btn = ctk.CTkButton(
                 content, text="＋",
                 font=FONT_SMALL, width=36, height=28,
                 fg_color="transparent", hover_color=BG_HIGHLIGHT,
-                text_color=TEXT_DISABLED, corner_radius=RADIUS_SM,
+                text_color=TEXT_DISABLED if eligible_count == 0 else TEXT_MUTED,
+                corner_radius=RADIUS_SM,
+                state="disabled" if eligible_count == 0 and all_for_date else "normal",
                 command=lambda y=year, d=date_str: self._suggest_race_for_slot(y, d)
-            ).pack(pady=SPACING_XS)
+            )
+            add_btn.pack(pady=SPACING_XS)
 
-    def _request_new_race(self):
-        dialog = ctk.CTkToplevel(self)
-        dialog.title("Request New Race")
-        dialog.geometry("420x220")
-        dialog.grab_set()
-        dialog.configure(fg_color=BG_DARK)
-
-        ctk.CTkLabel(
-            dialog, text="Request a Missing Race",
-            font=FONT_HEADER, text_color=TEXT_PRIMARY
-        ).pack(pady=SPACING_LG)
-
-        ctk.CTkLabel(
-            dialog, text="If a race you need isn't supported yet,\ndescribe it below.",
-            text_color=TEXT_MUTED, font=FONT_SMALL
-        ).pack(pady=SPACING_XS)
-
-        entry = ctk.CTkEntry(
-            dialog, placeholder_text="e.g. Dirt GI in Classic December",
-            width=340, fg_color=BG_MEDIUM, border_color=BG_LIGHT,
-            corner_radius=RADIUS_MD
-        )
-        entry.pack(pady=SPACING_MD)
-
-        def on_submit():
-            print("Race requested:", entry.get())
-            dialog.destroy()
-
-        create_styled_button(
-            dialog, text="Submit Request",
-            command=on_submit, style_type='accent'
-        ).pack()

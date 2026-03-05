@@ -1,6 +1,6 @@
 """
 Deck Skills View - Detailed breakdown of all skills in a deck or for a single card
-Premium redesign with card blocks and skill source badges
+Premium redesign with compact collapsible skill rows, sticky card headers, and top summary bar
 """
 
 import tkinter as tk
@@ -74,6 +74,37 @@ class DeckSkillsFrame(ctk.CTkFrame):
         )
         self.mode_label.pack(side=tk.RIGHT, padx=SPACING_LG)
 
+        # === Summary stats bar — shown prominently at top ===
+        self.summary_frame = ctk.CTkFrame(
+            self, fg_color=BG_MEDIUM, corner_radius=RADIUS_MD,
+            border_width=1, border_color=BG_LIGHT
+        )
+        self.summary_frame.pack(fill=tk.X, padx=SPACING_LG, pady=(0, SPACING_SM))
+
+        self.stats_total = ctk.CTkLabel(
+            self.summary_frame, text="—  Skills",
+            font=FONT_BODY_BOLD, text_color=TEXT_PRIMARY
+        )
+        self.stats_total.pack(side=tk.LEFT, padx=SPACING_LG, pady=SPACING_SM)
+
+        self.stats_hints = ctk.CTkLabel(
+            self.summary_frame, text="Hints: —",
+            font=FONT_SMALL, text_color=ACCENT_INFO
+        )
+        self.stats_hints.pack(side=tk.LEFT, padx=SPACING_MD)
+
+        self.stats_events = ctk.CTkLabel(
+            self.summary_frame, text="Events: —",
+            font=FONT_SMALL, text_color=ACCENT_SECONDARY
+        )
+        self.stats_events.pack(side=tk.LEFT, padx=SPACING_SM)
+
+        self.stats_golden = ctk.CTkLabel(
+            self.summary_frame, text="Golden: —",
+            font=FONT_SMALL, text_color=ACCENT_WARNING
+        )
+        self.stats_golden.pack(side=tk.LEFT, padx=SPACING_SM)
+
         # Results scroll
         self.results_container = ctk.CTkFrame(
             self, fg_color=BG_DARK, corner_radius=RADIUS_LG,
@@ -83,13 +114,6 @@ class DeckSkillsFrame(ctk.CTkFrame):
 
         self.scroll_area = ctk.CTkScrollableFrame(self.results_container, fg_color="transparent")
         self.scroll_area.pack(fill=tk.BOTH, expand=True, padx=SPACING_SM, pady=SPACING_SM)
-
-        # Stats footer
-        self.stats_label = ctk.CTkLabel(
-            self.results_container, text="",
-            font=FONT_TINY, text_color=TEXT_DISABLED
-        )
-        self.stats_label.pack(side=tk.BOTTOM, anchor='e', pady=SPACING_SM, padx=SPACING_LG)
 
     def refresh_decks(self):
         decks = get_all_decks()
@@ -114,6 +138,13 @@ class DeckSkillsFrame(ctk.CTkFrame):
             block.destroy()
         self.card_blocks.clear()
 
+    def _update_summary(self, total_skills, hint_count, event_count, golden_count):
+        """Update the top summary bar with skill counts"""
+        self.stats_total.configure(text=f"{total_skills}  Skills")
+        self.stats_hints.configure(text=f"Hints: {hint_count}")
+        self.stats_events.configure(text=f"Events: {event_count}")
+        self.stats_golden.configure(text=f"✨ Golden: {golden_count}")
+
     def show_deck_skills(self, deck_id):
         self._clear_blocks()
         self._block_render_gen += 1
@@ -121,7 +152,7 @@ class DeckSkillsFrame(ctk.CTkFrame):
 
         deck_cards = get_deck_cards(deck_id)
         if not deck_cards:
-            self.stats_label.configure(text="Deck is empty")
+            self._update_summary(0, 0, 0, 0)
             return
 
         card_data_list = []
@@ -157,9 +188,7 @@ class DeckSkillsFrame(ctk.CTkFrame):
 
             card_data_list.append((card_id, name, rarity, card_type, image_path, is_owned, skills))
 
-        self.stats_label.configure(
-            text=f"{total_skills} skills  ·  Hints: {hint_count}  ·  Events: {event_count}  ·  Golden: {golden_count}"
-        )
+        self._update_summary(total_skills, hint_count, event_count, golden_count)
         self._block_render_queue = card_data_list[:]
         self._process_block_queue(my_gen)
 
@@ -174,7 +203,7 @@ class DeckSkillsFrame(ctk.CTkFrame):
             self.after(25, lambda: self._process_block_queue(gen))
 
     def _render_card_block(self, card_id, name, rarity, card_type, image_path, is_owned, skills):
-        """Render a card block with its skills"""
+        """Render a card block with compact collapsible skill rows"""
         block_frame = ctk.CTkFrame(
             self.scroll_area, fg_color=BG_DARK,
             corner_radius=RADIUS_MD, border_width=1,
@@ -183,9 +212,9 @@ class DeckSkillsFrame(ctk.CTkFrame):
         block_frame.pack(fill=tk.X, pady=SPACING_SM, padx=SPACING_XS)
         self.card_blocks.append(block_frame)
 
-        # Header
-        header = ctk.CTkFrame(block_frame, fg_color="transparent")
-        header.pack(fill=tk.X, padx=SPACING_MD, pady=SPACING_SM)
+        # Sticky header
+        header = ctk.CTkFrame(block_frame, fg_color=BG_MEDIUM, corner_radius=RADIUS_SM)
+        header.pack(fill=tk.X, padx=SPACING_XS, pady=(SPACING_XS, 0))
 
         # Image
         img = self.icon_cache.get(card_id)
@@ -203,12 +232,11 @@ class DeckSkillsFrame(ctk.CTkFrame):
         ctk.CTkLabel(
             header, text="", image=img if img else None,
             width=44, height=44, corner_radius=RADIUS_SM
-        ).pack(side=tk.LEFT, padx=(0, SPACING_SM))
+        ).pack(side=tk.LEFT, padx=(SPACING_SM, SPACING_SM), pady=SPACING_XS)
 
         info = ctk.CTkFrame(header, fg_color="transparent")
         info.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        # Card name — clickable for cross-view linking
         name_label = ctk.CTkLabel(
             info, text=name,
             font=FONT_SUBHEADER, text_color=ACCENT_PRIMARY, anchor="w",
@@ -224,13 +252,12 @@ class DeckSkillsFrame(ctk.CTkFrame):
             font=FONT_TINY, text_color=get_rarity_color(rarity), anchor="w"
         ).pack(fill=tk.X)
 
-        # Skill count badge
         ctk.CTkLabel(
             header, text=f"{len(skills)} skills",
             font=FONT_TINY, text_color=TEXT_DISABLED,
-            fg_color=BG_MEDIUM, corner_radius=RADIUS_FULL,
+            fg_color=BG_LIGHT, corner_radius=RADIUS_FULL,
             height=20, width=60
-        ).pack(side=tk.RIGHT)
+        ).pack(side=tk.RIGHT, padx=SPACING_MD)
 
         if not skills:
             ctk.CTkLabel(
@@ -239,62 +266,97 @@ class DeckSkillsFrame(ctk.CTkFrame):
             ).pack(pady=SPACING_SM)
             return
 
-        # Skills list
+        # Compact skills list — each skill is a single tight row
+        # Clicking on a skill row expands/collapses its description
         skills_container = ctk.CTkFrame(block_frame, fg_color="transparent")
-        skills_container.pack(fill=tk.X, padx=SPACING_MD, pady=(0, SPACING_MD))
+        skills_container.pack(fill=tk.X, padx=SPACING_SM, pady=(SPACING_XS, SPACING_SM))
 
         for skill in skills:
-            skill_row = ctk.CTkFrame(
-                skills_container, fg_color=BG_MEDIUM, corner_radius=RADIUS_SM
+            self._render_compact_skill_row(skills_container, skill)
+
+    def _render_compact_skill_row(self, parent, skill):
+        """Render a single compact skill row with expand-on-click description"""
+        is_golden = skill['golden']
+        has_desc = bool(skill.get('desc'))
+
+        # Source badge color
+        if is_golden:
+            src_color = ACCENT_WARNING
+            prefix = "✨ "
+            c_name = ACCENT_WARNING
+        elif 'Event' in skill['source']:
+            src_color = ACCENT_SECONDARY
+            prefix = "◆ "
+            c_name = TEXT_PRIMARY
+        else:
+            src_color = ACCENT_INFO
+            prefix = "• "
+            c_name = TEXT_SECONDARY
+
+        # Wrapper for the row + hidden description
+        row_wrapper = ctk.CTkFrame(parent, fg_color="transparent")
+        row_wrapper.pack(fill=tk.X, pady=1)
+
+        skill_row = ctk.CTkFrame(
+            row_wrapper,
+            fg_color="#2a2200" if is_golden else BG_MEDIUM,
+            corner_radius=RADIUS_SM
+        )
+        skill_row.pack(fill=tk.X)
+
+        # Skill name
+        name_label = ctk.CTkLabel(
+            skill_row,
+            text=f"{prefix}{skill['name']}",
+            font=FONT_BODY_BOLD if is_golden else FONT_SMALL,
+            text_color=c_name, anchor="w",
+            cursor="hand2" if (self.navigate_to_skill or has_desc) else ""
+        )
+        name_label.pack(side=tk.LEFT, padx=SPACING_SM, pady=4)
+
+        # Source badge (compact)
+        ctk.CTkLabel(
+            skill_row, text=skill['source'],
+            font=FONT_TINY, text_color=src_color,
+            fg_color=BG_DARK, corner_radius=RADIUS_SM,
+            height=18
+        ).pack(side=tk.RIGHT, padx=SPACING_SM, pady=4)
+
+        # Hidden description label (toggled on click)
+        desc_label = None
+        desc_text = skill.get('desc') or ''
+        expanded = [False]
+
+        if has_desc:
+            desc_label = ctk.CTkLabel(
+                row_wrapper,
+                text=desc_text,
+                font=FONT_TINY, text_color=TEXT_MUTED,
+                anchor="w", justify="left", wraplength=600
             )
-            skill_row.pack(fill=tk.X, pady=2)
+            # Not packed initially
 
-            # Left: skill name + source
-            left_col = ctk.CTkFrame(skill_row, fg_color="transparent", width=240)
-            left_col.pack(side=tk.LEFT, fill=tk.Y, padx=SPACING_SM, pady=SPACING_SM)
-            left_col.pack_propagate(False)
-
-            prefix = "✨ " if skill['golden'] else "•  "
-            c_name = ACCENT_WARNING if skill['golden'] else TEXT_PRIMARY
-
-            # Source badge color
-            if skill['golden']:
-                src_color = ACCENT_WARNING
-            elif 'Event' in skill['source']:
-                src_color = ACCENT_SECONDARY
-            elif 'Hint' in skill['source']:
-                src_color = ACCENT_INFO
+        def toggle_desc(e):
+            if not desc_label:
+                return
+            expanded[0] = not expanded[0]
+            if expanded[0]:
+                desc_label.pack(fill=tk.X, padx=(SPACING_LG, SPACING_SM), pady=(0, 2))
+                skill_row.configure(fg_color=BG_HIGHLIGHT if not is_golden else "#3d3200")
             else:
-                src_color = TEXT_MUTED
+                desc_label.pack_forget()
+                skill_row.configure(fg_color="#2a2200" if is_golden else BG_MEDIUM)
 
-            skill_name_label = ctk.CTkLabel(
-                left_col, text=f"{prefix}{skill['name']}",
-                font=FONT_BODY_BOLD, text_color=c_name, anchor="w",
-                cursor="hand2" if self.navigate_to_skill else ""
+        if has_desc:
+            skill_row.bind("<Button-1>", toggle_desc)
+            name_label.bind("<Button-1>", toggle_desc if not self.navigate_to_skill else
+                            lambda e, sn=skill['name']: self.navigate_to_skill(sn))
+
+        if self.navigate_to_skill and not has_desc:
+            name_label.bind(
+                "<Button-1>",
+                lambda e, sn=skill['name']: self.navigate_to_skill(sn)
             )
-            skill_name_label.pack(fill=tk.X)
-            if self.navigate_to_skill:
-                skill_name_label.bind(
-                    "<Button-1>",
-                    lambda e, sn=skill['name']: self.navigate_to_skill(sn)
-                )
-
-            # Source as colored badge
-            ctk.CTkLabel(
-                left_col, text=skill['source'],
-                font=FONT_TINY, text_color=src_color, anchor="w"
-            ).pack(fill=tk.X)
-
-            # Right: Description
-            right_col = ctk.CTkFrame(skill_row, fg_color="transparent")
-            right_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=SPACING_SM, pady=SPACING_SM)
-
-            ctk.CTkLabel(
-                right_col,
-                text=skill['desc'] if skill['desc'] else "No description available",
-                font=FONT_SMALL, text_color=TEXT_SECONDARY,
-                justify="left", anchor="w", wraplength=400
-            ).pack(fill=tk.X)
 
     def set_card(self, card_id):
         """Show skills for a single card selection"""
@@ -334,6 +396,4 @@ class DeckSkillsFrame(ctk.CTkFrame):
             total_skills += 1
 
         self._render_card_block(card_id, name, rarity, card_type, image_path, is_owned, skills)
-        self.stats_label.configure(
-            text=f"{total_skills} skills  ·  Hints: {hint_count}  ·  Events: {event_count}  ·  Golden: {golden_count}"
-        )
+        self._update_summary(total_skills, hint_count, event_count, golden_count)
