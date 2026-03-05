@@ -1920,7 +1920,8 @@ def get_all_races(search_term=None, grade_filter=None, terrain_filter=None, dist
     """Get all active races with optional filtering.
     Returns a 15-column tuple: (race_id, name_en, name_jp, grade, racetrack, direction,
     participants, terrain, distance_type, distance_meters, season, time_of_day,
-    race_date, race_class, track_image_path)
+    race_date, race_class, image_path)
+    image_path is the race's own badge image (if scraped) falling back to the track photo.
     """
     conn = get_conn()
     cur = conn.cursor()
@@ -1929,7 +1930,7 @@ def get_all_races(search_term=None, grade_filter=None, terrain_filter=None, dist
             SELECT r.race_id, r.name_en, r.name_jp, r.grade, r.racetrack, r.direction,
                    r.participants, r.terrain, r.distance_type, r.distance_meters,
                    r.season, r.time_of_day, r.race_date, r.race_class,
-                   t.image_path as track_image_path
+                   COALESCE(r.image_path, t.image_path) as image_path
             FROM races r
             LEFT JOIN tracks t ON r.racetrack = t.name
             WHERE r.is_active = 1

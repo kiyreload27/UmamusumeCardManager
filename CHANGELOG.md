@@ -2,7 +2,76 @@
 
 All notable changes to the Umamusume Support Card Manager will be documented in this file.
 
+## [22.0.0] - 2026-03-04
+
+### 🎴 Race Calendar Improvements
+- **Race Badge Images**: Each calendar slot now displays the race's own badge image (scraped from GameTora) instead of the generic track photo
+- **Race Name Label**: Race name is now shown between the badge image and the terrain/distance row for clarity
+- **Senior Year Full Coverage**: Senior Year calendar now correctly shows Classic Class races (Japan Cup, Arima Kinen, Tenno Sho Autumn, etc.) since Senior Year horses are eligible for those races — all 12 months now have schedulable races
+- **Image Resolution**: `resolve_image_path()` now handles `assets/races/` and `assets/tracks/` subdirectories and resolves relative paths from project root (works both in source and bundled exe)
+
+### 🕷️ Race Scraper (v2)
+- Re-scrapes all **376 races** from GameTora (previously missed ~150 Senior Year races due to insufficient scrolling)
+- Downloads race **badge images** (`assets/races/`) for each race during scraping
+- Stores `image_path` in the `races` table for direct badge display
+- `get_all_races()` now returns `COALESCE(r.image_path, t.image_path)` — race badge preferred, track photo as fallback
+
+### 🗄️ Database
+- Added `image_path TEXT` column to `races` table (auto-migrated on first launch)
+
+---
+
+## [21.0.0] - 2026-03-04
+
+### 🐛 Bug Fixes
+
+#### Deck Builder — Level Display (Definitive Fix)
+- **Root cause identified**: `CTkComboBox.configure(state='disabled')` was re-rendering the widget from its bound `StringVar`, which still held the stale default `"50"` — resetting the display even after `set()` was called
+- **Fix**: `level_var` is now set **before** any `configure()` calls, and set again **after** `toggle_controls()`, guaranteeing the correct level is always shown regardless of widget state transitions
+- Added `int()` coercion guard on the level value from SQLite (handles potential float/None return)
+- R cards now correctly display level 40 max, SR shows 45, SSR shows 50
+
+#### Backup & Restore Dialog
+- **Restore button was invisible**: `style_type='ghost'` rendered the button with near-invisible text on the dark background
+- Button replaced with an explicit `CTkButton` styled with amber border/text, making it clearly visible
+- Dialog height increased from 420px to 500px to prevent content clipping
+
+---
+
+## [20.0.0] - 2026-03-04
+
+### 🐛 Bug Fixes
+
+#### Deck Builder — Rarity Filter
+- **Root cause**: `CTkSegmentedButton` does not update a bound `tk.StringVar` — the filter was always reading `"All"` regardless of the selected segment
+- **Fix**: `filter_cards()` now calls `self.rarity_seg.get()` directly on the widget, bypassing the stale variable
+- Removed the now-unused `self.rarity_var` StringVar
+
+#### Deck Builder — Load Deck Auto-Repair
+- `load_deck()` now detects and corrects any cards stored with a level exceeding their rarity maximum (legacy data fix)
+- Corrected levels are written back to the database permanently on first load
+
+#### Deck Builder — Effects Box Empty for R Cards
+- `update_effects_breakdown()` now caps the level by rarity before fetching effects, so R cards at level 40 correctly populate the effects panel
+
+---
+
+## [19.0.0] - 2026-03-04
+
+### 🎨 UI Improvements
+- **Tab Bar Centred**: Main navigation tab bar is now horizontally centred (`anchor="n"`) instead of left-aligned
+- **Timeline & Upgrade Tabs Removed**: Removed the unfinished "Timeline" and "Upgrade" planning tabs from the navigation to reduce clutter
+
+### 🗺️ Race Calendar
+- **Track Thumbnails**: Race cards in the Tracks view now display a 56×38px thumbnail of the track image next to the track name, with in-memory caching and an initials fallback
+
+### 🎴 Deck Builder
+- **Rarity Segmented Filter Added**: New `All / SSR / SR / R` segmented button filter in the Deck Builder card browser (foundation for the fix in v20)
+
+---
+
 ## [18.0.0] - 2026-03-04
+
 
 ### 🎨 Complete UI/UX Overhaul
 - **Responsive Sizing**: The app dynamically scales to screens, gracefully handling both full-screen and smaller 900x600 windows.

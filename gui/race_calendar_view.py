@@ -461,11 +461,26 @@ class RaceCalendarViewFrame(ctk.CTkFrame):
         for r in self.races:
             if r[12] == date_str:
                 rc = r[13] or ""
-                if (rc == race_class) or \
-                   (rc == "Classic/Senior Class" and race_class in ["Classic Class", "Senior Class"]) or \
-                   (rc == ""):
-                    if self._is_eligible(r):
-                        eligible.append(r)
+                # A race is valid for this year if:
+                # 1. Its class exactly matches this year's class
+                # 2. It's a Classic/Senior Class race (available to both Classic & Senior)
+                # 3. It has no class (open race)
+                # 4. For Senior Year: Classic Class races are included since Senior Year
+                #    horses are eligible for major Classic-class G1/G2/G3 races
+
+                if rc == race_class:
+                    pass  # exact match ✓
+                elif rc == "Classic/Senior Class" and race_class in ("Classic Class", "Senior Class"):
+                    pass  # shared cross-year race ✓
+                elif rc == "":
+                    pass  # open race ✓
+                elif race_class == "Senior Class" and rc == "Classic Class":
+                    pass  # Senior Year can enter Classic Class races ✓
+                else:
+                    continue
+
+                if self._is_eligible(r):
+                    eligible.append(r)
 
         return eligible
 
@@ -573,10 +588,10 @@ class RaceCalendarViewFrame(ctk.CTkFrame):
                     if resolved and os.path.exists(resolved):
                         try:
                             pil_img = Image.open(resolved)
-                            pil_img.thumbnail((40, 28), Image.Resampling.LANCZOS)
+                            pil_img.thumbnail((80, 30), Image.Resampling.LANCZOS)
                             cached = ctk.CTkImage(
                                 light_image=pil_img, dark_image=pil_img,
-                                size=(40, 28)
+                                size=(80, 30)
                             )
                             self._race_image_cache[track_img_path] = cached
                         except Exception:
@@ -587,12 +602,13 @@ class RaceCalendarViewFrame(ctk.CTkFrame):
                     img_row.pack(pady=(SPACING_XS, 0))
                     ctk.CTkLabel(
                         img_row, text="", image=cached,
-                        width=40, height=28
-                    ).pack(side=tk.LEFT, padx=(0, SPACING_XS))
+                        width=80, height=30
+                    ).pack()
+                    # Race name between image and terrain badges
                     ctk.CTkLabel(
-                        img_row, text=short_name,
+                        card, text=short_name,
                         font=FONT_TINY, text_color=TEXT_PRIMARY
-                    ).pack(side=tk.LEFT)
+                    ).pack(pady=(SPACING_XS, 0))
                 else:
                     ctk.CTkLabel(
                         card, text=short_name,
