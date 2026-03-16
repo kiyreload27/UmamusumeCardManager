@@ -1,6 +1,6 @@
 """
 Main Window for Umamusume Support Card Manager
-Tab-based navigation — replaces sidebar for maximum content space
+Collapsible left sidebar navigation with grouped sections
 """
 
 import tkinter as tk
@@ -28,50 +28,55 @@ from gui.theme import (
     ACCENT_PRIMARY, ACCENT_SECONDARY, ACCENT_TERTIARY,
     TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, TEXT_DISABLED,
     FONT_DISPLAY, FONT_TITLE, FONT_HEADER, FONT_BODY, FONT_BODY_BOLD,
-    FONT_SMALL, FONT_TINY,
+    FONT_SMALL, FONT_TINY, FONT_SUBHEADER,
     SPACING_XS, SPACING_SM, SPACING_MD, SPACING_LG, SPACING_XL,
-    RADIUS_MD, RADIUS_LG,
+    RADIUS_SM, RADIUS_MD, RADIUS_LG, RADIUS_FULL,
+    SIDEBAR_WIDTH_EXPANDED, SIDEBAR_WIDTH_COLLAPSED,
 )
 from utils import resolve_image_path
 from version import VERSION
 
 
-# Tab definitions: (internal_id, tab_label)
-TABS = [
-    ("Dashboard",  "📊 Dashboard"),
-    ("Cards",      "📋 Cards"),
-    ("Effects",    "🔎 Effects"),
-    ("Deck",       "🎴 Deck Builder"),
-    ("Skills",     "🔍 Skills"),
-    ("DeckSkills", "📜 Deck Skills"),
-    ("Tracks",     "🏟️ Tracks"),
-    ("Calendar",   "📅 Race Calendar"),
+# Navigation structure: (view_id, icon, label, group)
+NAV_ITEMS = [
+    # group headers are ('__group__', label)
+    ('__group__', 'Collection'),
+    ('Dashboard',  '📊', 'Dashboard',      'Collection'),
+    ('Cards',      '🃏', 'Card Library',   'Collection'),
+    ('Effects',    '🔎', 'Effect Search',  'Collection'),
+    ('__group__', 'Planning'),
+    ('Deck',       '🎴', 'Deck Builder',   'Planning'),
+    ('Skills',     '🔍', 'Skill Search',   'Planning'),
+    ('DeckSkills', '📜', 'Deck Skills',    'Planning'),
+    ('__group__', 'Reference'),
+    ('Tracks',     '🏟', 'Racetracks',     'Reference'),
+    ('Calendar',   '📅', 'Race Calendar',  'Reference'),
 ]
+
+# Keyboard shortcut order (skipping group headers)
+VIEW_ORDER = [item[0] for item in NAV_ITEMS if item[0] != '__group__']
 
 
 class MainWindow:
-    """Main application window with top-tab navigation"""
+    """Main application window — collapsible left sidebar + content area"""
 
     def __init__(self):
         self.root = ctk.CTk()
-        self.root.title("Umamusume Support Card Manager")
+        self.root.title('Umamusume Support Card Manager')
 
-        screen_width = self.root.winfo_screenwidth()
-        screen_height = self.root.winfo_screenheight()
-        if screen_width >= 1920:
-            self.root.geometry("1600x900")
-        elif screen_width >= 1280:
-            self.root.geometry("1280x800")
+        screen_w = self.root.winfo_screenwidth()
+        if screen_w >= 1920:
+            self.root.geometry('1600x900')
+        elif screen_w >= 1280:
+            self.root.geometry('1280x800')
         else:
-            self.root.geometry("1024x700")
-
+            self.root.geometry('1100x720')
         self.root.minsize(900, 600)
 
         try:
-            icon_path = resolve_image_path("1_Special Week.png")
+            icon_path = resolve_image_path('1_Special Week.png')
             if icon_path and os.path.exists(icon_path):
-                icon_img = tk.PhotoImage(file=icon_path)
-                self.root.iconphoto(True, icon_img)
+                self.root.iconphoto(True, tk.PhotoImage(file=icon_path))
         except Exception:
             pass
 
@@ -80,219 +85,293 @@ class MainWindow:
         # State
         self.last_selected_levels = {}
         self.selected_card_id = None
-        self.views = {}              # view_id -> widget (lazy loaded)
-        self._tab_id_map = {}       # tab_label -> view_id
+        self.views = {}
+        self.current_view_id = None
+        self._nav_buttons = {}   # view_id -> CTkButton
+        self._nav_labels  = {}   # view_id -> (icon, label) for collapse mode
+        self._sidebar_expanded = True
 
-        self.root.grid_rowconfigure(1, weight=1)
-        self.root.grid_columnconfigure(0, weight=1)
+        # Root layout: sidebar | content
+        self.root.rowconfigure(0, weight=1)
+        self.root.columnconfigure(1, weight=1)
 
-        self._create_header()
-        self._create_tabview()
-        self._init_views()
+        self._build_sidebar()
+        self._build_content_area()
+        self._bind_shortcuts()
 
-        # Default tab
-        self.tabview.set(TABS[0][1])
-        self._on_tab_changed()
-
-        # Keyboard shortcuts Ctrl+1..9
-        for idx, (view_id, tab_label) in enumerate(TABS):
-            n = idx + 1
-            if n <= 9:
-                self.root.bind(
-                    f'<Control-Key-{n}>',
-                    lambda e, lbl=tab_label: self._switch_tab(lbl)
-                )
-
-    # ─────────────────────────────────────────────
-    # Layout
-    # ─────────────────────────────────────────────
-
-    def _create_header(self):
-        """Thin header bar: branding | stats | action buttons"""
-        self.header = ctk.CTkFrame(
-            self.root, fg_color=BG_DARK, height=44, corner_radius=0
-        )
-        self.header.grid(row=0, column=0, sticky="ew")
-        self.header.grid_propagate(False)
-        self.header.columnconfigure(1, weight=1)
-
-        # Branding
-        brand = ctk.CTkFrame(self.header, fg_color="transparent")
-        brand.grid(row=0, column=0, sticky="w", padx=SPACING_MD, pady=SPACING_XS)
-
-        ctk.CTkLabel(
-            brand, text="🐴  Umamusume",
-            font=FONT_BODY_BOLD, text_color=TEXT_PRIMARY
-        ).pack(side=tk.LEFT, padx=(0, SPACING_XS))
-
-        ctk.CTkLabel(
-            brand, text=f"v{VERSION}",
-            font=FONT_TINY, text_color=TEXT_MUTED,
-            fg_color=BG_LIGHT, corner_radius=6, height=18, width=44
-        ).pack(side=tk.LEFT)
-
-        # Stats label (center)
-        self.stats_label = ctk.CTkLabel(
-            self.header, text="Loading...",
-            font=FONT_TINY, text_color=TEXT_MUTED, anchor="center"
-        )
-        self.stats_label.grid(row=0, column=1, sticky="ew", padx=SPACING_MD)
-
-        # Action buttons (right)
-        actions = ctk.CTkFrame(self.header, fg_color="transparent")
-        actions.grid(row=0, column=2, sticky="e", padx=SPACING_MD, pady=SPACING_XS)
-
-        ctk.CTkButton(
-            actions, text="💾 Backup",
-            command=self.show_backup_dialog,
-            font=FONT_TINY, height=28, width=88,
-            fg_color="transparent", hover_color=BG_HIGHLIGHT,
-            text_color=TEXT_MUTED, corner_radius=RADIUS_MD,
-        ).pack(side=tk.LEFT, padx=(0, SPACING_XS))
-
-        ctk.CTkButton(
-            actions, text="🔄 Updates",
-            command=self.show_update_dialog,
-            font=FONT_TINY, height=28, width=96,
-            fg_color="transparent", hover_color=BG_HIGHLIGHT,
-            text_color=TEXT_MUTED, corner_radius=RADIUS_MD,
-        ).pack(side=tk.LEFT)
-
+        # Launch to Dashboard
+        self._navigate('Dashboard')
         self.refresh_stats()
 
-    def _create_tabview(self):
-        """Create a full-width CTkTabview row below the header"""
-        self.tabview = ctk.CTkTabview(
+    # ─────────────────────────────────────────────────────────────────
+    # Sidebar
+    # ─────────────────────────────────────────────────────────────────
+
+    def _build_sidebar(self):
+        self.sidebar = ctk.CTkFrame(
             self.root,
-            fg_color=BG_DARKEST,
-            segmented_button_fg_color=BG_DARK,
-            segmented_button_selected_color=ACCENT_PRIMARY,
-            segmented_button_selected_hover_color=ACCENT_SECONDARY,
-            segmented_button_unselected_color=BG_DARK,
-            segmented_button_unselected_hover_color=BG_HIGHLIGHT,
-            text_color=TEXT_MUTED,
-            text_color_disabled=TEXT_DISABLED,
+            fg_color=BG_DARK,
             corner_radius=0,
-            anchor="n",
+            width=SIDEBAR_WIDTH_EXPANDED,
+            border_width=0,
         )
-        self.tabview.grid(row=1, column=0, sticky="nsew", padx=0, pady=0)
+        self.sidebar.grid(row=0, column=0, sticky='nsew')
+        self.sidebar.grid_propagate(False)
+        self.sidebar.rowconfigure(2, weight=1)  # nav section expands
 
-        for view_id, tab_label in TABS:
-            self.tabview.add(tab_label)
-            self._tab_id_map[tab_label] = view_id
-            # Each tab frame needs to expand
-            tab_frame = self.tabview.tab(tab_label)
-            tab_frame.grid_rowconfigure(0, weight=1)
-            tab_frame.grid_columnconfigure(0, weight=1)
+        # ── Top: branding + toggle ──
+        top = ctk.CTkFrame(self.sidebar, fg_color='transparent')
+        top.grid(row=0, column=0, sticky='ew', padx=SPACING_SM, pady=(SPACING_MD, SPACING_XS))
+        top.columnconfigure(0, weight=1)
 
-        self.tabview.configure(command=self._on_tab_changed)
+        self._brand_frame = ctk.CTkFrame(top, fg_color='transparent')
+        self._brand_frame.grid(row=0, column=0, sticky='w')
 
-    def _init_views(self):
-        """Define lazy-load constructors for each view"""
-        def _make_view(view_id, parent):
-            if view_id == "Dashboard":
-                from gui.collection_dashboard import CollectionDashboard
-                return CollectionDashboard(
-                    parent,
-                    navigate_to_cards_callback=lambda: self._switch_tab(self._label_for("Cards"))
+        self._brand_title = ctk.CTkLabel(
+            self._brand_frame, text='🐴 Umamusume',
+            font=FONT_BODY_BOLD, text_color=TEXT_PRIMARY
+        )
+        self._brand_title.pack(side=tk.LEFT)
+
+        self._version_badge = ctk.CTkLabel(
+            self._brand_frame, text=f'v{VERSION}',
+            font=FONT_TINY, text_color=TEXT_MUTED,
+            fg_color=BG_LIGHT, corner_radius=RADIUS_SM,
+            height=18, width=44, padx=4
+        )
+        self._version_badge.pack(side=tk.LEFT, padx=(SPACING_XS, 0))
+
+        self._toggle_btn = ctk.CTkButton(
+            top, text='◀', width=28, height=28,
+            fg_color='transparent', hover_color=BG_LIGHT,
+            text_color=TEXT_MUTED, corner_radius=RADIUS_SM,
+            font=FONT_SMALL, command=self._toggle_sidebar
+        )
+        self._toggle_btn.grid(row=0, column=1, sticky='e')
+
+        # ── Stats strip ──
+        self._stats_label = ctk.CTkLabel(
+            self.sidebar, text='',
+            font=FONT_TINY, text_color=TEXT_DISABLED,
+            wraplength=200, justify='left', anchor='w'
+        )
+        self._stats_label.grid(row=1, column=0, sticky='ew',
+                               padx=SPACING_MD, pady=(0, SPACING_SM))
+
+        # ── Divider ──
+        ctk.CTkFrame(self.sidebar, fg_color=BG_LIGHT, height=1
+                     ).grid(row=1, column=0, sticky='ew', padx=0,
+                            pady=(SPACING_XL, 0))
+
+        # ── Nav ──
+        self._nav_scroll = ctk.CTkScrollableFrame(
+            self.sidebar, fg_color='transparent', corner_radius=0
+        )
+        self._nav_scroll.grid(row=2, column=0, sticky='nsew', padx=0, pady=0)
+        self._nav_scroll.columnconfigure(0, weight=1)
+
+        self._build_nav_items()
+
+        # ── Bottom: backup + updates ──
+        bottom = ctk.CTkFrame(self.sidebar, fg_color=BG_DARKEST, corner_radius=0)
+        bottom.grid(row=3, column=0, sticky='ew')
+
+        self._backup_btn = ctk.CTkButton(
+            bottom, text='💾  Backup / Restore',
+            command=self.show_backup_dialog,
+            fg_color='transparent', hover_color=BG_LIGHT,
+            text_color=TEXT_MUTED, font=FONT_SMALL,
+            anchor='w', height=36, corner_radius=0,
+        )
+        self._backup_btn.pack(fill=tk.X, padx=SPACING_XS)
+
+        self._update_btn = ctk.CTkButton(
+            bottom, text='🔄  Check for Updates',
+            command=self.show_update_dialog,
+            fg_color='transparent', hover_color=BG_LIGHT,
+            text_color=TEXT_MUTED, font=FONT_SMALL,
+            anchor='w', height=36, corner_radius=0,
+        )
+        self._update_btn.pack(fill=tk.X, padx=SPACING_XS)
+
+    def _build_nav_items(self):
+        """Populate the scrollable nav with group headers and buttons."""
+        for w in self._nav_scroll.winfo_children():
+            w.destroy()
+        self._nav_buttons.clear()
+
+        for item in NAV_ITEMS:
+            if item[0] == '__group__':
+                # Section header
+                self._group_label = ctk.CTkLabel(
+                    self._nav_scroll, text=item[1].upper(),
+                    font=FONT_TINY, text_color=TEXT_DISABLED, anchor='w'
                 )
-            elif view_id == "Cards":
-                return CardListFrame(
-                    parent,
-                    on_card_selected_callback=self.on_card_selected,
-                    on_stats_updated_callback=self.refresh_stats,
-                    navigate_to_card_callback=self.navigate_to_card
+                self._group_label.pack(
+                    fill=tk.X, padx=SPACING_MD,
+                    pady=(SPACING_MD, SPACING_XS)
                 )
-            elif view_id == "Effects":
-                return EffectsFrame(
-                    parent,
-                    navigate_to_card_callback=self.navigate_to_card
+            else:
+                view_id, icon, label, _ = item
+                is_active = (view_id == self.current_view_id)
+                display = f'{icon}  {label}' if self._sidebar_expanded else icon
+
+                btn = ctk.CTkButton(
+                    self._nav_scroll,
+                    text=display,
+                    command=lambda vid=view_id: self._navigate(vid),
+                    fg_color=BG_HIGHLIGHT if is_active else 'transparent',
+                    hover_color=BG_LIGHT,
+                    text_color=ACCENT_PRIMARY if is_active else TEXT_MUTED,
+                    font=FONT_BODY_BOLD if is_active else FONT_BODY,
+                    corner_radius=RADIUS_MD,
+                    anchor='w' if self._sidebar_expanded else 'center',
+                    height=40,
+                    border_width=0,
                 )
-            elif view_id == "Deck":
-                return DeckBuilderFrame(parent)
-            elif view_id == "Skills":
-                return SkillSearchFrame(
-                    parent,
-                    navigate_to_card_callback=self.navigate_to_card
+                btn.pack(
+                    fill=tk.X, padx=SPACING_XS,
+                    pady=1
                 )
-            elif view_id == "DeckSkills":
-                return DeckSkillsFrame(
-                    parent,
-                    navigate_to_card_callback=self.navigate_to_card,
-                    navigate_to_skill_callback=self.navigate_to_skill
-                )
-            elif view_id == "Timeline":
-                return TrainingTimelineFrame(
-                    parent,
-                    navigate_to_card_callback=self.navigate_to_card
-                )
-            elif view_id == "Upgrade":
-                return UpgradePlannerFrame(parent)
-            elif view_id == "Tracks":
-                return TrackViewFrame(parent)
-            elif view_id == "Calendar":
-                return RaceCalendarViewFrame(parent)
+                self._nav_buttons[view_id] = btn
 
-        self._view_factories = {view_id: _make_view for view_id, _ in TABS}
+    def _toggle_sidebar(self):
+        self._sidebar_expanded = not self._sidebar_expanded
+        w = SIDEBAR_WIDTH_EXPANDED if self._sidebar_expanded else SIDEBAR_WIDTH_COLLAPSED
+        self.sidebar.configure(width=w)
 
-    # ─────────────────────────────────────────────
-    # Tab switching helpers
-    # ─────────────────────────────────────────────
+        if self._sidebar_expanded:
+            self._toggle_btn.configure(text='◀')
+            self._brand_title.pack(side=tk.LEFT)
+            self._version_badge.pack(side=tk.LEFT, padx=(SPACING_XS, 0))
+            self._stats_label.configure(wraplength=200)
+            self._backup_btn.configure(text='💾  Backup / Restore', anchor='w')
+            self._update_btn.configure(text='🔄  Check for Updates', anchor='w')
+        else:
+            self._toggle_btn.configure(text='▶')
+            self._brand_title.pack_forget()
+            self._version_badge.pack_forget()
+            self._stats_label.configure(wraplength=50)
+            self._backup_btn.configure(text='💾', anchor='center')
+            self._update_btn.configure(text='🔄', anchor='center')
 
-    def _label_for(self, view_id):
-        for vid, lbl in TABS:
-            if vid == view_id:
-                return lbl
-        return None
+        self._build_nav_items()
 
-    def _id_for_label(self, label):
-        return self._tab_id_map.get(label)
+    def _update_nav_active(self, active_id):
+        for vid, btn in self._nav_buttons.items():
+            is_active = (vid == active_id)
+            icon_label = vid
+            for item in NAV_ITEMS:
+                if item[0] == vid and len(item) == 4:
+                    icon_label = f"{item[1]}  {item[2]}" if self._sidebar_expanded else item[1]
+                    break
 
-    def _switch_tab(self, tab_label):
-        """Programmatically switch to a tab by label"""
-        try:
-            self.tabview.set(tab_label)
-            self._on_tab_changed()
-        except Exception:
-            pass
+            btn.configure(
+                fg_color=BG_HIGHLIGHT if is_active else 'transparent',
+                text_color=ACCENT_PRIMARY if is_active else TEXT_MUTED,
+                font=FONT_BODY_BOLD if is_active else FONT_BODY,
+                text=icon_label,
+            )
 
-    def _on_tab_changed(self, *_):
-        """Called when the active tab changes — lazy-loads the view if needed"""
-        current_label = self.tabview.get()
-        view_id = self._id_for_label(current_label)
-        if not view_id:
+    # ─────────────────────────────────────────────────────────────────
+    # Content area
+    # ─────────────────────────────────────────────────────────────────
+
+    def _build_content_area(self):
+        self.content_area = ctk.CTkFrame(
+            self.root, fg_color=BG_DARKEST, corner_radius=0
+        )
+        self.content_area.grid(row=0, column=1, sticky='nsew')
+        self.content_area.rowconfigure(0, weight=1)
+        self.content_area.columnconfigure(0, weight=1)
+
+    # ─────────────────────────────────────────────────────────────────
+    # Navigation
+    # ─────────────────────────────────────────────────────────────────
+
+    def _navigate(self, view_id):
+        if view_id not in VIEW_ORDER:
             return
 
+        self.current_view_id = view_id
+        self._update_nav_active(view_id)
+        self.root.title(f'Umamusume  ·  {self._label_for(view_id)}')
+
+        # Hide all existing view frames
+        for child in self.content_area.winfo_children():
+            child.grid_remove()
+
+        # Lazy-load or re-show view
         if view_id not in self.views:
-            parent = self.tabview.tab(current_label)
-            view = self._view_factories[view_id](view_id, parent)
+            view = self._build_view(view_id, self.content_area)
             if view:
-                view.grid(row=0, column=0, sticky="nsew")
+                view.grid(row=0, column=0, sticky='nsew')
                 self.views[view_id] = view
 
             # Post-load hooks
             if self.selected_card_id:
-                if view_id == "Effects" and view_id in self.views:
+                if view_id == 'Effects' and view_id in self.views:
                     self.views[view_id].set_card(self.selected_card_id)
-                elif view_id == "DeckSkills" and view_id in self.views:
+                elif view_id == 'DeckSkills' and view_id in self.views:
                     self.views[view_id].set_card(self.selected_card_id)
+        else:
+            self.views[view_id].grid(row=0, column=0, sticky='nsew')
 
-        # Update window title
-        self.root.title(f"Umamusume • {current_label.split(' ', 1)[-1]}")
+    def _build_view(self, view_id, parent):
+        if view_id == 'Dashboard':
+            from gui.collection_dashboard import CollectionDashboard
+            return CollectionDashboard(
+                parent,
+                navigate_to_cards_callback=lambda: self._navigate('Cards')
+            )
+        elif view_id == 'Cards':
+            return CardListFrame(
+                parent,
+                on_card_selected_callback=self.on_card_selected,
+                on_stats_updated_callback=self.refresh_stats,
+                navigate_to_card_callback=self.navigate_to_card
+            )
+        elif view_id == 'Effects':
+            return EffectsFrame(parent, navigate_to_card_callback=self.navigate_to_card)
+        elif view_id == 'Deck':
+            return DeckBuilderFrame(parent)
+        elif view_id == 'Skills':
+            return SkillSearchFrame(parent, navigate_to_card_callback=self.navigate_to_card)
+        elif view_id == 'DeckSkills':
+            return DeckSkillsFrame(
+                parent,
+                navigate_to_card_callback=self.navigate_to_card,
+                navigate_to_skill_callback=self.navigate_to_skill
+            )
+        elif view_id == 'Timeline':
+            return TrainingTimelineFrame(parent, navigate_to_card_callback=self.navigate_to_card)
+        elif view_id == 'Upgrade':
+            return UpgradePlannerFrame(parent)
+        elif view_id == 'Tracks':
+            return TrackViewFrame(parent)
+        elif view_id == 'Calendar':
+            return RaceCalendarViewFrame(parent)
+        return None
 
-    # ─────────────────────────────────────────────
+    def _label_for(self, view_id):
+        for item in NAV_ITEMS:
+            if item[0] == view_id:
+                return item[2]
+        return view_id
+
+    # ─────────────────────────────────────────────────────────────────
     # Cross-view navigation
-    # ─────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────
 
     def navigate_to_card(self, card_id):
-        self._switch_tab(self._label_for("Cards"))
-        if "Cards" in self.views:
-            self.views["Cards"].navigate_to_card(card_id)
+        self._navigate('Cards')
+        if 'Cards' in self.views:
+            self.views['Cards'].navigate_to_card(card_id)
 
     def navigate_to_skill(self, skill_name):
-        self._switch_tab(self._label_for("Skills"))
-        if "Skills" in self.views:
-            view = self.views["Skills"]
+        self._navigate('Skills')
+        if 'Skills' in self.views:
+            view = self.views['Skills']
             view.search_var.set(skill_name)
             view.filter_skills()
             view.on_skill_selected(skill_name)
@@ -301,35 +380,57 @@ class MainWindow:
         if level is not None:
             self.last_selected_levels[card_id] = level
         self.selected_card_id = card_id
+        if 'Effects' in self.views:
+            self.views['Effects'].set_card(card_id)
+        if 'DeckSkills' in self.views:
+            self.views['DeckSkills'].set_card(card_id)
 
-        if "Effects" in self.views:
-            self.views["Effects"].set_card(card_id)
-        if "DeckSkills" in self.views:
-            self.views["DeckSkills"].set_card(card_id)
+    # ─────────────────────────────────────────────────────────────────
+    # Stats / dialogs
+    # ─────────────────────────────────────────────────────────────────
 
     def refresh_stats(self):
-        stats = get_database_stats()
-        owned = get_owned_count()
-        total = stats.get('total_cards', 0)
-        by_rarity = stats.get('by_rarity', {})
-        text = (
-            f"📋 {total} Cards  ✅ {owned} Owned  │  "
-            f"SSR {by_rarity.get('SSR', 0)}  SR {by_rarity.get('SR', 0)}  R {by_rarity.get('R', 0)}"
-        )
-        if hasattr(self, 'stats_label'):
-            self.stats_label.configure(text=text)
+        try:
+            stats = get_database_stats()
+            owned = get_owned_count()
+            total = stats.get('total_cards', 0)
+            by_rarity = stats.get('by_rarity', {})
+            pct = f'{owned / total * 100:.0f}%' if total else '0%'
+            text = (
+                f'{owned}/{total} owned  ({pct})\n'
+                f'SSR {by_rarity.get("SSR",0)}  '
+                f'SR {by_rarity.get("SR",0)}  '
+                f'R {by_rarity.get("R",0)}'
+            )
+        except Exception:
+            text = ''
+        if hasattr(self, '_stats_label'):
+            self._stats_label.configure(text=text)
 
     def show_backup_dialog(self):
         def on_restore():
             self.refresh_stats()
-            if "Cards" in self.views:
-                self.views["Cards"].filter_cards()
-            if "Dashboard" in self.views:
-                self.views["Dashboard"].refresh()
+            if 'Cards' in self.views:
+                self.views['Cards'].filter_cards()
+            if 'Dashboard' in self.views:
+                self.views['Dashboard'].refresh()
         show_backup_dialog(self.root, on_restore_callback=on_restore)
 
     def show_update_dialog(self):
         show_update_dialog(self.root)
+
+    # ─────────────────────────────────────────────────────────────────
+    # Keyboard shortcuts
+    # ─────────────────────────────────────────────────────────────────
+
+    def _bind_shortcuts(self):
+        for idx, view_id in enumerate(VIEW_ORDER):
+            n = idx + 1
+            if n <= 9:
+                self.root.bind(
+                    f'<Control-Key-{n}>',
+                    lambda e, vid=view_id: self._navigate(vid)
+                )
 
     def run(self):
         self.root.mainloop()
@@ -340,5 +441,5 @@ def main():
     app.run()
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

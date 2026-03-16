@@ -650,14 +650,15 @@ class RaceCalendarViewFrame(ctk.CTkFrame):
                 ctk.CTkLabel(
                     card, text="⚠️ Hard",
                     font=FONT_TINY, text_color=ACCENT_ERROR,
-                    height=16
-                ).pack(pady=(SPACING_XS, 0))
+                    height=14
+                ).pack(pady=(2, 0))
 
             # Grade badge
             ctk.CTkLabel(
                 card, text=grade,
-                font=FONT_BODY_BOLD, text_color=grade_color
-            ).pack()
+                font=FONT_SMALL, text_color=grade_color,
+                height=16
+            ).pack(pady=2)
 
             short_name = name[:14] + "…" if len(name) > 14 else name
 
@@ -682,26 +683,26 @@ class RaceCalendarViewFrame(ctk.CTkFrame):
 
                 if cached:
                     img_row = ctk.CTkFrame(card, fg_color="transparent")
-                    img_row.pack(pady=(SPACING_XS, 0))
+                    img_row.pack(pady=(2, 0))
                     ctk.CTkLabel(
                         img_row, text="", image=cached,
-                        width=80, height=30
+                        width=60, height=20
                     ).pack()
                     # Race name between image and terrain badges
                     ctk.CTkLabel(
                         card, text=short_name,
-                        font=FONT_TINY, text_color=TEXT_PRIMARY
-                    ).pack(pady=(SPACING_XS, 0))
+                        font=FONT_TINY, text_color=TEXT_PRIMARY, height=16
+                    ).pack(pady=2)
                 else:
                     ctk.CTkLabel(
                         card, text=short_name,
-                        font=FONT_TINY, text_color=TEXT_PRIMARY
-                    ).pack(pady=(0, SPACING_XS))
+                        font=FONT_TINY, text_color=TEXT_PRIMARY, height=16
+                    ).pack(pady=2)
             else:
                 ctk.CTkLabel(
                     card, text=short_name,
-                    font=FONT_TINY, text_color=TEXT_PRIMARY
-                ).pack(pady=(0, SPACING_XS))
+                    font=FONT_TINY, text_color=TEXT_PRIMARY, height=16
+                ).pack(pady=2)
 
             # Terrain + distance badges
             terrain_text = race[7] or ""
@@ -725,10 +726,10 @@ class RaceCalendarViewFrame(ctk.CTkFrame):
 
             # Action buttons
             btns = ctk.CTkFrame(card, fg_color="transparent")
-            btns.pack(pady=(0, SPACING_XS))
+            btns.pack(pady=(0, 2))
 
             ctk.CTkButton(
-                btns, text="🔄", width=26, height=22,
+                btns, text="🔄", width=20, height=20,
                 font=FONT_TINY, fg_color="transparent",
                 hover_color=BG_HIGHLIGHT, text_color=TEXT_MUTED,
                 corner_radius=RADIUS_SM,
@@ -736,7 +737,7 @@ class RaceCalendarViewFrame(ctk.CTkFrame):
             ).pack(side=tk.LEFT, padx=1)
 
             ctk.CTkButton(
-                btns, text="✕", width=26, height=22,
+                btns, text="✕", width=20, height=20,
                 font=FONT_TINY, fg_color="transparent",
                 hover_color=ACCENT_ERROR, text_color=TEXT_MUTED,
                 corner_radius=RADIUS_SM,

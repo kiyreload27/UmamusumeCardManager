@@ -136,12 +136,10 @@ class EffectsFrame(ctk.CTkFrame):
         )
         self.status_label.pack(side=tk.RIGHT)
 
-        # Scrollable result grid
+        # Scrollable result grid (4 columns for density)
         self.scroll_area = ctk.CTkScrollableFrame(results_frame, fg_color="transparent")
         self.scroll_area.pack(fill=tk.BOTH, expand=True, padx=SPACING_SM, pady=(0, SPACING_SM))
-        self.scroll_area.columnconfigure(0, weight=1)
-        self.scroll_area.columnconfigure(1, weight=1)
-        self.scroll_area.columnconfigure(2, weight=1)
+        self.scroll_area.columnconfigure((0,1,2,3), weight=1)
 
     def _load_chip_counts(self):
         """Load match counts for each quick filter chip"""
@@ -259,7 +257,7 @@ class EffectsFrame(ctk.CTkFrame):
 
             img_label = ctk.CTkLabel(
                 card_frame, text="", image=img if img else None,
-                width=60, height=60, corner_radius=RADIUS_SM
+                width=48, height=48, corner_radius=RADIUS_SM
             )
             img_label.pack(side=tk.LEFT, padx=SPACING_SM, pady=SPACING_SM)
 
@@ -272,7 +270,7 @@ class EffectsFrame(ctk.CTkFrame):
 
             name_label = ctk.CTkLabel(
                 header_box, text=card_name,
-                font=FONT_BODY_BOLD, text_color=ACCENT_PRIMARY, anchor="w",
+                font=FONT_SMALL, text_color=ACCENT_PRIMARY, anchor="w",
                 cursor="hand2"
             )
             name_label.pack(side=tk.LEFT)
@@ -284,7 +282,7 @@ class EffectsFrame(ctk.CTkFrame):
                 header_box, text=level_label,
                 font=FONT_TINY, text_color=ACCENT_SUCCESS,
                 fg_color=BG_MEDIUM, corner_radius=4,
-                height=18, width=38
+                height=16, width=32
             ).pack(side=tk.RIGHT)
 
             # Effect name + colored value
@@ -293,16 +291,16 @@ class EffectsFrame(ctk.CTkFrame):
 
             ctk.CTkLabel(
                 effect_box, text=effect_name,
-                font=FONT_SMALL, text_color=TEXT_MUTED, anchor="w"
+                font=FONT_TINY, text_color=TEXT_MUTED, anchor="w"
             ).pack(side=tk.LEFT)
 
             ctk.CTkLabel(
                 effect_box, text=str(effect_value),
-                font=FONT_BODY_BOLD, text_color=val_color
+                font=FONT_SMALL, text_color=val_color
             ).pack(side=tk.RIGHT)
 
             col += 1
-            if col > 2:
+            if col > 3:  # 4 columns
                 col = 0
                 row += 1
 

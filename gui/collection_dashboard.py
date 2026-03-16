@@ -40,7 +40,7 @@ class CollectionDashboard(ctk.CTkFrame):
 
         # Header
         header = ctk.CTkFrame(self.scroll, fg_color="transparent")
-        header.pack(fill=tk.X, pady=(0, SPACING_LG))
+        header.pack(fill=tk.X, pady=(0, SPACING_LG), padx=SPACING_MD)
 
         ctk.CTkLabel(
             header, text="📊  Collection Dashboard",
@@ -56,21 +56,27 @@ class CollectionDashboard(ctk.CTkFrame):
 
         # === Top Stats Row ===
         self.top_stats_frame = ctk.CTkFrame(self.scroll, fg_color="transparent")
-        self.top_stats_frame.pack(fill=tk.X, pady=(0, SPACING_LG))
+        self.top_stats_frame.pack(fill=tk.X, pady=(0, SPACING_XL), padx=SPACING_MD)
 
-        # === Rarity Breakdown ===
+        # === Two Column Layout below top stats ===
+        self.columns_frame = ctk.CTkFrame(self.scroll, fg_color="transparent")
+        self.columns_frame.pack(fill=tk.BOTH, expand=True, padx=SPACING_MD)
+        self.columns_frame.columnconfigure(0, weight=1)
+        self.columns_frame.columnconfigure(1, weight=1)
+
+        # Left Column: Rarity Breakdown
         self.rarity_section = ctk.CTkFrame(
-            self.scroll, fg_color=BG_DARK,
+            self.columns_frame, fg_color=BG_DARK,
             corner_radius=RADIUS_LG, border_width=1, border_color=BG_LIGHT
         )
-        self.rarity_section.pack(fill=tk.X, pady=(0, SPACING_MD))
+        self.rarity_section.grid(row=0, column=0, sticky="nsew", padx=(0, SPACING_MD))
 
-        # === Type Breakdown ===
+        # Right Column: Type Breakdown
         self.type_section = ctk.CTkFrame(
-            self.scroll, fg_color=BG_DARK,
+            self.columns_frame, fg_color=BG_DARK,
             corner_radius=RADIUS_LG, border_width=1, border_color=BG_LIGHT
         )
-        self.type_section.pack(fill=tk.X, pady=(0, SPACING_MD))
+        self.type_section.grid(row=0, column=1, sticky="nsew")
 
     def refresh(self):
         """Refresh all dashboard data"""
@@ -98,9 +104,11 @@ class CollectionDashboard(ctk.CTkFrame):
         }
 
     def _render_top_stats(self, stats):
-        """Render the top stats cards"""
+        """Render the top stats cards using large metrics"""
         for w in self.top_stats_frame.winfo_children():
             w.destroy()
+
+        self.top_stats_frame.columnconfigure((0,1,2,3), weight=1)
 
         total = stats.get('total', 0)
         owned = stats.get('owned', 0)
@@ -113,48 +121,30 @@ class CollectionDashboard(ctk.CTkFrame):
             ("❌", "Missing", str(total - owned), ACCENT_ERROR),
         ]
 
-        for icon, label, value, color in stat_data:
+        for i, (icon, label, value, color) in enumerate(stat_data):
             card = ctk.CTkFrame(
                 self.top_stats_frame, fg_color=BG_DARK,
                 corner_radius=RADIUS_LG, border_width=1, border_color=BG_LIGHT
             )
-            card.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=SPACING_XS)
+            card.grid(row=0, column=i, sticky="nsew", padx=SPACING_SM)
 
             inner = ctk.CTkFrame(card, fg_color="transparent")
-            inner.pack(padx=SPACING_LG, pady=SPACING_LG)
+            inner.pack(padx=SPACING_LG, pady=SPACING_LG, expand=True)
 
             ctk.CTkLabel(
-                inner, text=f"{icon} {label}",
-                font=FONT_TINY, text_color=TEXT_MUTED
-            ).pack(anchor="w")
+                inner, text=icon, font=FONT_DISPLAY, text_color=color
+            ).pack(anchor="center", pady=(0, SPACING_XS))
 
             ctk.CTkLabel(
-                inner, text=value,
-                font=FONT_TITLE, text_color=color
-            ).pack(anchor="w")
+                inner, text=value, font=FONT_DISPLAY, text_color=TEXT_PRIMARY
+            ).pack(anchor="center")
 
-        # Completion progress bar
-        bar_frame = ctk.CTkFrame(
-            self.top_stats_frame, fg_color=BG_DARK,
-            corner_radius=RADIUS_LG, border_width=1, border_color=BG_LIGHT
-        )
-        bar_frame.pack(fill=tk.X, padx=SPACING_XS, pady=(SPACING_SM, 0))
-
-        bar_inner = ctk.CTkFrame(bar_frame, fg_color="transparent")
-        bar_inner.pack(fill=tk.X, padx=SPACING_LG, pady=SPACING_MD)
-
-        # Track
-        track = ctk.CTkFrame(bar_inner, fg_color=BG_MEDIUM, corner_radius=6, height=12)
-        track.pack(fill=tk.X)
-        track.pack_propagate(False)
-
-        # Fill
-        fill_pct = max(1, min(100, int(pct)))
-        fill = ctk.CTkFrame(track, fg_color=ACCENT_SUCCESS, corner_radius=6)
-        fill.place(relwidth=fill_pct / 100, relheight=1.0)
+            ctk.CTkLabel(
+                inner, text=label, font=FONT_SMALL, text_color=TEXT_MUTED
+            ).pack(anchor="center", pady=(SPACING_XS, 0))
 
     def _render_rarity_bars(self, stats):
-        """Render rarity breakdown progress bars"""
+        """Render rarity breakdown using circular progress rings"""
         for w in self.rarity_section.winfo_children():
             w.destroy()
 
@@ -163,43 +153,52 @@ class CollectionDashboard(ctk.CTkFrame):
             font=FONT_SUBHEADER, text_color=TEXT_PRIMARY
         ).pack(anchor="w", padx=SPACING_LG, pady=(SPACING_LG, SPACING_SM))
 
+        rings_container = ctk.CTkFrame(self.rarity_section, fg_color="transparent")
+        rings_container.pack(fill=tk.BOTH, expand=True, pady=SPACING_MD)
+        rings_container.columnconfigure((0,1,2), weight=1)
+
         by_rarity = stats.get('by_rarity', {})
-        for rarity in ['SSR', 'SR', 'R']:
+        for i, rarity in enumerate(['SSR', 'SR', 'R']):
             data = by_rarity.get(rarity, {'total': 0, 'owned': 0})
             total = data.get('total', 0)
             owned = data.get('owned', 0)
             pct = (owned / total * 100) if total > 0 else 0
             color = RARITY_COLORS.get(rarity, TEXT_MUTED)
 
-            row = ctk.CTkFrame(self.rarity_section, fg_color="transparent")
-            row.pack(fill=tk.X, padx=SPACING_LG, pady=SPACING_XS)
+            ring_frame = ctk.CTkFrame(rings_container, fg_color="transparent")
+            ring_frame.grid(row=0, column=i, sticky="nsew")
 
-            # Label
+            canvas_size = 120
+            thickness = 12
+            canvas = tk.Canvas(
+                ring_frame, width=canvas_size, height=canvas_size,
+                bg=BG_DARK, highlightthickness=0
+            )
+            canvas.pack()
+
+            # Background ring
+            canvas.create_oval(
+                thickness, thickness, canvas_size-thickness, canvas_size-thickness,
+                outline=BG_MEDIUM, width=thickness
+            )
+
+            # Foreground ring
+            extent = -(pct / 100) * 360
+            if extent != 0:
+                canvas.create_arc(
+                    thickness, thickness, canvas_size-thickness, canvas_size-thickness,
+                    start=90, extent=extent, outline=color, style=tk.ARC, width=thickness
+                )
+
+            # Center text
+            ctk.CTkLabel(ring_frame, text=rarity, font=FONT_TITLE, text_color=color).place(relx=0.5, rely=0.42, anchor="center")
+            ctk.CTkLabel(ring_frame, text=f"{pct:.0f}%", font=FONT_TINY, text_color=TEXT_MUTED).place(relx=0.5, rely=0.6, anchor="center")
+
+            # Footnote
             ctk.CTkLabel(
-                row, text=f"{rarity}", font=FONT_BODY_BOLD,
-                text_color=color, width=40
-            ).pack(side=tk.LEFT)
-
-            # Count
-            ctk.CTkLabel(
-                row, text=f"{owned}/{total}",
-                font=FONT_SMALL, text_color=TEXT_MUTED, width=60
-            ).pack(side=tk.RIGHT)
-
-            ctk.CTkLabel(
-                row, text=f"{pct:.0f}%",
-                font=FONT_TINY, text_color=TEXT_DISABLED, width=40
-            ).pack(side=tk.RIGHT)
-
-            # Bar
-            track = ctk.CTkFrame(row, fg_color=BG_MEDIUM, corner_radius=4, height=10)
-            track.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=SPACING_SM)
-            track.pack_propagate(False)
-
-            fill_w = max(1, int(pct)) if total > 0 else 0
-            if fill_w > 0:
-                fill = ctk.CTkFrame(track, fg_color=color, corner_radius=4)
-                fill.place(relwidth=fill_w / 100, relheight=1.0)
+                ring_frame, text=f"{owned} / {total}",
+                font=FONT_SMALL, text_color=TEXT_SECONDARY
+            ).pack(pady=(SPACING_SM, 0))
 
         # Bottom padding
         ctk.CTkFrame(self.rarity_section, fg_color="transparent", height=SPACING_MD).pack()

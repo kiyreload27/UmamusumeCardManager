@@ -2,6 +2,32 @@
 
 All notable changes to the Umamusume Support Card Manager will be documented in this file.
 
+## [24.0.0] - 2026-03-16
+
+### 🎨 Complete UI Redesign & Modernization
+- **New Warm Theme**: Replaced the previous cold indigo palette with a warmer, more readable charcoal and rose gold design system (`theme.py`) to reduce eye strain and better match the source material aesthetic.
+- **Collapsible Sidebar Navigation**: Replaced the top tab bar with a collapsible left sidebar (`main_window.py`), grouping views into Collection, Planning, and Reference categories for easier access.
+- **Deck Builder Overhaul**: Completely redesigned the layout to feature a 2x3 card slot grid and an effect summary sidebar alongside the card browser, fixing a layout crash that prevented loading.
+- **Card Library Improvements**: Switched to a cleaner 3-column grid layout with top-header filters, and fixed an issue where owned cards rendered incorrectly large.
+- **Collection Dashboard**: Redesigned to feature large metric cards and canvas-based radial progress rings for rarity breakdown.
+- **Better Information Density**: Redesigned effects, hints/skills, and deck skills views with tighter layouts, smaller chips, and grouped blocks to prioritize scannability.
+- **Race Calendar Polish**: Enhanced slot sizing, tighter padding, and added grade-colored visual accents for a crisp 4x6 grid.
+
+---
+
+## [23.0.0] - 2026-03-16
+
+### 🏟️ Tracks — Enhanced Search
+- **Search by course type**: The existing search bar in the Tracks tab now matches course attributes, not just track names
+  - **Distance**: type `long`, `medium`, `mile`, `sprint`, or `short` to show only tracks that have courses of that distance category
+  - **Surface**: type `turf` or `dirt` to filter to tracks with those course types
+  - **Direction**: type `left`, `right`, or `straight` to filter by course turn direction
+  - Track name and location still match as before
+- Course data is pre-loaded at startup so filtering is instant with no extra DB queries
+- Updated search placeholder to `Search by name, turf, long, dirt…` to hint at the new capabilities
+
+---
+
 ## [22.0.0] - 2026-03-04
 
 ### 🎴 Race Calendar Improvements

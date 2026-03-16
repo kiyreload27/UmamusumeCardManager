@@ -341,7 +341,7 @@ class SkillSearchFrame(ctk.CTkFrame):
                 self.results_scroll, fg_color=bg_color,
                 corner_radius=RADIUS_MD, border_width=1, border_color=border_color
             )
-            card_frame.pack(fill=tk.X, padx=SPACING_XS, pady=SPACING_XS)
+            card_frame.pack(fill=tk.X, padx=0, pady=(0, SPACING_SM))
             self.result_widgets.append(card_frame)
 
             # Image
@@ -351,15 +351,15 @@ class SkillSearchFrame(ctk.CTkFrame):
                 if resolved_path and os.path.exists(resolved_path):
                     try:
                         pil_img = Image.open(resolved_path)
-                        pil_img.thumbnail((60, 60), Image.Resampling.LANCZOS)
-                        img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(60, 60))
+                        pil_img.thumbnail((44, 44), Image.Resampling.LANCZOS)
+                        img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(44, 44))
                         self.icon_cache[card_id] = img
                     except (OSError, SyntaxError, ValueError) as e:
                         logging.debug(f"Failed to load skill card icon: {e}")
 
             ctk.CTkLabel(
                 card_frame, text="", image=img if img else None,
-                width=50, height=50, corner_radius=RADIUS_SM
+                width=44, height=44, corner_radius=RADIUS_SM
             ).pack(side=tk.LEFT, padx=SPACING_SM, pady=SPACING_SM)
 
             # Info
@@ -372,7 +372,7 @@ class SkillSearchFrame(ctk.CTkFrame):
 
             name_label = ctk.CTkLabel(
                 hdr, text=card.get('name', 'Unknown'),
-                font=FONT_BODY_BOLD, text_color=ACCENT_PRIMARY, anchor="w",
+                font=FONT_SMALL, text_color=ACCENT_PRIMARY, anchor="w",
                 cursor="hand2"
             )
             name_label.pack(side=tk.LEFT)

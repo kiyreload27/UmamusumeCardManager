@@ -97,6 +97,8 @@ class TrackViewFrame(ctk.CTkFrame):
         self.map_label = None
         self.map_frame = None
         self.resize_after_id = None
+        # Cache of track_id -> list of course tuples for search filtering
+        self._course_cache = {}  # {track_id: [(distance, surface, direction, ...), ...]}
 
         self.create_widgets()
         self.load_tracks()
@@ -115,8 +117,8 @@ class TrackViewFrame(ctk.CTkFrame):
         self.search_var = tk.StringVar()
         search = ctk.CTkEntry(
             top_bar, textvariable=self.search_var,
-            placeholder_text="🔍  Search tracks...",
-            width=220, height=34,
+            placeholder_text="🔍  Search by name, turf, long, dirt…",
+            width=240, height=34,
             fg_color=BG_MEDIUM, border_color=BG_LIGHT,
             corner_radius=RADIUS_MD
         )
@@ -219,14 +221,60 @@ class TrackViewFrame(ctk.CTkFrame):
     # Data loading
     def load_tracks(self):
         self.tracks = get_all_tracks()
+        # Pre-load all course data for search filtering
+        self._course_cache.clear()
+        for track in self.tracks:
+            track_id = track[0]
+            self._course_cache[track_id] = get_track_courses(track_id)
         self.render_track_list(self.tracks)
+
+    def _get_distance_keywords(self, distance):
+        """Map a numeric distance to distance-category keywords for searching."""
+        if not distance:
+            return []
+        try:
+            d = int(distance)
+        except (ValueError, TypeError):
+            return []
+        if d < 1400:
+            return ['sprint', 'short']
+        elif d < 1800:
+            return ['mile']
+        elif d < 2400:
+            return ['medium']
+        else:
+            return ['long']
+
+    def _track_matches(self, track, term):
+        """Return True if the track or any of its courses matches the search term."""
+        if not term:
+            return True
+        term = term.lower()
+        track_id, name, location = track[0], track[1], track[2] or ''
+
+        # Match track name or location
+        if term in name.lower() or term in location.lower():
+            return True
+
+        # Match course attributes
+        for course in self._course_cache.get(track_id, []):
+            # course: (course_id, distance, surface, direction, corner_count, final_straight)
+            surface = (course[2] or '').lower()
+            direction = (course[3] or '').lower()
+            dist_keywords = self._get_distance_keywords(course[1])
+
+            if term in surface:
+                return True
+            if term in direction:
+                return True
+            if any(term == kw for kw in dist_keywords):
+                return True
+
+        return False
 
     def filter_tracks(self):
         term = self.search_var.get().strip().lower()
-        if term:
-            filtered = [t for t in self.tracks if term in t[1].lower()]
-        else:
-            filtered = self.tracks
+        filtered = [t for t in self.tracks if self._track_matches(t, term)]
         self.render_track_list(filtered)
 
     def render_track_list(self, tracks):
@@ -331,6 +379,19 @@ class TrackViewFrame(ctk.CTkFrame):
         card._track_id = track_id
 
 
+    def _course_matches(self, course, term):
+        """Return True if a single course matches the search term."""
+        if not term:
+            return True
+        surface = (course[2] or '').lower()
+        direction = (course[3] or '').lower()
+        dist_keywords = self._get_distance_keywords(course[1])
+        return (
+            term in surface or
+            term in direction or
+            any(term == kw for kw in dist_keywords)
+        )
+
     def select_track(self, track_id):
         self.current_track_id = track_id
         self.current_course_id = None
@@ -358,12 +419,19 @@ class TrackViewFrame(ctk.CTkFrame):
                 child.configure(fg_color=BG_LIGHT if child._track_id == track_id else BG_MEDIUM)
 
         courses = get_track_courses(track_id)
-        self.render_course_list(courses)
+        # Filter courses by the active search term
+        term = self.search_var.get().strip().lower()
+        if term:
+            filtered_courses = [c for c in courses if self._course_matches(c, term)]
+        else:
+            filtered_courses = courses
+        self.render_course_list(filtered_courses)
 
         self.detail_header.configure(text="Course Details")
         self.detail_subtitle.configure(text="Select a course to view details")
         for w in self.detail_scroll.winfo_children():
             w.destroy()
+
 
     def _load_track_image(self, image_path):
         resolved = resolve_track_image(image_path)

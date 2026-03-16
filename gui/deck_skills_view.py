@@ -209,7 +209,7 @@ class DeckSkillsFrame(ctk.CTkFrame):
             corner_radius=RADIUS_MD, border_width=1,
             border_color=ACCENT_SUCCESS if is_owned else BG_LIGHT
         )
-        block_frame.pack(fill=tk.X, pady=SPACING_SM, padx=SPACING_XS)
+        block_frame.pack(fill=tk.X, pady=(0, SPACING_SM), padx=0)
         self.card_blocks.append(block_frame)
 
         # Sticky header
@@ -262,7 +262,7 @@ class DeckSkillsFrame(ctk.CTkFrame):
         if not skills:
             ctk.CTkLabel(
                 block_frame, text="No notable skills found.",
-                font=FONT_BODY, text_color=TEXT_MUTED
+                font=FONT_SMALL, text_color=TEXT_MUTED
             ).pack(pady=SPACING_SM)
             return
 

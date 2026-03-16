@@ -266,100 +266,22 @@ class DeckBuilderFrame(ctk.CTkFrame):
 
     def setup_ui(self):
         self.grid_rowconfigure(0, weight=1)
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_columnconfigure(1, weight=3)
+        self.grid_columnconfigure(0, weight=2)  # Main panel (Slots + Browser)
+        self.grid_columnconfigure(1, weight=1)  # Sidebar (Effects)
 
-        # === Left Panel: Card Browser ===
-        left_panel = ctk.CTkFrame(
-            self, fg_color=BG_DARK, corner_radius=RADIUS_LG,
-            border_width=1, border_color=BG_LIGHT
-        )
-        left_panel.grid(row=0, column=0, sticky="nsew", padx=(SPACING_SM, SPACING_XS), pady=SPACING_SM)
+        # === Left Main Panel (Deck + Browser) ===
+        main_panel = ctk.CTkFrame(self, fg_color="transparent")
+        main_panel.grid(row=0, column=0, sticky="nsew", padx=(SPACING_MD, SPACING_XS), pady=SPACING_MD)
+        main_panel.grid_rowconfigure(0, weight=0)  # Deck area
+        main_panel.grid_rowconfigure(1, weight=1)  # Browser area
 
-        header = ctk.CTkFrame(left_panel, fg_color="transparent")
-        header.pack(fill=tk.X, pady=(SPACING_LG, SPACING_SM), padx=SPACING_LG)
-        ctk.CTkLabel(
-            header, text="📋  Available Cards",
-            font=FONT_HEADER, text_color=TEXT_PRIMARY
-        ).pack(side=tk.LEFT)
-
-        # Drag hint
-        ctk.CTkLabel(
-            header, text="drag → slot",
-            font=FONT_TINY, text_color=TEXT_DISABLED
-        ).pack(side=tk.RIGHT)
-
-        # Filters
-        filter_frame = ctk.CTkFrame(left_panel, fg_color="transparent")
-        filter_frame.pack(fill=tk.X, pady=(0, SPACING_SM), padx=SPACING_LG)
-
-        self.type_var = tk.StringVar(value="All")
-        self.owned_only_var = tk.BooleanVar(value=False)
-        self.search_var = tk.StringVar()
-
-        self.search_entry = create_styled_entry(
-            filter_frame, textvariable=self.search_var,
-            placeholder_text="Search..."
-        )
-        self.search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, SPACING_SM))
-        self.search_entry.bind('<KeyRelease>', self._schedule_filter)
-
-        types = ["All", "Speed", "Stamina", "Power", "Guts", "Wisdom", "Friend", "Group"]
-        type_combo = ctk.CTkComboBox(
-            filter_frame, variable=self.type_var,
-            values=types, width=100, state='readonly',
-            command=lambda e: self.filter_cards()
-        )
-        type_combo.pack(side=tk.LEFT)
-
-        # Rarity filter row
-        rarity_frame = ctk.CTkFrame(left_panel, fg_color="transparent")
-        rarity_frame.pack(fill=tk.X, padx=SPACING_LG, pady=(0, SPACING_SM))
-
-        ctk.CTkLabel(
-            rarity_frame, text="Rarity:",
-            font=FONT_TINY, text_color=TEXT_MUTED
-        ).pack(side=tk.LEFT, padx=(0, SPACING_XS))
-
-        self.rarity_seg = ctk.CTkSegmentedButton(
-            rarity_frame,
-            values=["All", "SSR", "SR", "R"],
-            command=lambda _: self.filter_cards(),
-            font=FONT_TINY, height=26
-        )
-        self.rarity_seg.set("All")
-        self.rarity_seg.pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-        owned_frame = ctk.CTkFrame(left_panel, fg_color="transparent")
-        owned_frame.pack(fill=tk.X, padx=SPACING_LG, pady=(0, SPACING_SM))
-        ctk.CTkCheckBox(
-            owned_frame, text="Owned Only",
-            variable=self.owned_only_var, command=self.filter_cards,
-            font=FONT_TINY, checkbox_width=16, checkbox_height=16
-        ).pack(side=tk.LEFT)
-
-        # Add button (bottom)
-        add_btn = create_styled_button(
-            left_panel, text="➕  Add to Deck",
-            command=self.add_selected_to_deck, style_type='accent'
-        )
-        add_btn.pack(side=tk.BOTTOM, fill=tk.X, pady=SPACING_LG, padx=SPACING_LG)
-
-        # Card scroll list
-        self.card_scroll = ctk.CTkScrollableFrame(left_panel, fg_color="transparent")
-        self.card_scroll.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=SPACING_SM, pady=(0, SPACING_SM))
-        self.card_scroll.columnconfigure(0, weight=1)
-
-        # === Right Panel: Deck & Stats ===
-        right_panel = ctk.CTkFrame(self, fg_color="transparent")
-        right_panel.grid(row=0, column=1, sticky="nsew", padx=(SPACING_XS, SPACING_SM), pady=SPACING_SM)
-
+        # Move the deck controls and slots to the top of main_panel
         # Deck controls bar
         deck_ctrl = ctk.CTkFrame(
-            right_panel, fg_color=BG_DARK, corner_radius=RADIUS_LG,
+            main_panel, fg_color=BG_DARK, corner_radius=RADIUS_LG,
             border_width=1, border_color=BG_LIGHT
         )
-        deck_ctrl.pack(fill=tk.X, pady=(0, SPACING_SM))
+        deck_ctrl.grid(row=0, column=0, sticky="ew", pady=(0, SPACING_MD))
 
         deck_inner = ctk.CTkFrame(deck_ctrl, fg_color="transparent")
         deck_inner.pack(fill=tk.BOTH, padx=SPACING_LG, pady=SPACING_MD)
@@ -422,20 +344,104 @@ class DeckBuilderFrame(ctk.CTkFrame):
             text_color=TEXT_MUTED, corner_radius=RADIUS_SM
         ).pack(side=tk.LEFT)
 
-        # Card Slots Row
-        self.slots_frame = ctk.CTkFrame(right_panel, fg_color="transparent")
-        self.slots_frame.pack(fill=tk.X, pady=(0, SPACING_SM))
+        # Card Slots Row (2x3 grid)
+        self.slots_frame = ctk.CTkFrame(deck_ctrl, fg_color="transparent")
+        self.slots_frame.pack(fill=tk.X, padx=SPACING_LG, pady=(0, SPACING_MD))
 
         self.card_slots = []
         for i in range(6):
+            r = i // 3
+            c = i % 3
             slot = CardSlot(
                 self.slots_frame, i,
                 self.remove_from_slot, self.on_slot_level_changed,
                 on_drop_callback=self._on_card_dropped
             )
-            slot.grid(row=0, column=i, padx=SPACING_XS, pady=SPACING_XS, sticky='nsew')
-            self.slots_frame.columnconfigure(i, weight=1)
+            slot.grid(row=r, column=c, padx=SPACING_XS, pady=SPACING_XS, sticky='nsew')
+            self.slots_frame.columnconfigure(c, weight=1)
             self.card_slots.append(slot)
+
+        # Card Browser (Bottom of Main Panel)
+        browser_panel = ctk.CTkFrame(
+            main_panel, fg_color=BG_DARK, corner_radius=RADIUS_LG,
+            border_width=1, border_color=BG_LIGHT
+        )
+        browser_panel.grid(row=1, column=0, sticky="nsew")
+
+        header = ctk.CTkFrame(browser_panel, fg_color="transparent")
+        header.pack(fill=tk.X, pady=(SPACING_LG, SPACING_SM), padx=SPACING_LG)
+        ctk.CTkLabel(
+            header, text="📋  Available Cards",
+            font=FONT_HEADER, text_color=TEXT_PRIMARY
+        ).pack(side=tk.LEFT)
+
+        ctk.CTkLabel(
+            header, text="drag → slot",
+            font=FONT_TINY, text_color=TEXT_DISABLED
+        ).pack(side=tk.RIGHT)
+
+        filter_frame = ctk.CTkFrame(browser_panel, fg_color="transparent")
+        filter_frame.pack(fill=tk.X, pady=(0, SPACING_SM), padx=SPACING_LG)
+
+        self.type_var = tk.StringVar(value="All")
+        self.owned_only_var = tk.BooleanVar(value=False)
+        self.search_var = tk.StringVar()
+
+        self.search_entry = create_styled_entry(
+            filter_frame, textvariable=self.search_var,
+            placeholder_text="Search..."
+        )
+        self.search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, SPACING_SM))
+        self.search_entry.bind('<KeyRelease>', self._schedule_filter)
+
+        types = ["All", "Speed", "Stamina", "Power", "Guts", "Wisdom", "Friend", "Group"]
+        type_combo = ctk.CTkComboBox(
+            filter_frame, variable=self.type_var,
+            values=types, width=100, state='readonly',
+            command=lambda e: self.filter_cards()
+        )
+        type_combo.pack(side=tk.LEFT)
+
+        rarity_frame = ctk.CTkFrame(browser_panel, fg_color="transparent")
+        rarity_frame.pack(fill=tk.X, padx=SPACING_LG, pady=(0, SPACING_SM))
+
+        ctk.CTkLabel(
+            rarity_frame, text="Rarity:",
+            font=FONT_TINY, text_color=TEXT_MUTED
+        ).pack(side=tk.LEFT, padx=(0, SPACING_XS))
+
+        self.rarity_seg = ctk.CTkSegmentedButton(
+            rarity_frame,
+            values=["All", "SSR", "SR", "R"],
+            command=lambda _: self.filter_cards(),
+            font=FONT_TINY, height=26
+        )
+        self.rarity_seg.set("All")
+        self.rarity_seg.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        owned_frame = ctk.CTkFrame(browser_panel, fg_color="transparent")
+        owned_frame.pack(fill=tk.X, padx=SPACING_LG, pady=(0, SPACING_SM))
+        ctk.CTkCheckBox(
+            owned_frame, text="Owned Only",
+            variable=self.owned_only_var, command=self.filter_cards,
+            font=FONT_TINY, checkbox_width=16, checkbox_height=16
+        ).pack(side=tk.LEFT)
+
+        add_btn = create_styled_button(
+            browser_panel, text="➕  Add to Deck",
+            command=self.add_selected_to_deck, style_type='accent'
+        )
+        add_btn.pack(side=tk.BOTTOM, fill=tk.X, pady=SPACING_LG, padx=SPACING_LG)
+
+        self.card_scroll = ctk.CTkScrollableFrame(browser_panel, fg_color="transparent")
+        self.card_scroll.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=SPACING_SM, pady=(0, SPACING_SM))
+        self.card_scroll.columnconfigure(0, weight=1)
+
+        # === Right Panel: Effects Summary Sidebar ===
+        right_panel = ctk.CTkFrame(self, fg_color="transparent")
+        right_panel.grid(row=0, column=1, sticky="nsew", padx=(SPACING_XS, SPACING_MD), pady=SPACING_MD)
+
+
 
         # Effects Breakdown
         effects_container = ctk.CTkFrame(
@@ -468,23 +474,23 @@ class DeckBuilderFrame(ctk.CTkFrame):
         stats_body = ctk.CTkFrame(effects_container, fg_color="transparent")
         stats_body.pack(fill=tk.BOTH, expand=True, padx=SPACING_LG, pady=(0, SPACING_LG))
 
-        # Effects table (left)
+        # Effects table (top)
         self.table_scroll = ctk.CTkScrollableFrame(
             stats_body, fg_color=BG_DARKEST, corner_radius=RADIUS_SM,
             border_width=1, border_color=BG_LIGHT
         )
-        self.table_scroll.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, SPACING_SM))
+        self.table_scroll.pack(side=tk.TOP, fill=tk.BOTH, expand=True, pady=(0, SPACING_SM))
         self.table_scroll.columnconfigure(0, weight=3)
         self.table_scroll.columnconfigure(1, weight=1)
 
-        # Unique effects (right)
+        # Unique effects (bottom)
         self.unique_text = ctk.CTkTextbox(
-            stats_body, width=260, fg_color=BG_DARKEST,
+            stats_body, fg_color=BG_DARKEST, height=120,
             border_width=1, border_color=BG_LIGHT,
             text_color=TEXT_PRIMARY, corner_radius=RADIUS_SM,
             font=FONT_SMALL
         )
-        self.unique_text.pack(side=tk.RIGHT, fill=tk.Y)
+        self.unique_text.pack(side=tk.BOTTOM, fill=tk.X)
         self.unique_text.configure(state=tk.DISABLED)
 
         self.after(200, self.filter_cards)

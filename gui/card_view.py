@@ -160,19 +160,30 @@ class CardListFrame(ctk.CTkFrame):
 
     def create_widgets(self):
         """Create the card list interface"""
-        # Use grid for responsive two-column layout
-        self.grid_rowconfigure(0, weight=1)
-        self.grid_columnconfigure(0, weight=1)  # left: card list
-        self.grid_columnconfigure(1, weight=2)  # right: details
+        # Top-level layout: row 0 = Header/Filters, row 1 = Main Body
+        self.grid_rowconfigure(0, weight=0)
+        self.grid_rowconfigure(1, weight=1)
+        self.grid_columnconfigure(0, weight=1)
 
-        # Left panel - Card list with filters (no fixed width)
-        self.left_frame = ctk.CTkFrame(self, fg_color=BG_DARK, corner_radius=RADIUS_LG,
-                                   border_width=1, border_color=BG_LIGHT)
-        self.left_frame.grid(row=0, column=0, sticky='nsew', padx=(0, SPACING_XS))
+        # === Header Area (Filters + Search) ===
+        self.header_frame = ctk.CTkFrame(self, fg_color=BG_DARK, corner_radius=RADIUS_LG,
+                                         border_width=1, border_color=BG_LIGHT)
+        self.header_frame.grid(row=0, column=0, sticky='ew', padx=SPACING_MD, pady=(SPACING_MD, SPACING_XS))
+
+        # === Main Body (Left: Card Grid, Right: Details) ===
+        self.body_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.body_frame.grid(row=1, column=0, sticky='nsew', padx=SPACING_MD, pady=(0, SPACING_MD))
+        self.body_frame.grid_rowconfigure(0, weight=1)
+        self.body_frame.grid_columnconfigure(0, weight=3)  # left: card list
+        self.body_frame.grid_columnconfigure(1, weight=2)  # right: details
+
+        # Left panel - Card list
+        self.left_frame = ctk.CTkFrame(self.body_frame, fg_color="transparent")
+        self.left_frame.grid(row=0, column=0, sticky='nsew', padx=(0, SPACING_MD))
 
         # Right panel - Card details (collapsible)
         self.details_visible = True
-        self.details_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
+        self.details_frame = ctk.CTkFrame(self.body_frame, corner_radius=0, fg_color="transparent")
         self.details_frame.grid(row=0, column=1, sticky='nsew')
 
         # === Recently Viewed Strip ===
@@ -186,9 +197,9 @@ class CardListFrame(ctk.CTkFrame):
         self.owned_only_var = tk.BooleanVar(value=False)
         self.search_var = tk.StringVar(value="")
 
-        # === Search Bar ===
-        search_frame = ctk.CTkFrame(self.left_frame, fg_color="transparent")
-        search_frame.pack(fill=tk.X, padx=SPACING_MD, pady=(SPACING_SM, SPACING_SM))
+        # === Search Bar Container ===
+        search_frame = ctk.CTkFrame(self.header_frame, fg_color="transparent")
+        search_frame.pack(fill=tk.X, padx=SPACING_MD, pady=(SPACING_SM, SPACING_XS))
 
         self.search_entry = ctk.CTkEntry(
             search_frame,
@@ -216,7 +227,7 @@ class CardListFrame(ctk.CTkFrame):
         self.search_entry.bind('<Return>', lambda e: self._handle_enter())
 
         # === Filter Chips Row ===
-        filter_frame = ctk.CTkFrame(self.left_frame, fg_color="transparent")
+        filter_frame = ctk.CTkFrame(self.header_frame, fg_color="transparent")
         filter_frame.pack(fill=tk.X, padx=SPACING_MD, pady=(0, SPACING_SM))
 
         # Rarity pills
@@ -258,7 +269,7 @@ class CardListFrame(ctk.CTkFrame):
         ).pack(side=tk.RIGHT)
 
         # === Advanced Filter Row (Effect + Tag) ===
-        adv_filter_frame = ctk.CTkFrame(self.left_frame, fg_color="transparent")
+        adv_filter_frame = ctk.CTkFrame(self.header_frame, fg_color="transparent")
         adv_filter_frame.pack(fill=tk.X, padx=SPACING_MD, pady=(0, SPACING_SM))
 
         # Effect filter
@@ -289,7 +300,7 @@ class CardListFrame(ctk.CTkFrame):
         self._refresh_filter_dropdowns()
 
         # Owned checkbox + count label + bulk mode toggle
-        meta_frame = ctk.CTkFrame(self.left_frame, fg_color="transparent")
+        meta_frame = ctk.CTkFrame(self.header_frame, fg_color="transparent")
         meta_frame.pack(fill=tk.X, padx=SPACING_MD, pady=(0, SPACING_SM))
 
         ctk.CTkCheckBox(
@@ -317,7 +328,7 @@ class CardListFrame(ctk.CTkFrame):
         self.count_label.pack(side=tk.RIGHT)
 
         # === Bulk Action Bar (hidden by default) ===
-        self.bulk_action_frame = ctk.CTkFrame(self.left_frame, fg_color=BG_MEDIUM, corner_radius=RADIUS_SM)
+        self.bulk_action_frame = ctk.CTkFrame(self.left_frame, fg_color=BG_DARK, corner_radius=RADIUS_SM)
         # Not packed initially — shown only in bulk mode
 
         self.bulk_count_label = ctk.CTkLabel(
@@ -387,10 +398,11 @@ class CardListFrame(ctk.CTkFrame):
         self.btn_next.pack(side=tk.RIGHT)
 
         # === Card Grid (scrollable) ===
-        self.scroll_container = ctk.CTkScrollableFrame(self.left_frame, fg_color="transparent")
-        self.scroll_container.pack(fill=tk.BOTH, expand=True, padx=SPACING_SM, pady=(0, SPACING_SM))
+        self.scroll_container = ctk.CTkScrollableFrame(self.left_frame, fg_color=BG_DARK, corner_radius=RADIUS_LG)
+        self.scroll_container.pack(fill=tk.BOTH, expand=True, pady=(0, 0))
         self.scroll_container.columnconfigure(0, weight=1)
         self.scroll_container.columnconfigure(1, weight=1)
+        self.scroll_container.columnconfigure(2, weight=1)
 
         self.card_widgets = []
 
@@ -759,27 +771,13 @@ class CardListFrame(ctk.CTkFrame):
             border_color = ACCENT_SUCCESS if is_owned else BG_LIGHT
             bg_color = BG_ELEVATED if is_owned else BG_DARK
 
-            # Outer wrapper for green left accent bar on owned cards
-            card_wrapper = ctk.CTkFrame(
-                self.scroll_container, fg_color="transparent",
-                corner_radius=RADIUS_MD
-            )
-            card_wrapper.grid(row=row, column=col, sticky="nsew", padx=4, pady=4)
-            self.card_widgets.append(card_wrapper)
-
-            if is_owned:
-                accent_bar = ctk.CTkFrame(
-                    card_wrapper, fg_color=ACCENT_SUCCESS,
-                    width=4, corner_radius=RADIUS_SM
-                )
-                accent_bar.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 0))
-
             card_frame = ctk.CTkFrame(
-                card_wrapper, fg_color=bg_color,
-                corner_radius=RADIUS_MD, border_width=1,
+                self.scroll_container, fg_color=bg_color,
+                corner_radius=RADIUS_MD, border_width=2 if is_owned else 1,
                 border_color=border_color
             )
-            card_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            card_frame.grid(row=row, column=col, sticky="nsew", padx=4, pady=4)
+            self.card_widgets.append(card_frame)
 
             def make_clickable(widget, cid=card_id):
                 widget.bind("<Button-1>", lambda e, id=cid: self.on_select(id))
@@ -856,7 +854,7 @@ class CardListFrame(ctk.CTkFrame):
                 make_clickable(card_frame)
 
             col += 1
-            if col > 1:
+            if col > 2:  # Support 3 columns instead of 2
                 col = 0
                 row += 1
 
@@ -1157,9 +1155,9 @@ class CardListFrame(ctk.CTkFrame):
         self.details_visible = not self.details_visible
         if self.details_visible:
             self.details_frame.grid(row=0, column=1, sticky='nsew')
-            self.grid_columnconfigure(1, weight=2)
+            self.body_frame.grid_columnconfigure(1, weight=2)
             self.detail_toggle_btn.configure(text="◀")
         else:
             self.details_frame.grid_remove()
-            self.grid_columnconfigure(1, weight=0)
+            self.body_frame.grid_columnconfigure(1, weight=0)
             self.detail_toggle_btn.configure(text="▶")
