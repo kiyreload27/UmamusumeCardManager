@@ -2,6 +2,22 @@
 
 All notable changes to the Umamusume Support Card Manager will be documented in this file.
 
+## [24.1.0] - 2026-03-18
+
+### 🏇 Race Calendar — Distance Filter
+- **Distance type chips**: Four toggle chips (`Short` / `Mile` / `Med` / `Long`) are now displayed in the top-right of the race calendar header. Click a chip to exclude that distance category from eligible race suggestions; click again to re-enable it. Active chips are highlighted in indigo; inactive chips turn grey.
+- **Minimum grade threshold**: A new `Min Grade` dropdown (`S / A / B / C / D`, default `C`) lets you raise or lower the aptitude bar for both terrain and distance. For example, setting it to `A` limits suggestions to races where your character holds at least an A rating in both the surface and distance type.
+- Both filters apply instantly (150 ms debounce) and affect the `+` button suggestions, the `⛔ Apt` warning indicator on empty slots, and the `🔄` cycle button on filled slots.
+
+---
+
+## [24.0.1] - 2026-03-17
+
+### 🐛 Bug Fixes
+- **Race Calendar**: Fixed a critical issue where the executable (frozen) build would silently fail to synchronize track and race data from the seed database, resulting in an unresponsive `+` button and empty race selection calendar.
+
+---
+
 ## [24.0.0] - 2026-03-16
 
 ### 🎨 Complete UI Redesign & Modernization

@@ -197,6 +197,18 @@ class RaceCalendarViewFrame(ctk.CTkFrame):
         self.slot_frames = {}
         self._apt_combos = {}  # apt_name -> CTkComboBox
 
+        # ── Distance filter state ──
+        # Which distance types the user wants to see (all on by default)
+        self._dist_filter_vars = {
+            'Sprint': tk.BooleanVar(value=True),
+            'Mile':   tk.BooleanVar(value=True),
+            'Medium': tk.BooleanVar(value=True),
+            'Long':   tk.BooleanVar(value=True),
+        }
+        # Minimum aptitude grade required (default 'C' = same as before)
+        self._min_grade_var = tk.StringVar(value='C')
+        self._dist_chip_btns = {}  # distance -> CTkButton (for toggle visuals)
+
         self.create_widgets()
         self.load_data()
 
@@ -303,6 +315,59 @@ class RaceCalendarViewFrame(ctk.CTkFrame):
             command=self._clear_schedule,
             style_type="ghost", height=32, width=130
         ).pack(side=tk.RIGHT)
+
+        # ── Distance / Grade filter panel (top-right of header) ──
+        filter_panel = ctk.CTkFrame(header, fg_color=BG_MEDIUM, corner_radius=RADIUS_MD)
+        filter_panel.pack(side=tk.RIGHT, padx=(0, SPACING_SM))
+
+        # Min-grade label + dropdown
+        grade_row = ctk.CTkFrame(filter_panel, fg_color="transparent")
+        grade_row.pack(side=tk.LEFT, padx=(SPACING_SM, SPACING_XS), pady=SPACING_XS)
+
+        ctk.CTkLabel(
+            grade_row, text="Min Grade",
+            font=FONT_TINY, text_color=TEXT_MUTED
+        ).pack(side=tk.LEFT, padx=(0, SPACING_XS))
+
+        grade_combo = ctk.CTkComboBox(
+            grade_row,
+            values=['S', 'A', 'B', 'C', 'D'],
+            variable=self._min_grade_var,
+            width=58, height=26,
+            font=FONT_TINY,
+            command=self._on_filter_change
+        )
+        grade_combo.pack(side=tk.LEFT)
+
+        # Separator
+        ctk.CTkFrame(
+            filter_panel, fg_color=BG_LIGHT, width=1, height=28
+        ).pack(side=tk.LEFT, padx=SPACING_XS, pady=SPACING_XS)
+
+        # Distance chip toggles
+        chip_area = ctk.CTkFrame(filter_panel, fg_color="transparent")
+        chip_area.pack(side=tk.LEFT, padx=(SPACING_XS, SPACING_SM), pady=SPACING_XS)
+
+        ctk.CTkLabel(
+            chip_area, text="Dist",
+            font=FONT_TINY, text_color=TEXT_MUTED
+        ).pack(side=tk.LEFT, padx=(0, SPACING_XS))
+
+        _dist_labels = {'Sprint': 'Short', 'Mile': 'Mile', 'Medium': 'Med', 'Long': 'Long'}
+        for dist_key, dist_label in _dist_labels.items():
+            btn = ctk.CTkButton(
+                chip_area,
+                text=dist_label,
+                width=40, height=24,
+                font=FONT_TINY,
+                corner_radius=RADIUS_FULL,
+                fg_color=ACCENT_PRIMARY,
+                hover_color=ACCENT_SECONDARY,
+                text_color=TEXT_PRIMARY,
+                command=lambda dk=dist_key: self._toggle_dist_filter(dk)
+            )
+            btn.pack(side=tk.LEFT, padx=2)
+            self._dist_chip_btns[dist_key] = btn
 
         # Year tabs
         self.calendar_tabs = ctk.CTkTabview(
@@ -456,6 +521,32 @@ class RaceCalendarViewFrame(ctk.CTkFrame):
         self._load_schedule_from_db()
         self._refresh_calendar()
 
+    # ── Filter helpers ────────────────────────────────────────────
+    _GRADE_ORDER = ['S', 'A', 'B', 'C', 'D', 'E', 'F', 'G']
+
+    def _grade_passes(self, grade: str, min_grade: str) -> bool:
+        """Return True if *grade* is at least as good as *min_grade*."""
+        try:
+            return self._GRADE_ORDER.index(grade) <= self._GRADE_ORDER.index(min_grade)
+        except ValueError:
+            return False
+
+    def _toggle_dist_filter(self, dist_key: str):
+        var = self._dist_filter_vars[dist_key]
+        var.set(not var.get())
+        # Update chip appearance
+        btn = self._dist_chip_btns.get(dist_key)
+        if btn:
+            if var.get():
+                btn.configure(fg_color=ACCENT_PRIMARY, text_color=TEXT_PRIMARY)
+            else:
+                btn.configure(fg_color=BG_LIGHT, text_color=TEXT_DISABLED)
+        self._on_filter_change()
+
+    def _on_filter_change(self, _=None):
+        """Called whenever a distance chip or min-grade dropdown changes."""
+        self._on_stat_change()
+
     def _is_eligible(self, race_data):
         if not race_data:
             return False
@@ -465,17 +556,24 @@ class RaceCalendarViewFrame(ctk.CTkFrame):
         if dist_type == "Short":
             dist_type = "Sprint"
 
+        # ── Distance chip filter: skip if this distance is toggled off ──
+        if dist_type and not self._dist_filter_vars.get(dist_type, tk.BooleanVar(value=True)).get():
+            return False
+
+        # ── Min-grade threshold ──
+        min_grade = self._min_grade_var.get()
+
         surf_grade = self.aptitudes.get(terrain, tk.StringVar(value='E')).get()
-        if surf_grade not in ['S', 'A', 'B', 'C']:
+        if not self._grade_passes(surf_grade, min_grade):
             return False
 
         dist_grade = self.aptitudes.get(dist_type, tk.StringVar(value='E')).get()
-        if dist_grade not in ['S', 'A', 'B', 'C']:
+        if not self._grade_passes(dist_grade, min_grade):
             return False
 
         return True
 
-    def _get_eligible_races_for_date(self, year, date_str):
+    def _get_eligible_races_for_date(self, year, date_str, check_aptitude=True):
         if not self.current_character:
             return []
 
@@ -508,7 +606,7 @@ class RaceCalendarViewFrame(ctk.CTkFrame):
                 else:
                     continue
 
-                if self._is_eligible(r):
+                if not check_aptitude or self._is_eligible(r):
                     eligible.append(r)
 
         return eligible
@@ -746,10 +844,13 @@ class RaceCalendarViewFrame(ctk.CTkFrame):
 
         else:
             # Empty slot — show reason if available
-            eligible_count = len(self._get_eligible_races_for_date(year, date_str))
-            all_for_date = [r for r in self.races if r[12] == date_str] if self.races else []
+            eligible_count = len(self._get_eligible_races_for_date(year, date_str, check_aptitude=True))
+            all_for_date_and_class = len(self._get_eligible_races_for_date(year, date_str, check_aptitude=False))
 
-            if all_for_date and eligible_count == 0 and self.current_character:
+            has_races = all_for_date_and_class > 0
+            has_eligible = eligible_count > 0
+
+            if has_races and not has_eligible and self.current_character:
                 reason_label = ctk.CTkLabel(
                     content, text="⛔ Apt",
                     font=FONT_TINY, text_color=ACCENT_ERROR, height=24
@@ -760,9 +861,9 @@ class RaceCalendarViewFrame(ctk.CTkFrame):
                 content, text="＋",
                 font=FONT_SMALL, width=36, height=28,
                 fg_color="transparent", hover_color=BG_HIGHLIGHT,
-                text_color=TEXT_DISABLED if eligible_count == 0 else TEXT_MUTED,
+                text_color=TEXT_DISABLED if not has_eligible else TEXT_MUTED,
                 corner_radius=RADIUS_SM,
-                state="disabled" if eligible_count == 0 and all_for_date else "normal",
+                state="disabled" if not has_eligible else "normal",
                 command=lambda y=year, d=date_str: self._suggest_race_for_slot(y, d)
             )
             add_btn.pack(pady=SPACING_XS)

@@ -136,7 +136,14 @@ def run_migrations():
     except sqlite3.OperationalError:
         pass
     
-    # 6. Create tracks table (needed for old DBs upgrading to newer versions)
+    # 6. Add image_path to races
+    try:
+        cur.execute("ALTER TABLE races ADD COLUMN image_path TEXT")
+        print("Added image_path column to races")
+    except sqlite3.OperationalError:
+        pass # Column already exists
+        
+    # 7. Create tracks table (needed for old DBs upgrading to newer versions)
     try:
         cur.execute("""
             CREATE TABLE IF NOT EXISTS tracks (
@@ -235,6 +242,7 @@ def run_migrations():
                 race_date TEXT,
                 race_class TEXT,
                 gametora_url TEXT UNIQUE,
+                image_path TEXT,
                 is_active INTEGER DEFAULT 1
             )
         """)
@@ -540,10 +548,10 @@ def sync_from_seed(seed_path):
                 cur.execute("""
                     INSERT INTO main.races (race_id, name_en, name_jp, grade, racetrack, direction,
                                             participants, terrain, distance_type, distance_meters,
-                                            season, time_of_day, race_date, race_class, gametora_url, is_active)
+                                            season, time_of_day, race_date, race_class, gametora_url, image_path, is_active)
                     SELECT race_id, name_en, name_jp, grade, racetrack, direction,
                            participants, terrain, distance_type, distance_meters,
-                           season, time_of_day, race_date, race_class, gametora_url, is_active
+                           season, time_of_day, race_date, race_class, gametora_url, image_path, is_active
                     FROM seed.races
                 """)
         except sqlite3.OperationalError:
@@ -1040,7 +1048,7 @@ def get_card_events(card_id):
             details = skill_map[event_name] # e.g. "(Skill1, Skill2)" or "( (OR) Skill1 (OR) Skill2 )"
             ev_dict['choices'].append({
                 'label': 'Skill Outcome',
-                'effects': details.strip("()")
+                'effects': str(details).strip("()")
             })
                 
         formatted.append(ev_dict)
