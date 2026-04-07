@@ -27,22 +27,22 @@ A powerful, standalone desktop application for managing support cards, tracking 
 <summary><b>Click to Expand Screenshots</b></summary>
 
 ### Card Library
-<img src="docs/screenshots/card tab.png" width="800">
+<img src="docs/screenshots/card_tab.png" width="800">
 
 ### Deck Builder
-<img src="docs/screenshots/Deck Builder tab.png" width="800">
+<img src="docs/screenshots/Deck_Builder_tab.png" width="800">
 
 ### Effects Search
-<img src="docs/screenshots/Effects tab.png" width="800">
+<img src="docs/screenshots/Effects_tab.png" width="800">
 
 ### Skill Database
-<img src="docs/screenshots/Skills Tab.png" width="800">
+<img src="docs/screenshots/Skills_Tab.png" width="800">
 
 ### Race Calendar
-<img src="docs/screenshots/Race Calendar.png" width="800">
+<img src="docs/screenshots/Race_Calendar.png" width="800">
 
 ### Track Browser
-<img src="docs/screenshots/Track Tab.png" width="800">
+<img src="docs/screenshots/Track_Tab.png" width="800">
 
 </details>
 
