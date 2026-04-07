@@ -2,6 +2,15 @@
 
 All notable changes to the Umamusume Support Card Manager will be documented in this file.
 
+## [26.0.0] - 2026-04-07
+
+### ✨ Major Features
+- **Main Menu Launcher:** The application now boots into a stunning, dedicated Launcher Window!
+  - **Launch App:** Boots into the main Umamusume Application codebase seamlessly.
+  - **Database Scrapers:** Immediately accesses the Data Update portal where you can fetch cards, tracks, characters, and races without loading the entire application UI stringently.
+  - **Diagnostics & Logs:** Instantly pops out the Diagnostics panel (`Ctrl+Shift+D`) right from the splash screen to allow quick viewing of error logs in case the application fails to boot.
+
+---
 ## [25.0.0] - 2026-04-07
 
 ### ✨ Major Features
