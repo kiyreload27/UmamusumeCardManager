@@ -28,6 +28,8 @@ dist/
 # Ignore the running database, but keep the seed/template
 database/*.db
 !database/umamusume_seed.db
+*.sqlite
+local_db.sqlite
 
 # Logs — keep the logs/ directory but ignore actual log files
 logs/*.log
