@@ -4,7 +4,7 @@ This file is the single source of truth for the application version.
 """
 
 # Semantic versioning: MAJOR.MINOR.PATCH
-VERSION: str = "25.0.0"
+VERSION: str = "26.0.0"
 
 # Build date — replaced by build.py before PyInstaller runs.
 # Shows "dev" when running from source without a build step.

@@ -211,9 +211,14 @@ def _db_sanity_check() -> bool:
 
 def run_gui():
     try:
-        from gui.main_window import MainWindow
-        app = MainWindow()
-        app.run()
+        from gui.launcher_window import LauncherWindow
+        launcher = LauncherWindow()
+        launcher.run()
+        
+        if getattr(launcher, 'next_action', 'exit') == 'app':
+            from gui.main_window import MainWindow
+            app = MainWindow()
+            app.run()
     except Exception as e:
         import traceback
         error_msg = f"An error occurred while launching the GUI:\n\n{e}\n\n{traceback.format_exc()}"
