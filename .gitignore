@@ -5,7 +5,6 @@ __pycache__/
 *.swp
 *.swo
 *.tmp
-*.log
 .DS_Store
 Thumbs.db
 
@@ -29,6 +28,10 @@ dist/
 # Ignore the running database, but keep the seed/template
 database/*.db
 !database/umamusume_seed.db
+
+# Logs — keep the logs/ directory but ignore actual log files
+logs/*.log
+*.log
 
 # VS Code
 .vscode/

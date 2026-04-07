@@ -7,6 +7,7 @@ import tkinter as tk
 import customtkinter as ctk
 import sys
 import os
+import threading
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -22,6 +23,10 @@ from gui.update_dialog import show_update_dialog
 from gui.backup_dialog import show_backup_dialog
 from gui.training_timeline import TrainingTimelineFrame
 from gui.upgrade_planner import UpgradePlannerFrame
+from gui.first_run_dialog import show_first_run_dialog, should_show_first_run
+from gui.debug_panel import show_debug_panel
+from gui.data_update_dialog import show_data_update_dialog
+from updater.update_checker import check_for_updates
 from gui.theme import (
     configure_styles, create_styled_button,
     BG_DARKEST, BG_DARK, BG_MEDIUM, BG_LIGHT, BG_HIGHLIGHT, BG_ELEVATED,
@@ -103,6 +108,12 @@ class MainWindow:
         self._navigate('Dashboard')
         self.refresh_stats()
 
+        # Check first-run after the window is fully rendered
+        self.root.after(600, self._check_first_run)
+        
+        # Check for app updates silently in background
+        self.root.after(2000, self._run_background_update_check)
+
     # ─────────────────────────────────────────────────────────────────
     # Sidebar
     # ─────────────────────────────────────────────────────────────────
@@ -172,7 +183,7 @@ class MainWindow:
 
         self._build_nav_items()
 
-        # ── Bottom: backup + updates ──
+        # ── Bottom: backup + updates + diagnostics ──
         bottom = ctk.CTkFrame(self.sidebar, fg_color=BG_DARKEST, corner_radius=0)
         bottom.grid(row=3, column=0, sticky='ew')
 
@@ -185,6 +196,15 @@ class MainWindow:
         )
         self._backup_btn.pack(fill=tk.X, padx=SPACING_XS)
 
+        self._scrape_btn = ctk.CTkButton(
+            bottom, text='📥  Update Data',
+            command=self.show_data_update_dialog,
+            fg_color='transparent', hover_color=BG_LIGHT,
+            text_color=TEXT_MUTED, font=FONT_SMALL,
+            anchor='w', height=36, corner_radius=0,
+        )
+        self._scrape_btn.pack(fill=tk.X, padx=SPACING_XS)
+
         self._update_btn = ctk.CTkButton(
             bottom, text='🔄  Check for Updates',
             command=self.show_update_dialog,
@@ -193,6 +213,15 @@ class MainWindow:
             anchor='w', height=36, corner_radius=0,
         )
         self._update_btn.pack(fill=tk.X, padx=SPACING_XS)
+
+        self._diag_btn = ctk.CTkButton(
+            bottom, text='🛠  Diagnostics',
+            command=self.show_debug_panel,
+            fg_color='transparent', hover_color=BG_LIGHT,
+            text_color=TEXT_DISABLED, font=FONT_TINY,
+            anchor='w', height=28, corner_radius=0,
+        )
+        self._diag_btn.pack(fill=tk.X, padx=SPACING_XS)
 
     def _build_nav_items(self):
         """Populate the scrollable nav with group headers and buttons."""
@@ -246,14 +275,18 @@ class MainWindow:
             self._version_badge.pack(side=tk.LEFT, padx=(SPACING_XS, 0))
             self._stats_label.configure(wraplength=200)
             self._backup_btn.configure(text='💾  Backup / Restore', anchor='w')
+            self._scrape_btn.configure(text='📥  Update Data', anchor='w')
             self._update_btn.configure(text='🔄  Check for Updates', anchor='w')
+            self._diag_btn.configure(text='🛠  Diagnostics', anchor='w')
         else:
             self._toggle_btn.configure(text='▶')
             self._brand_title.pack_forget()
             self._version_badge.pack_forget()
             self._stats_label.configure(wraplength=50)
             self._backup_btn.configure(text='💾', anchor='center')
+            self._scrape_btn.configure(text='📥', anchor='center')
             self._update_btn.configure(text='🔄', anchor='center')
+            self._diag_btn.configure(text='🛠', anchor='center')
 
         self._build_nav_items()
 
@@ -431,6 +464,68 @@ class MainWindow:
                     f'<Control-Key-{n}>',
                     lambda e, vid=view_id: self._navigate(vid)
                 )
+        # Ctrl+Shift+D → Diagnostics panel
+        self.root.bind('<Control-Shift-D>', lambda e: self.show_debug_panel())
+        self.root.bind('<Control-Shift-d>', lambda e: self.show_debug_panel())
+
+    # ─────────────────────────────────────────────────────────────────
+    # Debug / diagnostics
+    # ─────────────────────────────────────────────────────────────────
+
+    def show_debug_panel(self):
+        show_debug_panel(self.root)
+
+    def show_data_update_dialog(self):
+        def on_complete():
+            self.refresh_stats()
+            if 'Dashboard' in self.views:
+                self.views['Dashboard'].refresh()
+            if 'Cards' in self.views:
+                self.views['Cards'].filter_cards()
+        show_data_update_dialog(self.root, on_complete_callback=on_complete)
+
+    # ─────────────────────────────────────────────────────────────────
+    # Background Update Check
+    # ─────────────────────────────────────────────────────────────────
+
+    def _run_background_update_check(self):
+        def _check():
+            try:
+                update_info = check_for_updates()
+                if update_info and update_info.get("has_update"):
+                    # Safely update GUI from thread
+                    self.root.after(0, lambda: self._flag_update_available(update_info["version"]))
+            except Exception:
+                pass
+        threading.Thread(target=_check, daemon=True).start()
+
+    def _flag_update_available(self, new_version):
+        if hasattr(self, '_update_btn'):
+            # Highlight the button and add a badge
+            text = f"🔄 Update Available! ({new_version})" if self._sidebar_expanded else "🔄(!)"
+            self._update_btn.configure(
+                text=text,
+                text_color=ACCENT_PRIMARY,
+                font=FONT_BODY_BOLD
+            )
+
+    # ─────────────────────────────────────────────────────────────────
+    # First-run
+    # ─────────────────────────────────────────────────────────────────
+
+    def _check_first_run(self):
+        """Show the first-run welcome dialog if the DB has no card data."""
+        if should_show_first_run():
+            show_first_run_dialog(
+                self.root,
+                on_complete_callback=self._on_first_run_complete
+            )
+
+    def _on_first_run_complete(self):
+        """Called when the first-run dialog is closed (scrape done or skipped)."""
+        self.refresh_stats()
+        if 'Dashboard' in self.views:
+            self.views['Dashboard'].refresh()
 
     def run(self):
         self.root.mainloop()

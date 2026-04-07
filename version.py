@@ -6,6 +6,10 @@ This file is the single source of truth for the application version.
 # Semantic versioning: MAJOR.MINOR.PATCH
 VERSION: str = "24.1.0"
 
+# Build date — replaced by build.py before PyInstaller runs.
+# Shows "dev" when running from source without a build step.
+BUILD_DATE: str = "dev"
+
 # Application metadata
 APP_NAME: str = "UmamusumeCardManager"
 GITHUB_REPO: str = "kiyreload27/UmamusumeCardManager"

@@ -758,6 +758,54 @@ class CardListFrame(ctk.CTkFrame):
         self.btn_prev.configure(state="normal" if self.current_page > 0 else "disabled")
         self.btn_next.configure(state="normal" if self.current_page < max_page - 1 else "disabled")
 
+        # ── Empty state ──
+        if not self.filtered_cards:
+            empty = ctk.CTkFrame(
+                self.scroll_container, fg_color="transparent"
+            )
+            empty.grid(row=0, column=0, columnspan=3, sticky="nsew", padx=SPACING_XL, pady=SPACING_2XL if hasattr(self, '_has_spacing_2xl') else 48)
+            self.card_widgets.append(empty)
+
+            has_search_active = (
+                self.search_var.get().strip()
+                or self.rarity_var.get() != "All"
+                or self.type_var.get() != "All"
+                or self.effect_var.get() != "All Effects"
+                or self.tag_var.get() != "All Tags"
+                or self.owned_only_var.get()
+            )
+
+            if has_search_active:
+                icon = "🔍"
+                msg = "No cards match your filters"
+                sub = "Try clearing the search or removing a filter"
+                btn_text = "Clear Filters"
+                btn_cmd = self.reset_filters
+            else:
+                icon = "📭"
+                msg = "No card data yet"
+                sub = "Run the scraper to fetch card data from GameTora"
+                btn_text = None
+                btn_cmd = None
+
+            ctk.CTkLabel(
+                empty, text=icon, font=("Segoe UI", 40), text_color=TEXT_DISABLED
+            ).pack(pady=(0, SPACING_SM))
+            ctk.CTkLabel(
+                empty, text=msg, font=FONT_SUBHEADER, text_color=TEXT_MUTED
+            ).pack()
+            ctk.CTkLabel(
+                empty, text=sub, font=FONT_SMALL, text_color=TEXT_DISABLED
+            ).pack(pady=(SPACING_XS, 0))
+            if btn_text:
+                ctk.CTkButton(
+                    empty, text=btn_text, command=btn_cmd,
+                    fg_color=BG_LIGHT, hover_color=BG_HIGHLIGHT,
+                    text_color=TEXT_MUTED, font=FONT_SMALL,
+                    height=32, width=120, corner_radius=RADIUS_MD
+                ).pack(pady=(SPACING_MD, 0))
+            return
+
         row, col = 0, 0
         for card in page_cards:
             card_id, name, rarity, card_type, max_level, image_path, is_owned, owned_level = card

@@ -1,11 +1,28 @@
 # -*- mode: python ; coding: utf-8 -*-
+import os
+import importlib
 
+try:
+    playwright_path = os.path.dirname(importlib.import_module("playwright").__file__)
+except ImportError:
+    playwright_path = None
+
+datas_list = [
+    ('images', 'images'), 
+    ('assets', 'assets'), 
+    ('database/umamusume_seed.db', 'database'), 
+    ('version.py', '.'), 
+    ('updater', 'updater')
+]
+
+if playwright_path:
+    datas_list.append((playwright_path, 'playwright'))
 
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('images', 'images'), ('assets', 'assets'), ('database/umamusume_seed.db', 'database'), ('version.py', '.'), ('updater', 'updater')],
+    datas=datas_list,
     hiddenimports=['requests', 'PIL', 'PIL._tkinter_finder'],
     hookspath=[],
     hooksconfig={},

@@ -14,6 +14,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from db.db_queries import export_user_data, import_user_data
+from version import VERSION
 from gui.theme import (
     BG_DARKEST, BG_DARK, BG_MEDIUM, BG_LIGHT, BG_HIGHLIGHT, BG_ELEVATED,
     ACCENT_PRIMARY, ACCENT_SECONDARY, ACCENT_SUCCESS, ACCENT_ERROR, ACCENT_WARNING, ACCENT_INFO,
@@ -143,7 +144,7 @@ class BackupDialog(ctk.CTkToplevel):
             data['_meta'] = {
                 'app': 'UmamusumeCardManager',
                 'exported_at': datetime.now().isoformat(),
-                'version': '17.0.0'
+                'version': VERSION
             }
 
             with open(filepath, 'w', encoding='utf-8') as f:

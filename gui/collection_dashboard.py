@@ -85,9 +85,57 @@ class CollectionDashboard(ctk.CTkFrame):
         except Exception:
             stats = self._fallback_stats()
 
+        total = stats.get('total', 0)
+
+        # ── Empty state — no data scraped yet ──
+        if total == 0:
+            self._render_empty_state()
+            return
+
         self._render_top_stats(stats)
         self._render_rarity_bars(stats)
         self._render_type_bars(stats)
+
+    def _render_empty_state(self):
+        """Show a friendly empty state when the database has no card data."""
+        # Clear existing top stats and sections
+        for w in self.top_stats_frame.winfo_children():
+            w.destroy()
+        for w in self.rarity_section.winfo_children():
+            w.destroy()
+        for w in self.type_section.winfo_children():
+            w.destroy()
+
+        # Central empty state message in top_stats_frame
+        ctk.CTkLabel(
+            self.top_stats_frame,
+            text="📭",
+            font=("Segoe UI", 52),
+            text_color=TEXT_DISABLED
+        ).pack(pady=(SPACING_XL, SPACING_SM))
+
+        ctk.CTkLabel(
+            self.top_stats_frame,
+            text="No card data yet",
+            font=FONT_TITLE, text_color=TEXT_MUTED
+        ).pack()
+
+        ctk.CTkLabel(
+            self.top_stats_frame,
+            text="Your database is empty. You need to run the scraper\n"
+                 "to fetch card data from GameTora before you can use the app.",
+            font=FONT_BODY, text_color=TEXT_DISABLED,
+            justify="center", wraplength=500
+        ).pack(pady=(SPACING_SM, SPACING_LG))
+
+        if self.navigate_to_cards:
+            create_styled_button(
+                self.top_stats_frame,
+                text="📋 Go to Card Library",
+                command=self.navigate_to_cards,
+                style_type='accent', height=40, width=200
+            ).pack()
+
 
     def _fallback_stats(self):
         """Build stats from basic queries when get_collection_stats isn't available"""
