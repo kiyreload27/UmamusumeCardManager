@@ -2,6 +2,24 @@
 
 All notable changes to the Umamusume Support Card Manager will be documented in this file.
 
+## [25.0.0] - 2026-04-07
+
+### ✨ Major Features
+- **Native EXE Scraper Support:** You can now run the web scraper directly from the `.exe`! The app detects if you need a Chromium browser and offers a seamless "Install Browser" button to download it automatically without touching an external terminal.
+- **Background Update Checker:** The application now silently checks for GitHub updates 2 seconds after launching and highlights the "Check for Updates" button if a new version is released.
+- **Bug Reporting Integration:** The `Ctrl+Shift+D` Diagnostics panel now has a "Report a Bug" button that directs you perfectly to the GitHub issue tracker to paste your debug info.
+
+### 💄 Modern UI Refactor
+- Switched to a collapsible **Sidebar Navigation** system, grouping tasks logically into *Collection*, *Planning*, and *Reference*.
+- Implemented a unified Glassmorphism aesthetic via a comprehensive design token system (`gui/theme.py`).
+- Added graceful "Empty State" UI screens for when no cards or data are loaded.
+
+### 🛠️ Developer & Stability Improvements
+- **Automated `.exe` Assembly:** Running `python build.py` now bundles Playwright dynamically, injects a security hash, and outputs a clean standalone app.
+- **Crash Reliability:** Replaced abrupt app closures with a beautiful, graceful global Crash Dialog displaying a trace payload to send to devs.
+- **Repository Structure:** Migrated to standard architecture—scripts live under `scripts/`, documentation unifies into `docs/`.
+
+---
 ## [24.1.0] - 2026-03-18
 
 ### 🏇 Race Calendar — Distance Filter
