@@ -1,0 +1,2061 @@
+"""
+Database query functions for Umamusume support cards
+"""
+
+import sqlite3
+import os
+import sys
+
+import shutil
+
+if getattr(sys, 'frozen', False):
+    # In frozen state (exe), we need to ensure the database is in a writable location
+    # sys.executable points to the .exe file
+    base_dir = os.path.dirname(sys.executable)
+    db_dir = os.path.join(base_dir, "database")
+    DB_PATH = os.path.join(db_dir, "umamusume.db")
+    
+    # Function to check if DB needs seed data (only if totally empty of master data)
+    def is_db_empty(path):
+        try:
+            conn = sqlite3.connect(path)
+            cur = conn.cursor()
+            
+            # Check cards - this is our primary indicator of master data
+            cur.execute("SELECT COUNT(*) FROM support_cards")
+            card_count = cur.fetchone()[0]
+            
+            conn.close()
+            # ONLY overwrite if we have no card data at all. 
+            # If we have cards but no tracks, we are an "old" user and should NOT be overwritten.
+            return card_count == 0
+        except:
+            return True
+
+    # Check state: Missing OR Empty
+    should_copy_seed = False
+    if not os.path.exists(DB_PATH):
+        should_copy_seed = True
+    elif is_db_empty(DB_PATH):
+        # exists but empty - overwrite it
+        should_copy_seed = True
+        
+    if should_copy_seed:
+        try:
+            # Ensure directory exists
+            os.makedirs(db_dir, exist_ok=True)
+            
+            # Check for bundled seed database
+            bundled_seed_path = os.path.join(sys._MEIPASS, "database", "umamusume_seed.db")
+            
+            if os.path.exists(bundled_seed_path):
+                # Copy seed database to user location (overwrite if exists)
+                shutil.copy2(bundled_seed_path, DB_PATH)
+            # Else: will be initialized by get_conn -> init_database
+            
+        except Exception as e:
+            pass
+else:
+    DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "database", "umamusume.db")
+
+# Add VERSION import
+if not getattr(sys, 'frozen', False):
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    
+try:
+    from version import VERSION
+except ImportError:
+    VERSION = "2.1.0" # Fallback
+
+_updates_checked = False
+
+def get_conn():
+    """Get database connection"""
+    global _updates_checked
+    
+    # Initialize if missing
+    if not os.path.exists(DB_PATH):
+        init_database()
+    
+    # Check for updates and migrate if needed (only once per session)
+    if not _updates_checked:
+        _updates_checked = True
+        run_migrations()
+        check_for_updates()
+        
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    return conn
+
+def run_migrations():
+    """Ensure database schema is up to date by adding missing columns"""
+    print("Checking for database migrations...")
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    
+    # 1. Add is_gold to event_skills
+    try:
+        cur.execute("ALTER TABLE event_skills ADD COLUMN is_gold INTEGER DEFAULT 0")
+        print("Added is_gold column to event_skills")
+    except sqlite3.OperationalError:
+        pass # Column already exists
+        
+    # 2. Add is_or to event_skills
+    try:
+        cur.execute("ALTER TABLE event_skills ADD COLUMN is_or INTEGER DEFAULT 0")
+        print("Added is_or column to event_skills")
+    except sqlite3.OperationalError:
+        pass # Column already exists
+    
+    # 3. Add image_path to support_cards
+    try:
+        cur.execute("ALTER TABLE support_cards ADD COLUMN image_path TEXT")
+        print("Added image_path column to support_cards")
+    except sqlite3.OperationalError:
+        pass # Column already exists
+        
+    # 4. Add map_image_path to courses
+    try:
+        cur.execute("ALTER TABLE courses ADD COLUMN map_image_path TEXT")
+        print("Added map_image_path column to courses")
+    except sqlite3.OperationalError:
+        pass # Column already exists
+        
+    # 5. Create user_notes table for card notes and tags
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS user_notes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                card_id INTEGER NOT NULL UNIQUE,
+                note TEXT DEFAULT '',
+                tags TEXT DEFAULT '',
+                FOREIGN KEY (card_id) REFERENCES support_cards(card_id)
+            )
+        """)
+    except sqlite3.OperationalError:
+        pass
+    
+    # 6. Add image_path to races
+    try:
+        cur.execute("ALTER TABLE races ADD COLUMN image_path TEXT")
+        print("Added image_path column to races")
+    except sqlite3.OperationalError:
+        pass # Column already exists
+        
+    # 7. Create tracks table (needed for old DBs upgrading to newer versions)
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS tracks (
+                track_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                location TEXT,
+                image_path TEXT,
+                image_url TEXT,
+                gametora_url TEXT UNIQUE,
+                is_active INTEGER DEFAULT 1
+            )
+        """)
+    except sqlite3.OperationalError:
+        pass
+
+    # 7. Create courses table
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS courses (
+                course_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                track_id INTEGER,
+                distance INTEGER,
+                surface TEXT,
+                direction TEXT,
+                corner_count INTEGER,
+                final_straight_length TEXT,
+                slope_info TEXT,
+                weather_data TEXT,
+                phases_json TEXT,
+                corners_json TEXT,
+                straights_json TEXT,
+                other_json TEXT,
+                raw_metadata_json TEXT,
+                gametora_url TEXT UNIQUE,
+                map_image_path TEXT,
+                is_active INTEGER DEFAULT 1,
+                FOREIGN KEY (track_id) REFERENCES tracks(track_id)
+            )
+        """)
+    except sqlite3.OperationalError:
+        pass
+
+    # 8. Create scraper_meta table
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS scraper_meta (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scraper_type TEXT UNIQUE,
+                last_run_timestamp TEXT
+            )
+        """)
+    except sqlite3.OperationalError:
+        pass
+
+    # 9. Create characters table (critical for Race Calendar)
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS characters (
+                character_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                gametora_id TEXT UNIQUE,
+                gametora_url TEXT,
+                image_path TEXT,
+                turf_aptitude TEXT,
+                dirt_aptitude TEXT,
+                short_aptitude TEXT,
+                mile_aptitude TEXT,
+                medium_aptitude TEXT,
+                long_aptitude TEXT,
+                runner_aptitude TEXT,
+                leader_aptitude TEXT,
+                betweener_aptitude TEXT,
+                chaser_aptitude TEXT,
+                is_active INTEGER DEFAULT 1
+            )
+        """)
+    except sqlite3.OperationalError:
+        pass
+
+    # 10. Create races table (critical for Race Calendar)
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS races (
+                race_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name_en TEXT NOT NULL,
+                name_jp TEXT,
+                grade TEXT,
+                racetrack TEXT,
+                direction TEXT,
+                participants INTEGER,
+                terrain TEXT,
+                distance_type TEXT,
+                distance_meters INTEGER,
+                season TEXT,
+                time_of_day TEXT,
+                race_date TEXT,
+                race_class TEXT,
+                gametora_url TEXT UNIQUE,
+                image_path TEXT,
+                is_active INTEGER DEFAULT 1
+            )
+        """)
+    except sqlite3.OperationalError:
+        pass
+
+    # 11. Create system_metadata table (needed for version tracking)
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS system_metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        """)
+    except sqlite3.OperationalError:
+        pass
+    
+    # 12. Create race_schedules table for saving per-character race calendars
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS race_schedules (
+                schedule_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                character_id INTEGER NOT NULL,
+                year_type TEXT NOT NULL,
+                slot_key TEXT NOT NULL,
+                race_id INTEGER,
+                FOREIGN KEY (character_id) REFERENCES characters(character_id),
+                FOREIGN KEY (race_id) REFERENCES races(race_id),
+                UNIQUE(character_id, year_type, slot_key)
+            )
+        """)
+    except sqlite3.OperationalError:
+        pass
+
+    conn.commit()
+    repair_image_paths(conn)
+    conn.close()
+
+def repair_image_paths(conn):
+    """Attempt to populate missing image_path for existing cards in old databases"""
+    print("Checking for missing image paths to repair...")
+    cur = conn.cursor()
+    
+    # Find ALL cards to check for absolute/corrupted paths
+    cur.execute("SELECT card_id, name, gametora_url, image_path FROM support_cards")
+    all_cards = cur.fetchall()
+    
+    import re
+    repaired_count = 0
+    
+    for card_id, name, url, current_path in all_cards:
+        if not url: continue
+        
+        # Extract ID from URL (e.g., 30154 from .../supports/30154-mejiro-ramonu)
+        match = re.search(r'/supports/(\d+)-', url)
+        if match:
+            stable_id = match.group(1)
+            # Create safe filename matching scraper logic
+            safe_name = re.sub(r'[<>:"/\\\\|?*]', '_', name)
+            correct_relative_path = f"images/{stable_id}_{safe_name}.png"
+            
+            # If path is missing, absolute, or doesn't match the standard relative format
+            if not current_path or os.path.isabs(current_path) or current_path != correct_relative_path:
+                # Update DB with images/filename
+                cur.execute("UPDATE support_cards SET image_path = ? WHERE card_id = ?", 
+                           (correct_relative_path, card_id))
+                repaired_count += 1
+            
+    # Also repair character image paths
+    cur.execute("SELECT character_id, name, image_path, gametora_id FROM characters")
+    char_rows = cur.fetchall()
+    char_repaired = 0
+    for cid, name, path, g_id in char_rows:
+        if path and (os.path.isabs(path) or not path.startswith('assets')):
+            # Normalize to relative path
+            filename = os.path.basename(path)
+            # If path is just a filename, assume it's in assets/characters
+            new_path = f"assets/characters/{filename}"
+            cur.execute("UPDATE characters SET image_path = ? WHERE character_id = ?", (new_path, cid))
+            char_repaired += 1
+            
+    if repaired_count > 0 or char_repaired > 0:
+        conn.commit()
+        if repaired_count > 0:
+            print(f"Successfully repaired {repaired_count} support card image paths!")
+        if char_repaired > 0:
+            print(f"Successfully repaired {char_repaired} character image paths!")
+
+def check_for_updates():
+    """Check if database version matches app version, sync if outdated"""
+    # Always ensure data integrity (run for both frozen and source)
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        repair_orphaned_data()
+        repair_image_paths(conn)
+        cleanup_orphaned_data()
+        conn.close()
+    except Exception as e:
+        logging.debug(f"Data integrity check failed: {e}")
+        
+    if getattr(sys, 'frozen', False):
+        bundled_seed_path = os.path.join(sys._MEIPASS, "database", "umamusume_seed.db")
+    else:
+        bundled_seed_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "database", "umamusume_seed.db")
+
+    if not os.path.exists(bundled_seed_path):
+        return 
+        
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        
+        # Check for metadata table
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='system_metadata'")
+        if not cur.fetchone():
+            # No metadata, likely old version. Create it.
+            cur.execute("CREATE TABLE IF NOT EXISTS system_metadata (key TEXT PRIMARY KEY, value TEXT)")
+            cur.execute("INSERT OR REPLACE INTO system_metadata (key, value) VALUES (?, ?)", ('app_version', "0.0.0"))
+            conn.commit()
+            db_version = "0.0.0"
+        else:
+            cur.execute("SELECT value FROM system_metadata WHERE key='app_version'")
+            row = cur.fetchone()
+            db_version = row[0] if row else "0.0.0"
+        
+        # Compare versions or check if characters/races are empty
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='characters'")
+        has_chars_table = cur.fetchone()
+        chars_empty = True
+        if has_chars_table:
+            cur.execute("SELECT COUNT(*) FROM characters")
+            chars_empty = (cur.fetchone()[0] == 0)
+
+        if db_version != VERSION or chars_empty:
+            sync_from_seed(bundled_seed_path)
+            
+        conn.close()
+    except Exception as e:
+        import traceback
+        print(f"Update check failed: {e}\n{traceback.format_exc()}")
+
+def sync_from_seed(seed_path):
+    """Merge new data from seed into user database"""
+    print(f"Syncing database from {seed_path}...")
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        
+        # Attach seed database
+        cur.execute("ATTACH DATABASE ? AS seed", (seed_path,))
+        
+        # 1. Insert New Cards (match by gametora_url)
+        # We assume gametora_url is unique and stable
+        cur.execute("""
+            INSERT INTO main.support_cards (name, rarity, card_type, max_level, gametora_url, image_path)
+            SELECT name, rarity, card_type, max_level, gametora_url, image_path
+            FROM seed.support_cards
+            WHERE gametora_url NOT IN (SELECT gametora_url FROM main.support_cards)
+        """)
+        
+        # 2. Sync Child Tables
+        # Since effects/hints/events don't have stable IDs, we wipe and re-import them for ALL cards.
+        # But we must map seed_card_id to main_card_id.
+        
+        # First, ensure we don't break foreign keys temporarily
+        cur.execute("PRAGMA foreign_keys = OFF")
+        
+        # Tracks and courses are master data, sync them completely
+        # Delete courses first due to foreign key
+        cur.execute("DELETE FROM main.courses")
+        cur.execute("DELETE FROM main.tracks")
+        
+        tables_to_sync = ['support_effects', 'support_hints', 'support_events', 'event_skills']
+        for table in tables_to_sync:
+            cur.execute(f"DELETE FROM main.{table}")
+            
+        # Migrate Support Effects
+        # Map: seed.card_id -> gametora_url -> main.card_id
+        cur.execute("""
+            INSERT INTO main.support_effects (card_id, level, effect_name, effect_value)
+            SELECT m.card_id, s.level, s.effect_name, s.effect_value
+            FROM seed.support_effects s
+            JOIN seed.support_cards sc ON s.card_id = sc.card_id
+            JOIN main.support_cards m ON sc.gametora_url = m.gametora_url
+        """)
+        
+        # Migrate Support Hints
+        cur.execute("""
+            INSERT INTO main.support_hints (card_id, hint_name, hint_description)
+            SELECT m.card_id, s.hint_name, s.hint_description
+            FROM seed.support_hints s
+            JOIN seed.support_cards sc ON s.card_id = sc.card_id
+            JOIN main.support_cards m ON sc.gametora_url = m.gametora_url
+        """)
+        
+        # Migrate Support Events
+        # We need to preserve event_id mapping for event_skills? 
+        # Actually no, we deleted event_skills too.
+        # But we need to insert events first to get new IDs, then insert skills linking to those new IDs?
+        # That's tricky in SQL. 
+        # Easier: Insert events, then resolving event_id is hard without a map.
+        # Alternative: Just copy the tables matching on card_id if we assume card_ids are consistent?
+        # If user has same cards as seed, IDs might be consistent.
+        # But if we added a card in the middle, IDs shift.
+        # Let's assume we can just drop event/skills for now or try to match them.
+        # The logic below is complex for events+skills because of the 2-level hierarchy.
+        
+        # Strategy for Events/Skills:
+        # Since we just deleted them, we can re-insert.
+        # But main.event_id will be auto-incremented.
+        # We need to insert event, get ID, then insert skill? No, bulk insert.
+        # We can't easily map seed.event_id to main.event_id in bulk SQL across DBs easily without a temp table.
+        
+        # Simplified Approach for Events/Skills:
+        # Iterate in Python? Slower but safer.
+        pass # Placeholder for python logic below
+        
+        # Update Version
+        cur.execute("INSERT OR REPLACE INTO system_metadata (key, value) VALUES (?, ?)", ('app_version', VERSION))
+        
+        conn.commit()
+        
+        # Python Logic for Events/Skills
+        # Fetch all events from seed with their card's gametora_url
+        cur.execute("""
+            SELECT sc.gametora_url, se.event_name, se.event_type, se.event_id
+            FROM seed.support_events se
+            JOIN seed.support_cards sc ON se.card_id = sc.card_id
+        """)
+        seed_events = cur.fetchall()
+        
+        # Prepare Skill map: seed_event_id -> list of (skill_name, is_gold, is_or)
+        cur.execute("SELECT event_id, skill_name, is_gold, is_or FROM seed.event_skills")
+        seed_skills = {}
+        for ev_id, sk_name, is_gold, is_or in cur.fetchall():
+            if ev_id not in seed_skills: seed_skills[ev_id] = []
+            seed_skills[ev_id].append((sk_name, is_gold, is_or))
+            
+        # Main Card Map: gametora_url -> main_card_id
+        cur.execute("SELECT gametora_url, card_id FROM main.support_cards")
+        url_to_main_id = dict(cur.fetchall())
+        
+        for url, ev_name, ev_type, seed_ev_id in seed_events:
+            if url in url_to_main_id:
+                main_card_id = url_to_main_id[url]
+                # Insert Event
+                cur.execute("INSERT INTO main.support_events (card_id, event_name, event_type) VALUES (?, ?, ?)", 
+                            (main_card_id, ev_name, ev_type))
+                new_event_id = cur.lastrowid
+                
+                # Insert Skills
+                if seed_ev_id in seed_skills:
+                    for sk_name, is_gold, is_or in seed_skills[seed_ev_id]:
+                        cur.execute("INSERT INTO main.event_skills (event_id, skill_name, is_gold, is_or) VALUES (?, ?, ?, ?)",
+                                    (new_event_id, sk_name, is_gold, is_or))
+
+        # Sync Tracks
+        cur.execute("""
+            INSERT INTO main.tracks (track_id, name, location, image_path, image_url, gametora_url, is_active)
+            SELECT track_id, name, location, image_path, image_url, gametora_url, is_active
+            FROM seed.tracks
+        """)
+        
+        # Sync Courses
+        cur.execute("""
+            INSERT INTO main.courses (course_id, track_id, distance, surface, direction, corner_count, 
+                                     final_straight_length, slope_info, weather_data, phases_json, 
+                                     corners_json, straights_json, other_json, raw_metadata_json, 
+                                     gametora_url, map_image_path, is_active)
+            SELECT course_id, track_id, distance, surface, direction, corner_count, 
+                   final_straight_length, slope_info, weather_data, phases_json, 
+                   corners_json, straights_json, other_json, raw_metadata_json, 
+                   gametora_url, map_image_path, is_active
+            FROM seed.courses
+        """)
+        
+        # Sync Characters (safe — only if seed has the table)
+        try:
+            cur.execute("SELECT COUNT(*) FROM seed.characters")
+            seed_char_count = cur.fetchone()[0]
+            if seed_char_count > 0:
+                cur.execute("DELETE FROM main.characters")
+                cur.execute("""
+                    INSERT INTO main.characters (character_id, name, gametora_id, gametora_url, image_path,
+                                                 turf_aptitude, dirt_aptitude, short_aptitude, mile_aptitude,
+                                                 medium_aptitude, long_aptitude, runner_aptitude, leader_aptitude,
+                                                 betweener_aptitude, chaser_aptitude, is_active)
+                    SELECT character_id, name, gametora_id, gametora_url, image_path,
+                           turf_aptitude, dirt_aptitude, short_aptitude, mile_aptitude,
+                           medium_aptitude, long_aptitude, runner_aptitude, leader_aptitude,
+                           betweener_aptitude, chaser_aptitude, is_active
+                    FROM seed.characters
+                """)
+        except sqlite3.OperationalError:
+            pass  # seed doesn't have characters table yet
+        
+        # Sync Races (safe — only if seed has the table)
+        try:
+            cur.execute("SELECT COUNT(*) FROM seed.races")
+            seed_race_count = cur.fetchone()[0]
+            if seed_race_count > 0:
+                cur.execute("DELETE FROM main.races")
+                cur.execute("""
+                    INSERT INTO main.races (race_id, name_en, name_jp, grade, racetrack, direction,
+                                            participants, terrain, distance_type, distance_meters,
+                                            season, time_of_day, race_date, race_class, gametora_url, image_path, is_active)
+                    SELECT race_id, name_en, name_jp, grade, racetrack, direction,
+                           participants, terrain, distance_type, distance_meters,
+                           season, time_of_day, race_date, race_class, gametora_url, image_path, is_active
+                    FROM seed.races
+                """)
+        except sqlite3.OperationalError:
+            pass  # seed doesn't have races table yet
+
+        cur.execute("PRAGMA foreign_keys = ON")
+        conn.commit()
+        conn.close()
+        print(f"Database sync complete. Updated to version {VERSION}")
+        
+    except Exception as e:
+        print(f"Sync failed: {e}")
+
+def init_database():
+    """Initialize fresh database with schema"""
+    # Ensure directory exists
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    
+    # Create tables
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS support_cards (
+            card_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            rarity TEXT,
+            card_type TEXT,
+            max_level INTEGER DEFAULT 50,
+            gametora_url TEXT UNIQUE,
+            image_path TEXT
+        )
+    """)
+    
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS support_effects (
+            effect_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            card_id INTEGER,
+            level INTEGER,
+            effect_name TEXT,
+            effect_value TEXT,
+            FOREIGN KEY (card_id) REFERENCES support_cards(card_id)
+        )
+    """)
+    
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS support_hints (
+            hint_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            card_id INTEGER,
+            hint_name TEXT,
+            hint_description TEXT,
+            FOREIGN KEY (card_id) REFERENCES support_cards(card_id)
+        )
+    """)
+    
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS support_events (
+            event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            card_id INTEGER,
+            event_name TEXT,
+            event_type TEXT,
+            FOREIGN KEY (card_id) REFERENCES support_cards(card_id)
+        )
+    """)
+    
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS event_skills (
+            skill_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_id INTEGER,
+            skill_name TEXT,
+            is_gold INTEGER DEFAULT 0,
+            is_or INTEGER DEFAULT 0,
+            FOREIGN KEY (event_id) REFERENCES support_events(event_id)
+        )
+    """)
+    
+    # Run migrations to ensure all columns exist
+    run_migrations()
+    
+    # User tables
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS owned_cards (
+            owned_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            card_id INTEGER UNIQUE,
+            level INTEGER DEFAULT 50,
+            limit_break INTEGER DEFAULT 0,
+            FOREIGN KEY (card_id) REFERENCES support_cards(card_id)
+        )
+    """)
+    
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS user_decks (
+            deck_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            deck_name TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS deck_slots (
+            slot_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            deck_id INTEGER,
+            card_id INTEGER,
+            slot_position INTEGER,
+            level INTEGER DEFAULT 50,
+            FOREIGN KEY (deck_id) REFERENCES user_decks(deck_id),
+            FOREIGN KEY (card_id) REFERENCES support_cards(card_id)
+        )
+    """)
+    
+    # ── User notes table ──
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS user_notes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            card_id INTEGER NOT NULL UNIQUE,
+            note TEXT DEFAULT '',
+            tags TEXT DEFAULT '',
+            FOREIGN KEY (card_id) REFERENCES support_cards(card_id)
+        )
+    """)
+    
+    # ── Track tables (additive only — no existing tables modified) ──
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS tracks (
+            track_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            location TEXT,
+            image_path TEXT,
+            image_url TEXT,
+            gametora_url TEXT UNIQUE,
+            is_active INTEGER DEFAULT 1
+        )
+    """)
+    
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS courses (
+            course_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            track_id INTEGER,
+            distance INTEGER,
+            surface TEXT,
+            direction TEXT,
+            corner_count INTEGER,
+            final_straight_length TEXT,
+            slope_info TEXT,
+            weather_data TEXT,
+            phases_json TEXT,
+            corners_json TEXT,
+            straights_json TEXT,
+            other_json TEXT,
+            raw_metadata_json TEXT,
+            gametora_url TEXT UNIQUE,
+            map_image_path TEXT,
+            is_active INTEGER DEFAULT 1,
+            FOREIGN KEY (track_id) REFERENCES tracks(track_id)
+        )
+    """)
+    
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS scraper_meta (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            scraper_type TEXT UNIQUE,
+            last_run_timestamp TEXT
+        )
+    """)
+    
+    # ── Character tables (additive only — no existing tables modified) ──
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS characters (
+            character_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            gametora_id TEXT UNIQUE,
+            gametora_url TEXT,
+            image_path TEXT,
+            turf_aptitude TEXT,
+            dirt_aptitude TEXT,
+            short_aptitude TEXT,
+            mile_aptitude TEXT,
+            medium_aptitude TEXT,
+            long_aptitude TEXT,
+            runner_aptitude TEXT,
+            leader_aptitude TEXT,
+            betweener_aptitude TEXT,
+            chaser_aptitude TEXT,
+            is_active INTEGER DEFAULT 1
+        )
+    """)
+    
+    # ── Race tables (additive only — no existing tables modified) ──
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS races (
+            race_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name_en TEXT NOT NULL,
+            name_jp TEXT,
+            grade TEXT,
+            racetrack TEXT,
+            direction TEXT,
+            participants INTEGER,
+            terrain TEXT,
+            distance_type TEXT,
+            distance_meters INTEGER,
+            season TEXT,
+            time_of_day TEXT,
+            race_date TEXT,
+            race_class TEXT,
+            gametora_url TEXT UNIQUE,
+            is_active INTEGER DEFAULT 1
+        )
+    """)
+    
+    # Create indexes for performance
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_effects_card_level ON support_effects(card_id, level)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_hints_card ON support_hints(card_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_events_card ON support_events(card_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_courses_track ON courses(track_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_characters_name ON characters(name)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_races_grade ON races(grade)")
+    
+    conn.commit()
+    conn.close()
+
+# ============================================
+# Card Queries
+# ============================================
+
+def get_all_cards(rarity_filter=None, type_filter=None, search_term=None, owned_only=False,
+                  effect_filter=None, tag_filter=None):
+    """
+    Get all support cards with optional filtering.
+    effect_filter: filter cards that have a specific effect name at any level
+    tag_filter: filter cards that have a specific user tag
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    query = """
+        SELECT sc.card_id, sc.name, sc.rarity, sc.card_type, sc.max_level, sc.image_path,
+               CASE WHEN oc.card_id IS NOT NULL THEN 1 ELSE 0 END as is_owned,
+               oc.level as owned_level
+        FROM support_cards sc
+        LEFT JOIN owned_cards oc ON sc.card_id = oc.card_id
+        WHERE 1=1
+    """
+    params = []
+    
+    if rarity_filter:
+        query += " AND sc.rarity = ?"
+        params.append(rarity_filter)
+    
+    if type_filter:
+        query += " AND sc.card_type = ?"
+        params.append(type_filter)
+    
+    if search_term:
+        query += " AND sc.name LIKE ?"
+        params.append(f"%{search_term}%")
+    
+    if owned_only:
+        query += " AND oc.card_id IS NOT NULL"
+    
+    if effect_filter:
+        query += " AND sc.card_id IN (SELECT DISTINCT card_id FROM support_effects WHERE effect_name = ?)"
+        params.append(effect_filter)
+    
+    if tag_filter:
+        query += " AND sc.card_id IN (SELECT card_id FROM user_notes WHERE (',' || tags || ',') LIKE ?)"
+        params.append(f"%,{tag_filter},%")
+    
+    query += " ORDER BY sc.rarity DESC, sc.name"
+    
+    cur.execute(query, params)
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+def get_card_by_id(card_id):
+    """Get a single card by ID"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT sc.card_id, sc.name, sc.rarity, sc.card_type, sc.max_level, sc.gametora_url, sc.image_path,
+               CASE WHEN oc.card_id IS NOT NULL THEN 1 ELSE 0 END as is_owned,
+               oc.level as owned_level
+        FROM support_cards sc
+        LEFT JOIN owned_cards oc ON sc.card_id = oc.card_id
+        WHERE sc.card_id = ?
+    """, (card_id,))
+    row = cur.fetchone()
+    conn.close()
+    return row
+
+def get_card_count():
+    """Get total number of cards in database"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM support_cards")
+    count = cur.fetchone()[0]
+    conn.close()
+    return count
+
+# ============================================
+# Effect Queries
+# ============================================
+
+def get_effects_at_level(card_id, level):
+    """Get all effects for a card at a specific level"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT effect_name, effect_value
+        FROM support_effects
+        WHERE card_id = ? AND level = ?
+        ORDER BY effect_name
+    """, (card_id, level))
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+def get_all_effects(card_id):
+    """Get all effects for a card at all levels"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT level, effect_name, effect_value
+        FROM support_effects
+        WHERE card_id = ?
+        ORDER BY level, effect_name
+    """, (card_id,))
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+def get_unique_effect_names(card_id):
+    """Get list of unique effect names for a card"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT DISTINCT effect_name
+        FROM support_effects
+        WHERE card_id = ?
+        ORDER BY effect_name
+    """, (card_id,))
+    rows = [r[0] for r in cur.fetchall()]
+    conn.close()
+    return rows
+
+def search_owned_effects(search_term):
+    """
+    Search for effects among owned cards.
+    Returns list of (card_id, card_name, image_path, effect_name, effect_value, level)
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    # We need to join support_effects with owned_cards to get the level
+    # But wait, owned_cards has a level column. support_effects stores effects for specific levels.
+    # So we need to match support_effects.level with owned_cards.level
+    # OR find the effect for the closest level <= owned level (if effects aren't stored for every single level)
+    # The current DB schema seems to store effects for specific levels (1, 5, 10, ...).
+    # If a card is level 49, `get_effects_at_level` usually queries for exact level match.
+    # Let's check `get_effects_at_level` implementation: "WHERE card_id = ? AND level = ?"
+    # So if I have a card at level 49, and effects are only defined at 45 and 50, query for 49 returns nothing?
+    # That would be a bug or assumption in the current app.
+    # Let's look at `update_progression_table` in `effects_view.py`. It does some "nearest level" logic.
+    # For this search feature, to be robust, we should probably fetch ALL effects for the card
+    # and filter for the one active at the owned level.
+    # OR, assuming the scraper/DB populates "current" effects effectively.
+    # Actually, the most robust way in SQL for "value at level X" given sparse data is complex.
+    # However, let's assume for now we want exact matches or we'll handle the "effective level" logic in Python?
+    # No, that's too slow for search.
+    # Let's look at how `get_effects_at_level` is used.
+    # It is used in `update_current_effects` with `self.level_var.get()`.
+    # It expects an exact match.
+    # So we should probably join on `oc.level`.
+    
+    query = """
+        SELECT sc.card_id, sc.name, sc.image_path, se.effect_name, se.effect_value, oc.level
+        FROM owned_cards oc
+        JOIN support_cards sc ON oc.card_id = sc.card_id
+        JOIN support_effects se ON oc.card_id = se.card_id AND oc.level = se.level
+        WHERE se.effect_name LIKE ?
+        ORDER BY sc.name
+    """
+    
+    cur.execute(query, (f"%{search_term}%",))
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+# ============================================
+# Hint Queries
+# ============================================
+
+def get_hints(card_id):
+    """Get all hints for a card"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT hint_name, hint_description
+        FROM support_hints
+        WHERE card_id = ?
+        ORDER BY hint_name
+    """, (card_id,))
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+# ============================================
+# Event Queries
+# ============================================
+
+def get_events(card_id):
+    """Get all events for a card"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT event_id, event_name, event_type
+        FROM support_events
+        WHERE card_id = ?
+        ORDER BY event_name
+    """, (card_id,))
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+def get_all_event_skills(card_id):
+    """Get all skills from training events for a card"""
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    cur.execute("""
+        SELECT se.event_name, es.skill_name, es.is_gold, es.is_or
+        FROM support_events se
+        JOIN event_skills es ON se.event_id = es.event_id
+        WHERE se.card_id = ?
+    """, (card_id,))
+    
+    # Group by event
+    events = {}
+    for event_name, skill_name, is_gold, is_or in cur.fetchall():
+        if event_name not in events:
+            events[event_name] = {'skills': [], 'or_skills': []}
+        
+        prefix = "✨ " if is_gold else ""
+        if is_or:
+            events[event_name]['or_skills'].append(f"{prefix}{skill_name}")
+        else:
+            events[event_name]['skills'].append(f"{prefix}{skill_name}")
+            
+    results = []
+    for event_name, data in events.items():
+        event_skills = []
+        if data['or_skills']:
+            event_skills.append(" (OR) ".join(data['or_skills']))
+        event_skills.extend(data['skills'])
+        
+        details = f"({', '.join(event_skills)})" if event_skills else ""
+        results.append({
+            'card_id': card_id,
+            'source': 'Event',
+            'skill_name': event_name,
+            'details': details
+        })
+        
+    conn.close()
+    return results
+
+
+def get_card_events(card_id):
+    """
+    Get all events and format them for the timeline view.
+    Since the DB only has skills, we represent skills as choices/effects.
+    """
+    raw_events = get_events(card_id)
+    if not raw_events:
+        return []
+        
+    # getting exactly the required dictionary format for training_timeline.py
+    # all_skills expects a dictionary grouped by event_name, returning [{'card_id': card_id, 'source': 'Event', 'skill_name': event_name, 'details': '(skills...)'}]
+    # wait, get_all_event_skills returns a list of dicts. We have to parse its returning dict list.
+    all_skills_list = get_all_event_skills(card_id)
+    skill_map = {}
+    for item in all_skills_list:
+        skill_map[item['skill_name']] = item['details']
+        
+    formatted = []
+    
+    for _, event_name, event_type in raw_events:
+        ev_dict = {
+            'name': f"[{event_type}] {event_name}" if event_type else event_name,
+            'choices': []
+        }
+        
+        if event_name in skill_map and skill_map[event_name]:
+            details = skill_map[event_name] # e.g. "(Skill1, Skill2)" or "( (OR) Skill1 (OR) Skill2 )"
+            ev_dict['choices'].append({
+                'label': 'Skill Outcome',
+                'effects': str(details).strip("()")
+            })
+                
+        formatted.append(ev_dict)
+        
+    return formatted
+
+# ============================================
+# Owned Cards (Collection) Queries
+# ============================================
+
+def is_card_owned(card_id):
+    """Check if a card is owned"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT 1 FROM owned_cards WHERE card_id = ?", (card_id,))
+    result = cur.fetchone() is not None
+    conn.close()
+    return result
+
+def set_card_owned(card_id, owned=True, level=50):
+    """Set a card as owned or not owned"""
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    if owned:
+        cur.execute("""
+            INSERT OR REPLACE INTO owned_cards (card_id, level)
+            VALUES (?, ?)
+        """, (card_id, level))
+    else:
+        cur.execute("DELETE FROM owned_cards WHERE card_id = ?", (card_id,))
+    
+    conn.commit()
+    conn.close()
+
+def set_cards_owned_bulk(card_ids, owned=True, level=50):
+    """Set multiple cards as owned or not owned in a single transaction"""
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    if owned:
+        for card_id in card_ids:
+            cur.execute("""
+                INSERT OR REPLACE INTO owned_cards (card_id, level)
+                VALUES (?, ?)
+            """, (card_id, level))
+    else:
+        placeholders = ','.join(['?' for _ in card_ids])
+        cur.execute(f"DELETE FROM owned_cards WHERE card_id IN ({placeholders})", card_ids)
+    
+    conn.commit()
+    conn.close()
+
+def update_owned_card_level(card_id, level):
+    """Update the level of an owned card"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE owned_cards SET level = ? WHERE card_id = ?", (level, card_id))
+    conn.commit()
+    conn.close()
+
+def get_owned_cards():
+    """Get all owned cards"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT sc.card_id, sc.name, sc.rarity, sc.card_type, oc.level, sc.image_path
+        FROM owned_cards oc
+        JOIN support_cards sc ON oc.card_id = sc.card_id
+        ORDER BY sc.rarity DESC, sc.name
+    """)
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+def get_owned_count():
+    """Get count of owned cards"""
+    conn = get_conn()
+    cur = conn.cursor()
+    # Use JOIN to ensure only valid cards are counted
+    cur.execute("""
+        SELECT COUNT(*) 
+        FROM owned_cards oc
+        JOIN support_cards sc ON oc.card_id = sc.card_id
+    """)
+    count = cur.fetchone()[0]
+    conn.close()
+    return count
+
+# ============================================
+# Notes & Tags Queries
+# ============================================
+
+def get_card_notes(card_id):
+    """Get notes and tags for a card. Returns (note, tags) or ('', '')"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT note, tags FROM user_notes WHERE card_id = ?", (card_id,))
+    row = cur.fetchone()
+    conn.close()
+    return row if row else ('', '')
+
+def set_card_notes(card_id, note='', tags=''):
+    """Set notes and tags for a card. Tags is a comma-separated string."""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO user_notes (card_id, note, tags) VALUES (?, ?, ?)
+        ON CONFLICT(card_id) DO UPDATE SET note=excluded.note, tags=excluded.tags
+    """, (card_id, note, tags))
+    conn.commit()
+    conn.close()
+
+def get_all_tags():
+    """Get all unique tags across all cards, sorted."""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT tags FROM user_notes WHERE tags != ''")
+    all_tags = set()
+    for (tags_str,) in cur.fetchall():
+        for tag in tags_str.split(','):
+            tag = tag.strip()
+            if tag:
+                all_tags.add(tag)
+    conn.close()
+    return sorted(all_tags)
+
+def search_cards_by_tag(tag):
+    """Get card_ids that have a specific tag."""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT card_id FROM user_notes WHERE (',' || tags || ',') LIKE ?", (f"%,{tag},%",))
+    ids = [r[0] for r in cur.fetchall()]
+    conn.close()
+    return ids
+
+# ============================================
+# Effect Names Query
+# ============================================
+
+def get_all_effect_names():
+    """Get all unique effect names across all cards, sorted."""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT DISTINCT effect_name FROM support_effects ORDER BY effect_name")
+    names = [r[0] for r in cur.fetchall()]
+    conn.close()
+    return names
+
+# ============================================
+# Backup / Restore
+# ============================================
+
+def export_user_data():
+    """Export all user data tables as a JSON-serializable dict."""
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    data = {}
+    
+    # Owned cards — map by gametora_url for portability
+    cur.execute("""
+        SELECT sc.gametora_url, oc.level, oc.limit_break
+        FROM owned_cards oc
+        JOIN support_cards sc ON oc.card_id = sc.card_id
+    """)
+    data['owned_cards'] = [{'url': r[0], 'level': r[1], 'limit_break': r[2]} for r in cur.fetchall()]
+    
+    # Decks
+    cur.execute("SELECT deck_id, deck_name FROM user_decks")
+    decks = []
+    for deck_id, deck_name in cur.fetchall():
+        cur.execute("""
+            SELECT ds.slot_position, ds.level, sc.gametora_url
+            FROM deck_slots ds
+            JOIN support_cards sc ON ds.card_id = sc.card_id
+            WHERE ds.deck_id = ?
+            ORDER BY ds.slot_position
+        """, (deck_id,))
+        slots = [{'position': r[0], 'level': r[1], 'url': r[2]} for r in cur.fetchall()]
+        decks.append({'name': deck_name, 'slots': slots})
+    data['decks'] = decks
+    
+    # Notes/Tags — map by gametora_url
+    cur.execute("""
+        SELECT sc.gametora_url, un.note, un.tags
+        FROM user_notes un
+        JOIN support_cards sc ON un.card_id = sc.card_id
+    """)
+    data['notes'] = [{'url': r[0], 'note': r[1], 'tags': r[2]} for r in cur.fetchall()]
+    
+    conn.close()
+    return data
+
+def import_user_data(data):
+    """
+    Import user data from a backup dict. Clears existing user data and replaces.
+    Cards are matched by gametora_url for portability.
+    Returns a summary dict of what was imported.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    summary = {'owned': 0, 'decks': 0, 'notes': 0, 'skipped': 0}
+    
+    # Build URL -> card_id mapping
+    cur.execute("SELECT card_id, gametora_url FROM support_cards")
+    url_to_id = {r[1]: r[0] for r in cur.fetchall() if r[1]}
+    
+    # Clear existing user data
+    cur.execute("DELETE FROM owned_cards")
+    cur.execute("DELETE FROM deck_slots")
+    cur.execute("DELETE FROM user_decks")
+    cur.execute("DELETE FROM user_notes")
+    
+    # Import owned cards
+    for item in data.get('owned_cards', []):
+        card_id = url_to_id.get(item.get('url'))
+        if card_id:
+            cur.execute("INSERT OR REPLACE INTO owned_cards (card_id, level, limit_break) VALUES (?, ?, ?)",
+                        (card_id, item.get('level', 50), item.get('limit_break', 0)))
+            summary['owned'] += 1
+        else:
+            summary['skipped'] += 1
+    
+    # Import decks
+    for deck in data.get('decks', []):
+        cur.execute("INSERT INTO user_decks (deck_name) VALUES (?)", (deck['name'],))
+        deck_id = cur.lastrowid
+        for slot in deck.get('slots', []):
+            card_id = url_to_id.get(slot.get('url'))
+            if card_id:
+                cur.execute("INSERT INTO deck_slots (deck_id, card_id, slot_position, level) VALUES (?, ?, ?, ?)",
+                            (deck_id, card_id, slot['position'], slot.get('level', 50)))
+        summary['decks'] += 1
+    
+    # Import notes
+    for item in data.get('notes', []):
+        card_id = url_to_id.get(item.get('url'))
+        if card_id:
+            cur.execute("INSERT OR REPLACE INTO user_notes (card_id, note, tags) VALUES (?, ?, ?)",
+                        (card_id, item.get('note', ''), item.get('tags', '')))
+            summary['notes'] += 1
+    
+    conn.commit()
+    conn.close()
+    return summary
+
+def export_single_deck(deck_id):
+    """Export a single deck as a JSON-serializable dict with card URLs for portability."""
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    cur.execute("SELECT deck_name FROM user_decks WHERE deck_id = ?", (deck_id,))
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        return None
+    
+    deck_data = {'name': row[0], 'slots': []}
+    
+    cur.execute("""
+        SELECT ds.slot_position, ds.level, sc.gametora_url, sc.name, sc.rarity, sc.card_type
+        FROM deck_slots ds
+        JOIN support_cards sc ON ds.card_id = sc.card_id
+        WHERE ds.deck_id = ?
+        ORDER BY ds.slot_position
+    """, (deck_id,))
+    
+    for slot_pos, level, url, name, rarity, card_type in cur.fetchall():
+        deck_data['slots'].append({
+            'position': slot_pos,
+            'level': level,
+            'url': url,
+            'name': name,
+            'rarity': rarity,
+            'card_type': card_type
+        })
+    
+    conn.close()
+    return deck_data
+
+def import_single_deck(deck_data):
+    """
+    Import a single deck from a dict. Creates a new deck.
+    Returns (deck_id, matched_count, total_slots).
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    # Build URL -> card_id mapping
+    cur.execute("SELECT card_id, gametora_url FROM support_cards")
+    url_to_id = {r[1]: r[0] for r in cur.fetchall() if r[1]}
+    
+    deck_name = deck_data.get('name', 'Imported Deck')
+    cur.execute("INSERT INTO user_decks (deck_name) VALUES (?)", (deck_name,))
+    deck_id = cur.lastrowid
+    
+    matched = 0
+    total = len(deck_data.get('slots', []))
+    
+    for slot in deck_data.get('slots', []):
+        card_id = url_to_id.get(slot.get('url'))
+        if card_id:
+            cur.execute(
+                "INSERT INTO deck_slots (deck_id, card_id, slot_position, level) VALUES (?, ?, ?, ?)",
+                (deck_id, card_id, slot['position'], slot.get('level', 50))
+            )
+            matched += 1
+    
+    conn.commit()
+    conn.close()
+    return deck_id, matched, total
+
+# ============================================
+# Deck Queries
+# ============================================
+
+def create_deck(name):
+    """Create a new deck"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO user_decks (deck_name) VALUES (?)", (name,))
+    deck_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return deck_id
+
+def get_all_decks():
+    """Get all saved decks"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT deck_id, deck_name, created_at FROM user_decks ORDER BY created_at DESC")
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+def delete_deck(deck_id):
+    """Delete a deck and its slots"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM deck_slots WHERE deck_id = ?", (deck_id,))
+    cur.execute("DELETE FROM user_decks WHERE deck_id = ?", (deck_id,))
+    conn.commit()
+    conn.close()
+
+def add_card_to_deck(deck_id, card_id, slot_position, level=50):
+    """Add a card to a deck slot"""
+    conn = get_conn()
+    cur = conn.cursor()
+    # Remove existing card in that slot
+    cur.execute("DELETE FROM deck_slots WHERE deck_id = ? AND slot_position = ?", (deck_id, slot_position))
+    # Add new card
+    cur.execute("""
+        INSERT INTO deck_slots (deck_id, card_id, slot_position, level)
+        VALUES (?, ?, ?, ?)
+    """, (deck_id, card_id, slot_position, level))
+    conn.commit()
+    conn.close()
+
+def remove_card_from_deck(deck_id, slot_position):
+    """Remove a card from a deck slot"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM deck_slots WHERE deck_id = ? AND slot_position = ?", (deck_id, slot_position))
+    conn.commit()
+    conn.close()
+
+def get_deck_cards(deck_id):
+    """Get all cards in a deck with their effects"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT ds.slot_position, ds.level, sc.card_id, sc.name, sc.rarity, sc.card_type, sc.image_path
+        FROM deck_slots ds
+        JOIN support_cards sc ON ds.card_id = sc.card_id
+        WHERE ds.deck_id = ?
+        ORDER BY ds.slot_position
+    """, (deck_id,))
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+def get_deck_combined_effects(deck_id):
+    """
+    Get combined effects for all cards in a deck
+    Returns dict: {effect_name: {'total': value, 'breakdown': [(card_name, value), ...]}}
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    # Get cards in deck with their levels
+    cur.execute("""
+        SELECT ds.card_id, ds.level, sc.name
+        FROM deck_slots ds
+        JOIN support_cards sc ON ds.card_id = sc.card_id
+        WHERE ds.deck_id = ?
+    """, (deck_id,))
+    deck_cards = cur.fetchall()
+    
+    combined = {}
+    
+    for card_id, level, card_name in deck_cards:
+        # Get effects for this card at this level
+        cur.execute("""
+            SELECT effect_name, effect_value
+            FROM support_effects
+            WHERE card_id = ? AND level = ?
+        """, (card_id, level))
+        
+        for effect_name, effect_value in cur.fetchall():
+            if effect_name not in combined:
+                combined[effect_name] = {'total': 0, 'breakdown': []}
+            
+            # Parse value (remove % and convert to number)
+            try:
+                num_value = float(effect_value.replace('%', '').replace('+', ''))
+            except:
+                num_value = 0
+            
+            combined[effect_name]['total'] += num_value
+            combined[effect_name]['breakdown'].append((card_name, effect_value))
+    
+    conn.close()
+    return combined
+
+# ============================================
+# Statistics
+# ============================================
+
+def get_database_stats():
+    """Get statistics about the database"""
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    stats = {}
+    
+    cur.execute("SELECT COUNT(*) FROM support_cards")
+    stats['total_cards'] = cur.fetchone()[0]
+    
+    cur.execute("SELECT rarity, COUNT(*) FROM support_cards GROUP BY rarity")
+    stats['by_rarity'] = dict(cur.fetchall())
+    
+    cur.execute("SELECT card_type, COUNT(*) FROM support_cards GROUP BY card_type")
+    stats['by_type'] = dict(cur.fetchall())
+    
+    cur.execute("SELECT COUNT(*) FROM support_effects")
+    stats['total_effects'] = cur.fetchone()[0]
+    
+    # Use JOIN to ensure only valid cards are counted
+    cur.execute("""
+        SELECT COUNT(*) 
+        FROM owned_cards oc
+        JOIN support_cards sc ON oc.card_id = sc.card_id
+    """)
+    stats['owned_cards'] = cur.fetchone()[0]
+    
+    cur.execute("SELECT COUNT(*) FROM user_decks")
+    stats['saved_decks'] = cur.fetchone()[0]
+    
+    conn.close()
+    return stats
+
+def get_collection_stats():
+    """Get detailed collection stats for dashboard: owned/total by rarity and type."""
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    # Total counts
+    cur.execute("SELECT COUNT(*) FROM support_cards")
+    total = cur.fetchone()[0]
+    
+    cur.execute("""
+        SELECT COUNT(*) FROM owned_cards oc
+        JOIN support_cards sc ON oc.card_id = sc.card_id
+    """)
+    owned = cur.fetchone()[0]
+    
+    # By rarity
+    cur.execute("""
+        SELECT sc.rarity, COUNT(*) as total,
+               SUM(CASE WHEN oc.card_id IS NOT NULL THEN 1 ELSE 0 END) as owned
+        FROM support_cards sc
+        LEFT JOIN owned_cards oc ON sc.card_id = oc.card_id
+        GROUP BY sc.rarity
+    """)
+    by_rarity = {}
+    for rarity, t, o in cur.fetchall():
+        by_rarity[rarity] = {'total': t, 'owned': o}
+    
+    # By type
+    cur.execute("""
+        SELECT sc.card_type, COUNT(*) as total,
+               SUM(CASE WHEN oc.card_id IS NOT NULL THEN 1 ELSE 0 END) as owned
+        FROM support_cards sc
+        LEFT JOIN owned_cards oc ON sc.card_id = oc.card_id
+        GROUP BY sc.card_type
+    """)
+    by_type = {}
+    for card_type, t, o in cur.fetchall():
+        by_type[card_type] = {'total': t, 'owned': o}
+    
+    conn.close()
+    return {
+        'total': total,
+        'owned': owned,
+        'by_rarity': by_rarity,
+        'by_type': by_type
+    }
+
+def repair_orphaned_data():
+    """
+    Attempt to repair orphaned data where card_id mapping was lost 
+    but can be recovered by matching card names or URLs if available.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    
+    try:
+        # Check if we have orphans
+        cur.execute("SELECT COUNT(*) FROM support_events WHERE card_id NOT IN (SELECT card_id FROM support_cards)")
+        orphan_count = cur.fetchone()[0]
+        
+        if orphan_count > 0:
+            print(f"Detected {orphan_count} orphaned training events. Attempting recovery by card name...")
+            
+            # This is complex because we don't know the name of the card the orphaned event belonged to 
+            # UNLESS we can find a previous state. 
+            # MOST LIKELY: This happened during a failed sync where card_ids were from the seed.
+            # If so, we might not be able to recover without re-scraping.
+            pass
+
+        # A more common issue: support_cards duplicated due to INSERT OR REPLACE
+        # Let's ensure no duplicates exist based on URL
+        cur.execute("SELECT gametora_url, COUNT(*) as c FROM support_cards GROUP BY gametora_url HAVING c > 1")
+        dupes = cur.fetchall()
+        if dupes:
+            print(f"Found {len(dupes)} duplicate card entries. Cleaning up...")
+            for url, count in dupes:
+                # Keep the one with highest ID (most recent)
+                cur.execute("SELECT card_id FROM support_cards WHERE gametora_url = ? ORDER BY card_id DESC", (url,))
+                ids = [r[0] for r in cur.fetchall()]
+                keep_id = ids[0]
+                toss_ids = ids[1:]
+                
+                # Update references in other tables before deleting
+                for table in ['owned_cards', 'deck_slots', 'support_effects', 'support_hints', 'support_events']:
+                    cur.execute(f"UPDATE {table} SET card_id = ? WHERE card_id IN ({','.join(['?']*len(toss_ids))})", 
+                                [keep_id] + toss_ids)
+                
+                cur.execute(f"DELETE FROM support_cards WHERE card_id IN ({','.join(['?']*len(toss_ids))})", toss_ids)
+            conn.commit()
+            
+    except Exception as e:
+        print(f"Repair failed: {e}")
+    finally:
+        conn.close()
+
+def cleanup_orphaned_data():
+    """Remove references to non-existent cards in user data tables"""
+    print("Cleaning up orphaned database records...")
+    # Use direct connection to avoid recursion with get_conn()
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    
+    try:
+        # 1. Clean owned_cards
+        cur.execute("""
+            DELETE FROM owned_cards 
+            WHERE card_id NOT IN (SELECT card_id FROM support_cards)
+        """)
+        if cur.rowcount > 0:
+            print(f"Removed {cur.rowcount} orphaned owned card records.")
+            
+        # 2. Clean deck_slots
+        cur.execute("""
+            DELETE FROM deck_slots 
+            WHERE card_id NOT IN (SELECT card_id FROM support_cards)
+        """)
+        if cur.rowcount > 0:
+            print(f"Removed {cur.rowcount} orphaned deck slot records.")
+            
+        # 3. Clean detail tables
+        cur.execute("DELETE FROM support_effects WHERE card_id NOT IN (SELECT card_id FROM support_cards)")
+        cur.execute("DELETE FROM support_hints WHERE card_id NOT IN (SELECT card_id FROM support_cards)")
+        cur.execute("DELETE FROM support_events WHERE card_id NOT IN (SELECT card_id FROM support_cards)")
+        cur.execute("DELETE FROM event_skills WHERE event_id NOT IN (SELECT event_id FROM support_events)")
+        
+        conn.commit()
+    except Exception as e:
+        print(f"Cleanup failed: {e}")
+    finally:
+        conn.close()
+# Skill Search Queries
+# ============================================
+
+def get_all_unique_skills():
+    """Get a sorted list of all unique skills from hints and events, with golden indicator"""
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    # Get skills from hints
+    cur.execute("SELECT DISTINCT hint_name FROM support_hints")
+    hint_skills = {row[0] for row in cur.fetchall() if row[0]}
+    
+    # Get skills from events, marking which are golden
+    cur.execute("SELECT DISTINCT skill_name, MAX(is_gold) as is_gold FROM event_skills GROUP BY skill_name")
+    event_skills_data = cur.fetchall()
+    event_skills = {}
+    for skill_name, is_gold in event_skills_data:
+        if skill_name:
+            event_skills[skill_name] = bool(is_gold)
+    
+    # Combine and mark golden skills
+    all_skills = []
+    for skill in sorted(list(hint_skills.union(event_skills.keys()))):
+        if skill in event_skills and event_skills[skill]:
+            # Mark as golden
+            all_skills.append((skill, True))  # (skill_name, is_golden)
+        else:
+            all_skills.append((skill, False))
+    
+    conn.close()
+    return all_skills
+
+def get_cards_with_skill(skill_name):
+    """
+    Find all cards that have a specific skill.
+    Returns list of dicts:
+    {
+        'card_id': int,
+        'name': str,
+        'rarity': str,
+        'type': str,
+        'image_path': str,
+        'source': str ('Hint' or 'Event: [Name]'),
+        'details': str (description or event name)
+    }
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    results = []
+    seen_entries = set() # To avoid duplicates if same skill in multiple events
+    
+    # 1. Check Hints
+    cur.execute("""
+        SELECT sc.card_id, sc.name, sc.rarity, sc.card_type, sc.image_path, sh.hint_description,
+               CASE WHEN oc.card_id IS NOT NULL THEN 1 ELSE 0 END as is_owned
+        FROM support_hints sh
+        JOIN support_cards sc ON sh.card_id = sc.card_id
+        LEFT JOIN owned_cards oc ON sc.card_id = oc.card_id
+        WHERE sh.hint_name = ?
+    """, (skill_name,))
+    
+    for row in cur.fetchall():
+        entry_key = (row[0], 'Hint')
+        if entry_key not in seen_entries:
+            results.append({
+                'card_id': row[0],
+                'name': row[1] or 'Unknown',
+                'rarity': row[2] or 'Unknown',
+                'type': row[3] or 'Unknown',  # Also include 'card_type' for compatibility
+                'card_type': row[3] or 'Unknown',
+                'image_path': row[4],
+                'source': 'Training Hint',
+                'details': row[5] or "Random hint event",
+                'is_owned': bool(row[6])
+            })
+            seen_entries.add(entry_key)
+            
+    # 2. Check Event Skills (including golden perks)
+    cur.execute("""
+        SELECT sc.card_id, sc.name, sc.rarity, sc.card_type, sc.image_path, se.event_name, se.event_id,
+               CASE WHEN oc.card_id IS NOT NULL THEN 1 ELSE 0 END as is_owned,
+               es.is_gold
+        FROM event_skills es
+        JOIN support_events se ON es.event_id = se.event_id
+        JOIN support_cards sc ON se.card_id = sc.card_id
+        LEFT JOIN owned_cards oc ON sc.card_id = oc.card_id
+        WHERE es.skill_name = ?
+    """, (skill_name,))
+    
+    rows = cur.fetchall()
+    for row in rows:
+        card_id, name, rarity, card_type, image_path, event_name, event_id, is_owned, is_gold = row
+        event_name = event_name.replace('\n', ' ').strip()
+        
+        # Format event skills (handle OR groups and gold skills)
+        formatted_event_skills = []
+        cur.execute("""
+            SELECT skill_name, is_gold, is_or 
+            FROM event_skills 
+            WHERE event_id = ?
+        """, (event_id,))
+        
+        skills_data = cur.fetchall()
+        
+        or_group_skills = []
+        other_event_skills = []
+        
+        for s_name, s_is_gold, s_is_or in skills_data:
+            prefix = "✨ " if s_is_gold else ""
+            if s_is_or:
+                or_group_skills.append(f"{prefix}{s_name}")
+            else:
+                other_event_skills.append(f"{prefix}{s_name}")
+        
+        if or_group_skills:
+            formatted_event_skills.append(" (OR) ".join(or_group_skills))
+        formatted_event_skills.extend(other_event_skills)
+        
+        # Create a nice string like "Event Name (Skill1, Skill2)"
+        if formatted_event_skills:
+            details = f"{event_name} ({', '.join(formatted_event_skills)})"
+        elif event_name:
+            details = f"{event_name} (Golden Perk)"
+        else:
+            details = "Golden Perk Event"
+        
+        # Mark source as GOLDEN if this is a golden skill
+        source = "✨ GOLDEN Event" if is_gold else "Event"
+        
+        entry_key = (card_id, f'Event: {event_name}')
+        
+        if entry_key not in seen_entries:
+            results.append({
+                'card_id': card_id,
+                'name': name or 'Unknown',
+                'rarity': rarity or 'Unknown',
+                'type': card_type or 'Unknown',  # Also include 'card_type' for compatibility
+                'card_type': card_type or 'Unknown',
+                'image_path': image_path,
+                'source': source,
+                'details': details or 'No details available',
+                'is_owned': bool(is_owned),
+                'is_gold': bool(is_gold)
+            })
+            seen_entries.add(entry_key)
+    
+    conn.close()
+    
+    # Sort by Rarity (SSR first), then Name
+    rarity_map = {'SSR': 3, 'SR': 2, 'R': 1}
+    results.sort(key=lambda x: (rarity_map.get(x['rarity'], 0), x['name']), reverse=True)
+    
+    return results
+
+# ============================================
+# Track Queries
+# ============================================
+
+def get_all_tracks():
+    """Get all active tracks"""
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT t.track_id, t.name, t.location, t.image_path,
+                   COUNT(c.course_id) as course_count
+            FROM tracks t
+            LEFT JOIN courses c ON t.track_id = c.track_id AND c.is_active = 1
+            WHERE t.is_active = 1
+            GROUP BY t.track_id
+            ORDER BY t.name
+        """)
+        rows = cur.fetchall()
+    except sqlite3.OperationalError:
+        rows = []  # Table doesn't exist yet
+    conn.close()
+    return rows
+
+def get_track_courses(track_id):
+    """Get all active courses for a track"""
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT course_id, distance, surface, direction, corner_count,
+                   final_straight_length
+            FROM courses
+            WHERE track_id = ? AND is_active = 1
+            ORDER BY surface, distance
+        """, (track_id,))
+        rows = cur.fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+    conn.close()
+    return rows
+
+def get_course_detail(course_id):
+    """Get full course detail including JSON metadata"""
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT c.course_id, c.distance, c.surface, c.direction,
+                   c.corner_count, c.final_straight_length, c.slope_info,
+                   c.weather_data, c.phases_json, c.corners_json,
+                   c.straights_json, c.other_json, c.raw_metadata_json,
+                   c.map_image_path, t.name as track_name
+            FROM courses c
+            JOIN tracks t ON c.track_id = t.track_id
+            WHERE c.course_id = ?
+        """, (course_id,))
+        row = cur.fetchone()
+    except sqlite3.OperationalError:
+        row = None
+    conn.close()
+    return row
+
+def get_scraper_timestamp(scraper_type):
+    """Get last run timestamp for a scraper type"""
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT last_run_timestamp FROM scraper_meta WHERE scraper_type = ?", (scraper_type,))
+        row = cur.fetchone()
+        result = row[0] if row else None
+    except sqlite3.OperationalError:
+        result = None
+    conn.close()
+    return result
+
+def set_scraper_timestamp(scraper_type, timestamp):
+    """Set last run timestamp for a scraper type"""
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            INSERT INTO scraper_meta (scraper_type, last_run_timestamp)
+            VALUES (?, ?)
+            ON CONFLICT(scraper_type) DO UPDATE SET last_run_timestamp = ?
+        """, (scraper_type, timestamp, timestamp))
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+    conn.close()
+
+# ============================================
+# Character Queries
+# ============================================
+
+def get_all_characters(search_term=None, surface_filter=None, distance_filter=None, strategy_filter=None):
+    """Get all active characters with optional filtering"""
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        query = """
+            SELECT character_id, name, gametora_id, image_path,
+                   turf_aptitude, dirt_aptitude,
+                   short_aptitude, mile_aptitude, medium_aptitude, long_aptitude,
+                   runner_aptitude, leader_aptitude, betweener_aptitude, chaser_aptitude
+            FROM characters
+            WHERE is_active = 1
+        """
+        params = []
+        
+        if search_term:
+            query += " AND name LIKE ?"
+            params.append(f"%{search_term}%")
+        
+        # Filter by minimum aptitude grade in specific categories
+        if surface_filter:
+            query += f" AND (turf_aptitude <= ? OR dirt_aptitude <= ?)"
+            params.extend([surface_filter, surface_filter])
+        
+        query += " ORDER BY name"
+        
+        cur.execute(query, params)
+        rows = cur.fetchall()
+    except sqlite3.OperationalError:
+        rows = []  # Table doesn't exist yet
+    conn.close()
+    return rows
+
+def get_character_count():
+    """Get count of characters in database"""
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT COUNT(*) FROM characters WHERE is_active = 1")
+        count = cur.fetchone()[0]
+    except sqlite3.OperationalError:
+        count = 0
+    conn.close()
+    return count
+
+# ============================================
+# Race Queries
+# ============================================
+
+def get_all_races(search_term=None, grade_filter=None, terrain_filter=None, distance_filter=None):
+    """Get all active races with optional filtering.
+    Returns a 15-column tuple: (race_id, name_en, name_jp, grade, racetrack, direction,
+    participants, terrain, distance_type, distance_meters, season, time_of_day,
+    race_date, race_class, image_path)
+    image_path is the race's own badge image (if scraped) falling back to the track photo.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        query = """
+            SELECT r.race_id, r.name_en, r.name_jp, r.grade, r.racetrack, r.direction,
+                   r.participants, r.terrain, r.distance_type, r.distance_meters,
+                   r.season, r.time_of_day, r.race_date, r.race_class,
+                   COALESCE(r.image_path, t.image_path) as image_path
+            FROM races r
+            LEFT JOIN tracks t ON r.racetrack = t.name
+            WHERE r.is_active = 1
+        """
+        params = []
+        
+        if search_term:
+            query += " AND (r.name_en LIKE ? OR r.name_jp LIKE ? OR r.racetrack LIKE ?)"
+            params.extend([f"%{search_term}%", f"%{search_term}%", f"%{search_term}%"])
+        
+        if grade_filter:
+            query += " AND r.grade = ?"
+            params.append(grade_filter)
+        
+        if terrain_filter:
+            query += " AND r.terrain = ?"
+            params.append(terrain_filter)
+        
+        if distance_filter:
+            query += " AND r.distance_type = ?"
+            params.append(distance_filter)
+        
+        query += " ORDER BY r.grade, r.distance_meters"
+        
+        cur.execute(query, params)
+        rows = cur.fetchall()
+    except sqlite3.OperationalError:
+        rows = []  # Table doesn't exist yet
+    conn.close()
+    return rows
+
+def get_race_count():
+    """Get count of races in database"""
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT COUNT(*) FROM races WHERE is_active = 1")
+        count = cur.fetchone()[0]
+    except sqlite3.OperationalError:
+        count = 0
+    conn.close()
+    return count
+
+
+# ============================================
+# Race Schedule Queries (per-character persistence)
+# ============================================
+
+def save_race_schedule(character_id, year_type, slot_key, race_id):
+    """Save a race selection for a specific character/year/slot.
+    Pass race_id=None to clear that slot."""
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        if race_id is None:
+            cur.execute("""
+                DELETE FROM race_schedules
+                WHERE character_id=? AND year_type=? AND slot_key=?
+            """, (character_id, year_type, slot_key))
+        else:
+            cur.execute("""
+                INSERT OR REPLACE INTO race_schedules
+                    (character_id, year_type, slot_key, race_id)
+                VALUES (?, ?, ?, ?)
+            """, (character_id, year_type, slot_key, race_id))
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+    conn.close()
+
+
+def load_race_schedule(character_id, year_type):
+    """Load all saved race selections for a character + year_type.
+    Returns dict: slot_key -> race_id"""
+    conn = get_conn()
+    cur = conn.cursor()
+    result = {}
+    try:
+        cur.execute("""
+            SELECT slot_key, race_id FROM race_schedules
+            WHERE character_id=? AND year_type=?
+        """, (character_id, year_type))
+        for slot_key, race_id in cur.fetchall():
+            result[slot_key] = race_id
+    except sqlite3.OperationalError:
+        pass
+    conn.close()
+    return result
+
+
+def clear_race_schedule(character_id, year_type):
+    """Clear all saved race selections for a character + year_type."""
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            DELETE FROM race_schedules
+            WHERE character_id=? AND year_type=?
+        """, (character_id, year_type))
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+    conn.close()

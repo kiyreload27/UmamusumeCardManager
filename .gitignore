@@ -1,0 +1,43 @@
+# General
+__pycache__/
+*.py[cod]
+*$py.class
+*.swp
+*.swo
+*.tmp
+.DS_Store
+Thumbs.db
+
+# Virtual Environment
+venv/
+.venv/
+env/
+.env
+
+# Build and Distribution
+build/
+dist/
+*.spec
+# Exception: We want to keep our custom spec file
+!UmamusumeCardManager.spec
+*.exe
+*.zip
+*.pkg
+
+# Database
+# Ignore the running database, but keep the seed/template
+database/*.db
+!database/umamusume_seed.db
+*.sqlite
+local_db.sqlite
+
+# Logs — keep the logs/ directory but ignore actual log files
+logs/*.log
+*.log
+
+# VS Code
+.vscode/
+
+# Project Specific
+# We are allowing .txt and .html now (removing previous blocks)
+# If there are specific large generated files, add them here.
