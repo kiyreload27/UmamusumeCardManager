@@ -314,7 +314,7 @@ class DataUpdateDialog(QDialog):
 
             btn = create_styled_button(
                 None, text="▶  Run",
-                command=lambda sc=s: self._start([sc]),
+                command=lambda _, sc=s: self._start([sc]),
                 style_type="default" if self._prereqs_ok else "ghost",
                 height=32, width=80
             )
