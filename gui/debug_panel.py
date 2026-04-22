@@ -1,12 +1,9 @@
 """
-Diagnostic / Debug Panel
-Accessible via Ctrl+Shift+D or the 🛠 sidebar button.
-Shows app state, DB info, log tail — designed for use when remoting
-into a user's machine to diagnose issues.
+Diagnostic / Debug Panel — PySide6 edition.
+Accessible via Ctrl+Shift+D or the Logs button in the chrome bar.
+Shows app state, DB info, log tail.
 """
 
-import tkinter as tk
-import customtkinter as ctk
 import sys
 import os
 import platform
@@ -14,21 +11,28 @@ import sqlite3
 import webbrowser
 from datetime import datetime
 
+from PySide6.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+    QFrame, QTabWidget, QScrollArea, QWidget,
+    QPlainTextEdit, QApplication
+)
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QTextCursor
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from gui.theme import (
     BG_DARKEST, BG_DARK, BG_MEDIUM, BG_LIGHT, BG_ELEVATED,
-    ACCENT_PRIMARY, ACCENT_SUCCESS, ACCENT_WARNING, ACCENT_ERROR, ACCENT_INFO,
-    TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, TEXT_DISABLED,
-    FONT_HEADER, FONT_SUBHEADER, FONT_BODY, FONT_BODY_BOLD, FONT_SMALL, FONT_TINY, FONT_MONO_SMALL,
-    SPACING_XS, SPACING_SM, SPACING_MD, SPACING_LG, SPACING_XL,
-    RADIUS_SM, RADIUS_MD, RADIUS_LG, RADIUS_FULL,
+    ACCENT_PRIMARY, ACCENT_SUCCESS, ACCENT_INFO,
+    TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
+    FONT_HEADER, FONT_BODY, FONT_BODY_BOLD, FONT_SMALL, FONT_MONO,
+    SPACING_XS, SPACING_SM, SPACING_MD, SPACING_LG,
+    RADIUS_MD, RADIUS_LG,
     create_styled_button,
 )
 
 
 def _get_db_path() -> str:
-    """Return current DB_PATH from db_queries."""
     try:
         from db.db_queries import DB_PATH
         return DB_PATH
@@ -37,23 +41,19 @@ def _get_db_path() -> str:
 
 
 def _get_log_path() -> str:
-    """Return the resolved log path (same logic as main.py)."""
     try:
         from main import get_log_path
         return get_log_path()
     except Exception:
         pass
-    # Fallback: reconstruct
     if getattr(sys, 'frozen', False):
         appdata = os.environ.get("APPDATA", os.path.expanduser("~"))
         return os.path.join(appdata, "UmamusumeCardManager", "logs", "app.log")
-    else:
-        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        return os.path.join(root, "logs", "app.log")
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(root, "logs", "app.log")
 
 
 def _read_log_tail(log_path: str, lines: int = 100) -> str:
-    """Read the last N lines of the log file."""
     try:
         if not os.path.exists(log_path):
             return "(Log file not found)"
@@ -66,19 +66,15 @@ def _read_log_tail(log_path: str, lines: int = 100) -> str:
 
 
 def _get_db_stats() -> dict:
-    """Collect DB statistics safely."""
     stats = {}
     db_path = _get_db_path()
     try:
         if os.path.exists(db_path):
-            size_bytes = os.path.getsize(db_path)
-            stats["db_size"] = f"{size_bytes / 1024:.1f} KB"
+            stats["db_size"] = f"{os.path.getsize(db_path) / 1024:.1f} KB"
         else:
             stats["db_size"] = "File not found"
-
         conn = sqlite3.connect(db_path)
         cur = conn.cursor()
-
         for table, label in [
             ("support_cards", "Total Cards"),
             ("owned_cards",   "Owned Cards"),
@@ -92,225 +88,170 @@ def _get_db_stats() -> dict:
                 stats[label] = cur.fetchone()[0]
             except Exception:
                 stats[label] = "—"
-
-        # Scraper timestamps
         try:
             cur.execute("SELECT scraper_type, last_run_timestamp FROM scraper_meta")
             for stype, ts in cur.fetchall():
                 stats[f"Last scrape: {stype}"] = ts or "Never"
         except Exception:
             pass
-
-        # App version in DB
         try:
             cur.execute("SELECT value FROM system_metadata WHERE key='app_version'")
             row = cur.fetchone()
             stats["DB app_version"] = row[0] if row else "—"
         except Exception:
             stats["DB app_version"] = "—"
-
         conn.close()
     except Exception as e:
         stats["error"] = str(e)
-
     return stats
 
 
 def _build_diagnostics_text() -> str:
-    """Build a plain-text diagnostics summary for clipboard."""
-    from version import VERSION, APP_NAME
     try:
-        from version import BUILD_DATE
+        from version import VERSION, APP_NAME, BUILD_DATE
     except ImportError:
-        BUILD_DATE = "unknown"
-
+        VERSION, APP_NAME, BUILD_DATE = "?", "UmamusumeCardManager", "unknown"
     db_path = _get_db_path()
     log_path = _get_log_path()
     db_stats = _get_db_stats()
     log_tail = _read_log_tail(log_path, lines=20)
-
     lines = [
         "=" * 60,
         f"  {APP_NAME} — Diagnostic Report",
         f"  Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        "=" * 60,
-        "",
+        "=" * 60, "",
         "[ App ]",
         f"  Version:    v{VERSION}  (built {BUILD_DATE})",
         f"  Mode:       {'Frozen EXE' if getattr(sys, 'frozen', False) else 'Python Source'}",
         f"  Python:     {sys.version}",
         f"  Platform:   {platform.system()} {platform.release()} ({platform.machine()})",
-        "",
-        "[ Database ]",
+        "", "[ Database ]",
         f"  Path:       {db_path}",
     ]
     for k, v in db_stats.items():
         lines.append(f"  {k+':':24} {v}")
-    lines += [
-        "",
-        "[ Logs ]",
-        f"  Log path:   {log_path}",
-        "",
-        "[ Last 20 log lines ]",
-        log_tail,
-        "=" * 60,
-    ]
+    lines += ["", "[ Logs ]", f"  Log path:   {log_path}", "",
+              "[ Last 20 log lines ]", log_tail, "=" * 60]
     return "\n".join(lines)
 
 
-class DebugPanel:
+def _make_kv_row(parent, label, value, val_color=None):
+    row = QWidget(parent)
+    row.setStyleSheet("background: transparent;")
+    rl = QHBoxLayout(row)
+    rl.setContentsMargins(0, 1, 0, 1)
+    lbl = QLabel(label + ":")
+    lbl.setFont(FONT_SMALL)
+    lbl.setStyleSheet(f"color: {TEXT_MUTED}; min-width: 130px;")
+    rl.addWidget(lbl)
+    val = QLabel(str(value))
+    val.setFont(FONT_SMALL)
+    col = val_color or TEXT_PRIMARY
+    val.setStyleSheet(f"color: {col}; background: transparent;")
+    val.setWordWrap(True)
+    rl.addWidget(val, stretch=1)
+    return row
+
+
+class DebugPanel(QDialog):
     """In-app diagnostic panel."""
 
-    def __init__(self, parent: ctk.CTk):
-        self.parent = parent
-
-        self.dialog = ctk.CTkToplevel(parent)
-        self.dialog.title("🛠  Diagnostics")
-        self.dialog.geometry("720x640")
-        self.dialog.resizable(True, True)
-        self.dialog.minsize(600, 500)
-        self.dialog.transient(parent)
-
-        # Center
-        self.dialog.update_idletasks()
-        px = parent.winfo_x() + (parent.winfo_width() - 720) // 2
-        py = parent.winfo_y() + (parent.winfo_height() - 640) // 2
-        self.dialog.geometry(f"720x640+{px}+{py}")
-
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("🛠  Diagnostics")
+        self.resize(720, 640)
+        self.setMinimumSize(600, 500)
+        self.setModal(False)
         self._build_ui()
         self._refresh()
-        self.dialog.after(100, self.dialog.lift)
 
     def _build_ui(self):
-        self.dialog.configure(fg_color=BG_DARK)
+        self.setStyleSheet(f".QWidget, .QFrame, .QMainWindow, .QDialog {{ background-color: {BG_DARK}; }}")
+        lay = QVBoxLayout(self)
+        lay.setSpacing(0)
+        lay.setContentsMargins(0, 0, 0, 0)
 
-        # Header
-        hdr = ctk.CTkFrame(self.dialog, fg_color=BG_ELEVATED, corner_radius=0)
-        hdr.pack(fill=tk.X)
+        # Header band
+        hdr = QFrame()
+        hdr.setStyleSheet(f"background-color: {BG_ELEVATED}; border: none;")
+        hdr_lay = QHBoxLayout(hdr)
+        hdr_lay.setContentsMargins(SPACING_LG, SPACING_MD, SPACING_LG, SPACING_MD)
 
-        title_row = ctk.CTkFrame(hdr, fg_color="transparent")
-        title_row.pack(fill=tk.X, padx=SPACING_LG, pady=SPACING_MD)
+        title = QLabel("🛠  Diagnostics")
+        title.setFont(FONT_HEADER)
+        title.setStyleSheet(f"color: {ACCENT_PRIMARY}; background: transparent;")
+        hdr_lay.addWidget(title)
+        hdr_lay.addStretch()
 
-        ctk.CTkLabel(
-            title_row, text="🛠  Diagnostics",
-            font=FONT_HEADER, text_color=ACCENT_PRIMARY
-        ).pack(side=tk.LEFT)
+        for text, slot in [
+            ("🔄 Refresh", self._refresh),
+            ("📋 Copy All", self._copy_all),
+            ("🐞 Report a Bug", lambda: webbrowser.open(
+                "https://github.com/kiyreload27/UmamusumeCardManager/issues/new")),
+        ]:
+            b = create_styled_button(None, text=text, command=slot,
+                                     style_type="ghost" if "Bug" in text else "default",
+                                     height=32)
+            hdr_lay.addWidget(b)
 
-        # Action buttons in header
-        
-        self._report_btn = create_styled_button(
-            title_row, text="🐞 Report a Bug",
-            command=lambda: webbrowser.open("https://github.com/kiyreload27/UmamusumeCardManager/issues/new"), 
-            style_type="ghost", height=32, width=120
+        lay.addWidget(hdr)
+
+        # Tabs
+        self.tabs = QTabWidget()
+        self.tabs.setStyleSheet(f".QWidget, .QFrame, .QMainWindow, .QDialog {{ background-color: {BG_DARK}; }}")
+        lay.addWidget(self.tabs, stretch=1)
+
+        # Overview tab
+        self._ov_widget = QWidget()
+        self._ov_widget.setStyleSheet(f".QWidget, .QFrame, .QMainWindow, .QDialog {{ background-color: {BG_DARK}; }}")
+        ov_scroll = QScrollArea()
+        ov_scroll.setWidgetResizable(True)
+        ov_scroll.setWidget(self._ov_widget)
+        ov_scroll.setStyleSheet("border: none;")
+        self._ov_lay = QVBoxLayout(self._ov_widget)
+        self._ov_lay.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self._ov_lay.setSpacing(SPACING_MD)
+        self._ov_lay.setContentsMargins(SPACING_MD, SPACING_MD, SPACING_MD, SPACING_MD)
+        self.tabs.addTab(ov_scroll, "Overview")
+
+        # Database tab
+        self._db_widget = QWidget()
+        self._db_widget.setStyleSheet(f".QWidget, .QFrame, .QMainWindow, .QDialog {{ background-color: {BG_DARK}; }}")
+        db_scroll = QScrollArea()
+        db_scroll.setWidgetResizable(True)
+        db_scroll.setWidget(self._db_widget)
+        db_scroll.setStyleSheet("border: none;")
+        self._db_lay = QVBoxLayout(self._db_widget)
+        self._db_lay.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self._db_lay.setSpacing(SPACING_MD)
+        self._db_lay.setContentsMargins(SPACING_MD, SPACING_MD, SPACING_MD, SPACING_MD)
+        self.tabs.addTab(db_scroll, "Database")
+
+        # Log tab
+        self._log_box = QPlainTextEdit()
+        self._log_box.setFont(FONT_MONO)
+        self._log_box.setStyleSheet(
+            f"background-color: {BG_DARKEST}; color: {TEXT_SECONDARY};"
+            f"border: none; padding: 8px;"
         )
-        self._report_btn.pack(side=tk.RIGHT, padx=(SPACING_SM, 0))
+        self._log_box.setReadOnly(True)
+        self.tabs.addTab(self._log_box, "Log File")
 
-        create_styled_button(
-            title_row, text="📋 Copy All",
-            command=self._copy_all, style_type="accent", height=32, width=110
-        ).pack(side=tk.RIGHT, padx=(SPACING_SM, 0))
-
-        create_styled_button(
-            title_row, text="🔄 Refresh",
-            command=self._refresh, style_type="default", height=32, width=90
-        ).pack(side=tk.RIGHT)
-
-        # Tabbed content
-        self.tabs = ctk.CTkTabview(self.dialog, fg_color=BG_DARK)
-        self.tabs.pack(fill=tk.BOTH, expand=True, padx=SPACING_MD, pady=SPACING_MD)
-
-        self.tabs.add("Overview")
-        self.tabs.add("Database")
-        self.tabs.add("Log File")
-
-        self._build_overview_tab(self.tabs.tab("Overview"))
-        self._build_database_tab(self.tabs.tab("Database"))
-        self._build_log_tab(self.tabs.tab("Log File"))
-
-    # ──────────────────────────── Overview tab ──────────────────────────
-
-    def _build_overview_tab(self, parent):
-        scroll = ctk.CTkScrollableFrame(parent, fg_color="transparent")
-        scroll.pack(fill=tk.BOTH, expand=True)
-
-        # App info section
-        self._app_section = ctk.CTkFrame(scroll, fg_color=BG_MEDIUM, corner_radius=RADIUS_LG,
-                                          border_width=1, border_color=BG_LIGHT)
-        self._app_section.pack(fill=tk.X, pady=(0, SPACING_MD))
-
-        ctk.CTkLabel(self._app_section, text="Application",
-                     font=FONT_BODY_BOLD, text_color=TEXT_PRIMARY
-                     ).pack(anchor="w", padx=SPACING_LG, pady=(SPACING_MD, SPACING_XS))
-
-        self._app_rows_frame = ctk.CTkFrame(self._app_section, fg_color="transparent")
-        self._app_rows_frame.pack(fill=tk.X, padx=SPACING_LG, pady=(0, SPACING_MD))
-
-        # Log info section
-        self._log_section = ctk.CTkFrame(scroll, fg_color=BG_MEDIUM, corner_radius=RADIUS_LG,
-                                          border_width=1, border_color=BG_LIGHT)
-        self._log_section.pack(fill=tk.X, pady=(0, SPACING_MD))
-
-        ctk.CTkLabel(self._log_section, text="Log File",
-                     font=FONT_BODY_BOLD, text_color=TEXT_PRIMARY
-                     ).pack(anchor="w", padx=SPACING_LG, pady=(SPACING_MD, SPACING_XS))
-
-        self._log_path_label = ctk.CTkLabel(
-            self._log_section, text="", font=FONT_MONO_SMALL, text_color=TEXT_MUTED,
-            wraplength=600, justify="left"
+    def _section_frame(self, title: str) -> tuple:
+        frame = QFrame()
+        frame.setStyleSheet(
+            f".QFrame {{ background-color: {BG_MEDIUM}; border: 1px solid {BG_LIGHT};"
+            f"border-radius: {RADIUS_LG}px; }}"
         )
-        self._log_path_label.pack(anchor="w", padx=SPACING_LG)
-
-        self._open_log_btn = create_styled_button(
-            self._log_section, text="📄 Open Log in Notepad",
-            command=self._open_log, style_type="default", height=32
-        )
-        self._open_log_btn.pack(anchor="w", padx=SPACING_LG, pady=(SPACING_SM, SPACING_MD))
-
-    # ──────────────────────────── Database tab ──────────────────────────
-
-    def _build_database_tab(self, parent):
-        scroll = ctk.CTkScrollableFrame(parent, fg_color="transparent")
-        scroll.pack(fill=tk.BOTH, expand=True)
-
-        self._db_path_section = ctk.CTkFrame(scroll, fg_color=BG_MEDIUM, corner_radius=RADIUS_LG,
-                                              border_width=1, border_color=BG_LIGHT)
-        self._db_path_section.pack(fill=tk.X, pady=(0, SPACING_MD))
-
-        ctk.CTkLabel(self._db_path_section, text="Database Path",
-                     font=FONT_BODY_BOLD, text_color=TEXT_PRIMARY
-                     ).pack(anchor="w", padx=SPACING_LG, pady=(SPACING_MD, SPACING_XS))
-
-        self._db_path_label = ctk.CTkLabel(
-            self._db_path_section, text="",
-            font=FONT_MONO_SMALL, text_color=ACCENT_INFO,
-            wraplength=620, justify="left"
-        )
-        self._db_path_label.pack(anchor="w", padx=SPACING_LG, pady=(0, SPACING_MD))
-
-        # Stats table
-        self._db_stats_frame = ctk.CTkFrame(scroll, fg_color=BG_MEDIUM, corner_radius=RADIUS_LG,
-                                             border_width=1, border_color=BG_LIGHT)
-        self._db_stats_frame.pack(fill=tk.X)
-        ctk.CTkLabel(self._db_stats_frame, text="Statistics",
-                     font=FONT_BODY_BOLD, text_color=TEXT_PRIMARY
-                     ).pack(anchor="w", padx=SPACING_LG, pady=(SPACING_MD, SPACING_XS))
-        self._db_stats_inner = ctk.CTkFrame(self._db_stats_frame, fg_color="transparent")
-        self._db_stats_inner.pack(fill=tk.X, padx=SPACING_LG, pady=(0, SPACING_MD))
-
-    # ──────────────────────────── Log tab ───────────────────────────────
-
-    def _build_log_tab(self, parent):
-        self._log_textbox = ctk.CTkTextbox(
-            parent, font=FONT_MONO_SMALL,
-            fg_color=BG_DARKEST, text_color=TEXT_SECONDARY,
-            corner_radius=RADIUS_MD
-        )
-        self._log_textbox.pack(fill=tk.BOTH, expand=True)
-
-    # ──────────────────────────── Refresh ───────────────────────────────
+        inner = QVBoxLayout(frame)
+        inner.setContentsMargins(SPACING_LG, SPACING_MD, SPACING_LG, SPACING_MD)
+        t = QLabel(title)
+        t.setFont(FONT_BODY_BOLD)
+        t.setStyleSheet(f"color: {TEXT_PRIMARY}; background: transparent;")
+        inner.addWidget(t)
+        return frame, inner
 
     def _refresh(self):
-        """Populate all tabs with fresh data."""
         try:
             from version import VERSION, APP_NAME
         except ImportError:
@@ -320,83 +261,75 @@ class DebugPanel:
         except ImportError:
             BUILD_DATE = "unknown"
 
-        mode = "Frozen EXE" if getattr(sys, 'frozen', False) else "Python Source"
         db_path = _get_db_path()
         log_path = _get_log_path()
         db_stats = _get_db_stats()
 
-        # ── Overview: App rows ──
-        for w in self._app_rows_frame.winfo_children():
-            w.destroy()
+        # Clear overview
+        while self._ov_lay.count():
+            item = self._ov_lay.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
 
-        app_rows = [
-            ("Version",  f"v{VERSION}   (built {BUILD_DATE})"),
-            ("Mode",     mode),
-            ("Python",   sys.version.split()[0]),
+        # App section
+        app_frame, app_inner = self._section_frame("Application")
+        for label, value in [
+            ("Version", f"v{VERSION}  (built {BUILD_DATE})"),
+            ("Mode", "Frozen EXE" if getattr(sys, 'frozen', False) else "Python Source"),
+            ("Python", sys.version.split()[0]),
             ("Platform", f"{platform.system()} {platform.release()} ({platform.machine()})"),
-        ]
-        for label, value in app_rows:
-            row = ctk.CTkFrame(self._app_rows_frame, fg_color="transparent")
-            row.pack(fill=tk.X, pady=1)
-            ctk.CTkLabel(row, text=label + ":", font=FONT_SMALL, text_color=TEXT_MUTED,
-                         width=90, anchor="w").pack(side=tk.LEFT)
-            ctk.CTkLabel(row, text=value, font=FONT_SMALL, text_color=TEXT_PRIMARY,
-                         anchor="w").pack(side=tk.LEFT)
+        ]:
+            app_inner.addWidget(_make_kv_row(app_frame, label, value))
+        self._ov_lay.addWidget(app_frame)
 
-        # ── Overview: Log path ──
-        self._log_path_label.configure(text=log_path)
+        # Log section
+        log_frame, log_inner = self._section_frame("Log File")
+        log_inner.addWidget(_make_kv_row(log_frame, "Path", log_path, ACCENT_INFO))
         log_exists = os.path.exists(log_path)
-        self._open_log_btn.configure(
-            state="normal" if log_exists else "disabled",
-            text="📄 Open Log in Notepad" if log_exists else "📄 Log file not yet created"
-        )
+        open_btn = create_styled_button(None, text="📄 Open Log in Editor",
+                                        command=self._open_log, style_type="default", height=30)
+        open_btn.setEnabled(log_exists)
+        log_inner.addWidget(open_btn)
+        self._ov_lay.addWidget(log_frame)
 
-        # ── Database tab ──
-        self._db_path_label.configure(text=db_path)
+        # Clear db tab
+        while self._db_lay.count():
+            item = self._db_lay.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
 
-        for w in self._db_stats_inner.winfo_children():
-            w.destroy()
+        path_frame, path_inner = self._section_frame("Database Path")
+        path_inner.addWidget(_make_kv_row(path_frame, "Path", db_path, ACCENT_INFO))
+        self._db_lay.addWidget(path_frame)
 
+        stats_frame, stats_inner = self._section_frame("Statistics")
         for label, value in db_stats.items():
-            row = ctk.CTkFrame(self._db_stats_inner, fg_color="transparent")
-            row.pack(fill=tk.X, pady=1)
-            ctk.CTkLabel(row, text=label + ":", font=FONT_SMALL, text_color=TEXT_MUTED,
-                         width=200, anchor="w").pack(side=tk.LEFT)
-            color = ACCENT_SUCCESS if isinstance(value, int) and value > 0 else TEXT_PRIMARY
-            ctk.CTkLabel(row, text=str(value), font=FONT_SMALL, text_color=color,
-                         anchor="w").pack(side=tk.LEFT)
+            col = ACCENT_SUCCESS if isinstance(value, int) and value > 0 else TEXT_PRIMARY
+            stats_inner.addWidget(_make_kv_row(stats_frame, label, value, col))
+        self._db_lay.addWidget(stats_frame)
 
-        # ── Log tab ──
+        # Log tab
         log_content = _read_log_tail(log_path, lines=100)
-        self._log_textbox.configure(state="normal")
-        self._log_textbox.delete("1.0", "end")
-        self._log_textbox.insert("1.0", log_content)
-        self._log_textbox.see("end")
-        self._log_textbox.configure(state="disabled")
-
-    # ──────────────────────────── Actions ───────────────────────────────
+        self._log_box.setPlainText(log_content)
+        self._log_box.moveCursor(QTextCursor.MoveOperation.End)
 
     def _open_log(self):
         log_path = _get_log_path()
         try:
             os.startfile(log_path)
         except Exception:
-            pass
+            import subprocess
+            try:
+                subprocess.Popen(["xdg-open", log_path])
+            except Exception:
+                pass
 
     def _copy_all(self):
-        try:
-            text = _build_diagnostics_text()
-            self.dialog.clipboard_clear()
-            self.dialog.clipboard_append(text)
-            self.dialog.update()
-            # Brief visual feedback
-            orig_text = "📋 Copy All"
-            # find button and flash it
-            self.dialog.after(100, lambda: None)  # yield
-        except Exception:
-            pass
+        text = _build_diagnostics_text()
+        QApplication.clipboard().setText(text)
 
 
-def show_debug_panel(parent: ctk.CTk):
+def show_debug_panel(parent=None):
     """Open the diagnostic panel."""
-    return DebugPanel(parent)
+    dlg = DebugPanel(parent)
+    dlg.exec()

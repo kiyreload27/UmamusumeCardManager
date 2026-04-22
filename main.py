@@ -32,7 +32,6 @@ def get_log_path() -> str:
         if sys.platform == "win32":
             base = os.environ.get("APPDATA", os.path.expanduser("~"))
         else:
-            # XDG Base Directory spec: ~/.local/state  (or $XDG_STATE_HOME)
             base = os.environ.get(
                 "XDG_STATE_HOME",
                 os.path.join(os.path.expanduser("~"), ".local", "state")
@@ -60,19 +59,17 @@ def setup_logging(level_name: str = "INFO") -> str:
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
 
-    # Console handler
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(level)
     console_handler.setFormatter(fmt)
     root_logger.addHandler(console_handler)
 
-    # Rotating file handler (5 MB × 3 backups)
     log_path = get_log_path()
     try:
         file_handler = logging.handlers.RotatingFileHandler(
             log_path, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
         )
-        file_handler.setLevel(logging.DEBUG)   # always log everything to file
+        file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(fmt)
         root_logger.addHandler(file_handler)
     except Exception as e:
@@ -85,7 +82,7 @@ def setup_logging(level_name: str = "INFO") -> str:
 # Global exception hook
 # ──────────────────────────────────────────────────────────────────────────────
 
-_LOG_PATH: str = ""   # set after setup_logging() is called
+_LOG_PATH: str = ""
 
 
 def _global_exception_hook(exc_type, exc_value, exc_tb):
@@ -103,7 +100,6 @@ def _global_exception_hook(exc_type, exc_value, exc_tb):
         from gui.crash_dialog import show_crash_dialog
         show_crash_dialog(exc_type, exc_value, exc_tb, log_path=_LOG_PATH)
     except Exception:
-        # Absolute last resort
         import traceback
         traceback.print_exception(exc_type, exc_value, exc_tb)
 
@@ -116,9 +112,20 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 logger = logging.getLogger(__name__)
 
+
 # ──────────────────────────────────────────────────────────────────────────────
-# Scraper runners
+# Scraper runners (no GUI dependency — just show QMessageBox on error)
 # ──────────────────────────────────────────────────────────────────────────────
+
+def _show_error(title: str, message: str):
+    """Show an error dialog — uses QMessageBox if QApplication exists."""
+    try:
+        from PySide6.QtWidgets import QApplication, QMessageBox
+        app = QApplication.instance() or QApplication(sys.argv)
+        QMessageBox.critical(None, title, message)
+    except Exception:
+        print(f"ERROR — {title}\n{message}", file=sys.stderr)
+
 
 def run_scraper():
     try:
@@ -128,15 +135,9 @@ def run_scraper():
         import traceback
         error_msg = f"An error occurred while running the scraper:\n\n{e}\n\n{traceback.format_exc()}"
         logger.error(error_msg)
-        try:
-            import tkinter as tk
-            from tkinter import messagebox
-            root = tk.Tk()
-            root.withdraw()
-            messagebox.showerror("Scraper Error", error_msg)
-        except Exception:
-            pass
+        _show_error("Scraper Error", error_msg)
         sys.exit(1)
+
 
 def run_track_scraper():
     try:
@@ -146,15 +147,9 @@ def run_track_scraper():
         import traceback
         error_msg = f"An error occurred while running the track scraper:\n\n{e}\n\n{traceback.format_exc()}"
         logger.error(error_msg)
-        try:
-            import tkinter as tk
-            from tkinter import messagebox
-            root = tk.Tk()
-            root.withdraw()
-            messagebox.showerror("Track Scraper Error", error_msg)
-        except Exception:
-            pass
+        _show_error("Track Scraper Error", error_msg)
         sys.exit(1)
+
 
 def run_character_scraper():
     try:
@@ -164,15 +159,9 @@ def run_character_scraper():
         import traceback
         error_msg = f"An error occurred while running the character scraper:\n\n{e}\n\n{traceback.format_exc()}"
         logger.error(error_msg)
-        try:
-            import tkinter as tk
-            from tkinter import messagebox
-            root = tk.Tk()
-            root.withdraw()
-            messagebox.showerror("Character Scraper Error", error_msg)
-        except Exception:
-            pass
+        _show_error("Character Scraper Error", error_msg)
         sys.exit(1)
+
 
 def run_race_scraper():
     try:
@@ -182,15 +171,9 @@ def run_race_scraper():
         import traceback
         error_msg = f"An error occurred while running the race scraper:\n\n{e}\n\n{traceback.format_exc()}"
         logger.error(error_msg)
-        try:
-            import tkinter as tk
-            from tkinter import messagebox
-            root = tk.Tk()
-            root.withdraw()
-            messagebox.showerror("Race Scraper Error", error_msg)
-        except Exception:
-            pass
+        _show_error("Race Scraper Error", error_msg)
         sys.exit(1)
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # DB startup sanity check
@@ -208,48 +191,67 @@ def _db_sanity_check() -> bool:
         return True
     except Exception as e:
         logger.critical(f"Database sanity check FAILED: {e}")
-        try:
-            import tkinter as tk
-            from tkinter import messagebox
-            root = tk.Tk()
-            root.withdraw()
-            messagebox.showerror(
-                "Database Error",
-                f"Could not open the database:\n\n{e}\n\n"
-                "Try deleting 'database/umamusume.db' and restarting."
-            )
-            root.destroy()
-        except Exception:
-            pass
+        _show_error(
+            "Database Error",
+            f"Could not open the database:\n\n{e}\n\n"
+            "Try deleting 'database/umamusume.db' and restarting."
+        )
         return False
 
+
 # ──────────────────────────────────────────────────────────────────────────────
-# GUI runner
+# GUI runner — single QApplication instance, launcher then main window
 # ──────────────────────────────────────────────────────────────────────────────
 
 def run_gui():
+    from PySide6.QtWidgets import QApplication
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QFont
+
+    # Enable HiDPI before creating QApplication
+    QApplication.setHighDpiScaleFactorRoundingPolicy(
+        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+    )
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    app.setApplicationName("Umamusume Support Card Manager")
+    app.setOrganizationName("UmamusumeCardManager")
+
+    # Apply global stylesheet
+    try:
+        from gui.theme import STYLESHEET
+        app.setStyleSheet(STYLESHEET)
+    except Exception as e:
+        logger.warning(f"Could not load stylesheet: {e}")
+
+    # Set default font
+    try:
+        from gui.theme import FONT_BODY
+        app.setFont(FONT_BODY)
+    except Exception:
+        pass
+
     try:
         from gui.launcher_window import LauncherWindow
         launcher = LauncherWindow()
-        launcher.run()
-        
-        if getattr(launcher, 'next_action', 'exit') == 'app':
+        launcher.show()
+        app.exec()
+
+        next_action = getattr(launcher, 'next_action', 'exit')
+
+        if next_action == 'app':
             from gui.main_window import MainWindow
-            app = MainWindow()
-            app.run()
+            main_win = MainWindow()
+            main_win.show()
+            sys.exit(app.exec())
+
     except Exception as e:
         import traceback
         error_msg = f"An error occurred while launching the GUI:\n\n{e}\n\n{traceback.format_exc()}"
         logger.error(error_msg)
-        try:
-            import tkinter as tk
-            from tkinter import messagebox
-            root = tk.Tk()
-            root.withdraw()
-            messagebox.showerror("Application Error", error_msg)
-        except Exception:
-            pass
+        _show_error("Application Error", error_msg)
         sys.exit(1)
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Entry point
@@ -286,7 +288,6 @@ def main():
 
     args = parser.parse_args()
 
-    # Set up logging first so everything after is captured
     _LOG_PATH = setup_logging(args.log_level)
     sys.excepthook = _global_exception_hook
 
@@ -316,7 +317,6 @@ def main():
         logger.info("Starting race scraper...")
         run_race_scraper()
     else:
-        # Default to GUI — run DB sanity check first
         logger.info("Launching Umamusume Support Card Manager...")
         if not _db_sanity_check():
             sys.exit(1)

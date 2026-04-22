@@ -9,14 +9,11 @@ requests>=2.31.0
 # Image handling
 Pillow>=10.0.0
 
-# GUI — CustomTkinter (modern styled widgets on top of tkinter)
-customtkinter>=5.2.0
+# GUI — PySide6 (Qt for Python)
+PySide6>=6.6.0
 
 # Database (included with Python, but listing for clarity)
 # sqlite3 - built-in
-
-# GUI (included with Python)
-# tkinter - built-in
 
 # ── Build tools (only needed when building the .exe, not for running) ──
 # pyinstaller>=6.0.0

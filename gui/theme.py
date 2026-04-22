@@ -1,494 +1,642 @@
 """
-Centralized Theme Module for Umamusume Support Card Manager
-Warm charcoal & rose-gold aesthetic — comfortable for long sessions, true to the game's feel
+AETHER Theme — PySide6 Edition
+Design token bridge: maps design_system.py constants to PySide6-compatible
+values (hex strings, QFont objects, QSS stylesheet fragments) and provides
+factory functions for styled widgets.
+
+All color/spacing/font constant NAMES are preserved so existing views can
+import them without change.  Only the values that were CTk-specific (tuples
+for fonts, ctk-widget factories) have been replaced with Qt equivalents.
 """
 
-import tkinter as tk
-from tkinter import ttk
-import customtkinter as ctk
+from PySide6.QtWidgets import (
+    QPushButton, QLineEdit, QLabel, QFrame, QWidget, QScrollArea
+)
+from PySide6.QtGui import QFont, QColor
+from PySide6.QtCore import Qt
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# CONFIGURATION
-# ═══════════════════════════════════════════════════════════════════════════════
+# ─── Re-export all design tokens so views can do:
+#     from gui.theme import BG_DARK, ACCENT_PRIMARY, FONT_BODY, ...
+# ─────────────────────────────────────────────────────────────────────────────
 
-ctk.set_appearance_mode("Dark")
-ctk.set_default_color_theme("blue")
+from gui.design_system import (
+    VOID_0, VOID_1, VOID_2, SURFACE, SURFACE_ELEVATED,
+    BORDER_SUBTLE, BORDER_STRONG,
+    SIGNAL_PRIMARY, SIGNAL_SECONDARY, SIGNAL_MINT, SIGNAL_AMBER, SIGNAL_ROSE,
+    SIGNAL_CYAN, SIGNAL_PRIMARY_DIM, SIGNAL_GLOW,
+    FONT_UI, FONT_FALLBACK, FONT_MONO, FONT_MONO_FB,
+    S0, S1, S2, S3, S4, S5, S6, S7, S8,
+    SPACE_XS, SPACE_SM, SPACE_MD, SPACE_LG, SPACE_XL, SPACE_2XL,
+    RAD_TIGHT, RAD_STD, RAD_LG, RAD_XL, RAD_PILL,
+    TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, TEXT_DISABLED, TEXT_ON_SIGNAL,
+    RARITY_COLORS, TYPE_COLORS, TYPE_ICONS, GRADE_COLORS,
+)
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# COLOR PALETTE — Warm charcoal base + rose-gold accents
-# ═══════════════════════════════════════════════════════════════════════════════
+# ─── Background aliases (legacy names used throughout the views) ──────────────
 
-# Backgrounds — Warm, layered dark surfaces (brown-tinted, not blue-tinted)
-BG_DARKEST  = '#13100f'   # Deepest warm charcoal — main content backdrop
-BG_DARK     = '#1d1917'   # Panels, sidebar
-BG_MEDIUM   = '#272220'   # Cards, input fields
-BG_LIGHT    = '#332e2b'   # Borders, dividers
-BG_HIGHLIGHT = '#3f3835'  # Active states, selections
-BG_ELEVATED = '#2c2724'   # Elevated card surfaces
+BG_DARKEST  = VOID_0
+BG_DARK     = VOID_1
+BG_MEDIUM   = VOID_2
+BG_LIGHT    = BORDER_SUBTLE
+BG_HIGHLIGHT = BORDER_STRONG
+BG_ELEVATED  = SURFACE_ELEVATED
 
-# Glass overlay
-GLASS_BG     = '#2c272480'
-GLASS_BORDER = '#ffffff10'
+# ─── Accent aliases ───────────────────────────────────────────────────────────
 
-# Accents — Warm rose / gold / sage system
-ACCENT_PRIMARY   = '#d4836a'   # Dusty rose-orange (CTAs, active nav)
-ACCENT_SECONDARY = '#c9a84c'   # Warm gold (secondary elements)
-ACCENT_TERTIARY  = '#9b7ec8'   # Muted lavender (highlights, special items)
-ACCENT_SUCCESS   = '#6dab7a'   # Sage green
-ACCENT_WARNING   = '#d4924a'   # Warm amber
-ACCENT_ERROR     = '#c96464'   # Muted red
-ACCENT_INFO      = '#5fa8c8'   # Muted teal
+ACCENT_PRIMARY   = SIGNAL_PRIMARY
+ACCENT_SECONDARY = SIGNAL_SECONDARY
+ACCENT_TERTIARY  = SIGNAL_CYAN
+ACCENT_SUCCESS   = SIGNAL_MINT
+ACCENT_WARNING   = SIGNAL_AMBER
+ACCENT_ERROR     = SIGNAL_ROSE
+ACCENT_INFO      = SIGNAL_CYAN
 
-# Glow variants
-ACCENT_PRIMARY_GLOW   = '#d4836a28'
-ACCENT_SUCCESS_GLOW   = '#6dab7a28'
-ACCENT_WARNING_GLOW   = '#d4924a28'
-ACCENT_ERROR_GLOW     = '#c9646428'
+# ─── Spacing aliases (SPACING_* → S* scale) ──────────────────────────────────
 
-# Text — Warm-tinted for comfort during extended use
-TEXT_PRIMARY   = '#f2ebe4'   # Warm cream (headers, main content)
-TEXT_SECONDARY = '#cec5bb'   # Warm greige (body text)
-TEXT_MUTED     = '#9d9089'   # Warm taupe (captions, labels)
-TEXT_DISABLED  = '#6b6058'   # Dimmed (disabled states)
-TEXT_INVERSE   = '#13100f'   # For text on bright backgrounds
+SPACING_XS  = S1    # 4
+SPACING_SM  = S2    # 8
+SPACING_MD  = S3    # 12
+SPACING_LG  = S4    # 16
+SPACING_XL  = S5    # 20
+SPACING_2XL = S8    # 48
 
-# Rarity — Consistent, vibrant
-RARITY_SSR = '#d4924a'    # Warm amber/gold
-RARITY_SR  = '#b0b8c4'    # Cool silver (contrast intentional)
-RARITY_R   = '#a07850'    # Warm bronze
-RARITY_COLORS = {'SSR': RARITY_SSR, 'SR': RARITY_SR, 'R': RARITY_R}
+# ─── Radius aliases ───────────────────────────────────────────────────────────
 
-# Card type colors — warmer variants of the originals
-TYPE_COLORS = {
-    'Speed':   '#7ab0e8',   # Soft blue
-    'Stamina': '#e07860',   # Warm terracotta
-    'Power':   '#d4b44a',   # Gold-yellow
-    'Guts':    '#d47070',   # Warm red
-    'Wisdom':  '#6dab7a',   # Sage green
-    'Friend':  '#b07ad4',   # Soft purple
-    'Group':   '#d4924a',   # Warm amber
+RADIUS_SM   = RAD_TIGHT  # 6
+RADIUS_MD   = RAD_STD    # 10
+RADIUS_LG   = RAD_LG     # 16
+RADIUS_FULL = RAD_PILL   # 999
+
+# ─── Font family ──────────────────────────────────────────────────────────────
+
+FONT_FAMILY = FONT_FALLBACK
+
+
+# ─── QFont helpers ───────────────────────────────────────────────────────────
+
+def _f(size: int, bold: bool = False, family: str = FONT_FALLBACK) -> QFont:
+    font = QFont(family, size)
+    if bold:
+        font.setBold(True)
+    return font
+
+
+def _fm(size: int) -> QFont:
+    """Monospace font."""
+    f = QFont(FONT_MONO_FB, size)
+    return f
+
+
+# ─── Font constants (QFont objects, same names as the old CTk tuples) ─────────
+
+FONT_DISPLAY    = _f(26, bold=True)
+FONT_TITLE      = _f(20, bold=True)
+FONT_HEADER     = _f(16, bold=True)
+FONT_SUBHEADER  = _f(13, bold=True)
+FONT_BODY       = _f(12)
+FONT_BODY_BOLD  = _f(12, bold=True)
+FONT_SMALL      = _f(11)
+FONT_TINY       = _f(10)
+FONT_MONO       = _fm(11)
+FONT_MONO_SMALL = _fm(10)
+
+# ─── Rarity / type helpers ────────────────────────────────────────────────────
+
+RARITY_COLORS = {
+    "SSR": "#ffd77a",
+    "SR":  "#b0c4de",
+    "R":   "#cd7f32",
 }
-TYPE_ICONS = {
-    'Speed': '🏃', 'Stamina': '💚', 'Power': '💪',
-    'Guts': '🔥', 'Wisdom': '🧠', 'Friend': '💜', 'Group': '👥'
-}
 
-# Race grade colors
-GRADE_COLORS = {
-    'GI':  '#d4924a', 'G1':  '#d4924a',   # Warm gold
-    'GII': '#b0b8c4', 'G2':  '#b0b8c4',   # Silver
-    'GIII':'#a07850', 'G3':  '#a07850',   # Bronze
-    'OP':  '#9b7ec8', 'Pre-OP': '#b09ad4', # Lavender
-}
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# SPACING & RADIUS TOKENS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-SPACING_XS  = 4
-SPACING_SM  = 8
-SPACING_MD  = 16
-SPACING_LG  = 24
-SPACING_XL  = 32
-SPACING_2XL = 48
-
-RADIUS_SM   = 6
-RADIUS_MD   = 10
-RADIUS_LG   = 16
-RADIUS_XL   = 22
-RADIUS_FULL = 100
-
-# Sidebar
-SIDEBAR_WIDTH_EXPANDED  = 220
-SIDEBAR_WIDTH_COLLAPSED = 58
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TYPOGRAPHY
-# ═══════════════════════════════════════════════════════════════════════════════
-
-FONT_FAMILY      = 'Segoe UI'
-FONT_FAMILY_MONO = 'Consolas'
-
-FONT_DISPLAY    = (FONT_FAMILY, 26, 'bold')
-FONT_TITLE      = (FONT_FAMILY, 20, 'bold')
-FONT_HEADER     = (FONT_FAMILY, 15, 'bold')
-FONT_SUBHEADER  = (FONT_FAMILY, 13, 'bold')
-FONT_BODY       = (FONT_FAMILY, 12)
-FONT_BODY_BOLD  = (FONT_FAMILY, 12, 'bold')
-FONT_SMALL      = (FONT_FAMILY, 11)
-FONT_TINY       = (FONT_FAMILY, 10)
-FONT_MONO       = (FONT_FAMILY_MONO, 12)
-FONT_MONO_SMALL = (FONT_FAMILY_MONO, 11)
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TTK STYLE CONFIGURATION
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def configure_styles(root: tk.Tk):
-    """Configure ttk styles for legacy widgets (Treeview, Scrollbar, etc.)"""
-    style = ttk.Style()
-    style.theme_use('clam')
-
-    style.configure('TFrame', background=BG_DARK)
-    style.configure('TLabel', background=BG_DARK, foreground=TEXT_SECONDARY, font=FONT_BODY)
-    style.configure('TLabelframe', background=BG_DARK, foreground=TEXT_SECONDARY)
-    style.configure('TLabelframe.Label', background=BG_DARK, foreground=ACCENT_PRIMARY, font=FONT_SUBHEADER)
-
-    style.configure('Title.TLabel',     font=FONT_TITLE,     foreground=TEXT_PRIMARY,   background=BG_DARK)
-    style.configure('Header.TLabel',    font=FONT_HEADER,    foreground=ACCENT_PRIMARY, background=BG_DARK)
-    style.configure('Subheader.TLabel', font=FONT_SUBHEADER, foreground=TEXT_PRIMARY,   background=BG_DARK)
-    style.configure('Subtitle.TLabel',  font=FONT_SMALL,     foreground=TEXT_MUTED,     background=BG_DARK)
-    style.configure('Stats.TLabel',     font=FONT_SMALL,     foreground=TEXT_SECONDARY, background=BG_MEDIUM, padding=8)
-    style.configure('Accent.TLabel',    font=FONT_BODY,      foreground=ACCENT_PRIMARY, background=BG_DARK)
-
-    style.configure('TButton', padding=(12, 6), font=FONT_BODY, background=BG_LIGHT, foreground=TEXT_PRIMARY)
-    style.map('TButton',
-              background=[('active', BG_HIGHLIGHT), ('pressed', ACCENT_PRIMARY)],
-              foreground=[('active', TEXT_PRIMARY), ('pressed', TEXT_PRIMARY)])
-    style.configure('Accent.TButton', padding=(12, 6), font=FONT_BODY_BOLD,
-                    background=ACCENT_PRIMARY, foreground=TEXT_PRIMARY)
-    style.configure('Small.TButton', padding=(8, 4), font=FONT_SMALL)
-
-    style.configure('TCheckbutton', background=BG_DARK, foreground=TEXT_SECONDARY, font=FONT_BODY)
-    style.map('TCheckbutton', background=[('active', BG_DARK)], foreground=[('active', TEXT_PRIMARY)])
-    style.configure('Large.TCheckbutton', font=FONT_BODY_BOLD, background=BG_DARK, foreground=TEXT_PRIMARY)
-
-    style.configure('TEntry', fieldbackground=BG_MEDIUM, foreground=TEXT_PRIMARY,
-                    insertcolor=TEXT_PRIMARY, padding=6)
-    style.configure('TCombobox', fieldbackground=BG_MEDIUM, background=BG_LIGHT,
-                    foreground=TEXT_PRIMARY, arrowcolor=TEXT_MUTED, padding=4)
-    style.map('TCombobox', fieldbackground=[('readonly', BG_MEDIUM)],
-              selectbackground=[('readonly', BG_HIGHLIGHT)])
-
-    style.configure('TNotebook', background=BG_DARK, borderwidth=0)
-    style.configure('TNotebook.Tab', padding=(20, 10), font=FONT_BODY_BOLD,
-                    background=BG_MEDIUM, foreground=TEXT_MUTED)
-    style.map('TNotebook.Tab',
-              background=[('selected', BG_LIGHT), ('active', BG_HIGHLIGHT)],
-              foreground=[('selected', ACCENT_PRIMARY), ('active', TEXT_PRIMARY)],
-              expand=[('selected', (0, 0, 0, 2))])
-
-    # Treeview
-    style.configure('Treeview',
-                    background=BG_MEDIUM, foreground=TEXT_SECONDARY,
-                    fieldbackground=BG_MEDIUM, font=FONT_BODY, rowheight=36)
-    style.configure('Treeview.Heading',
-                    font=FONT_BODY_BOLD, background=BG_LIGHT,
-                    foreground=TEXT_PRIMARY, padding=8)
-    style.map('Treeview',
-              background=[('selected', ACCENT_PRIMARY)],
-              foreground=[('selected', TEXT_INVERSE)])
-    style.map('Treeview.Heading', background=[('active', BG_HIGHLIGHT)])
-
-    style.configure('CardList.Treeview',
-                    background=BG_MEDIUM, foreground=TEXT_SECONDARY,
-                    fieldbackground=BG_MEDIUM, font=FONT_BODY, rowheight=80)
-    style.configure('DeckList.Treeview',
-                    background=BG_MEDIUM, foreground=TEXT_SECONDARY,
-                    fieldbackground=BG_MEDIUM, font=FONT_BODY, rowheight=80)
-    style.map('DeckList.Treeview', background=[('selected', ACCENT_PRIMARY)])
-
-    style.configure('TScale', background=BG_DARK, troughcolor=BG_MEDIUM, sliderthickness=18)
-    style.configure('TScrollbar', background=BG_LIGHT, troughcolor=BG_DARKEST,
-                    borderwidth=0, arrowsize=0, width=6)
-    style.map('TScrollbar', background=[('active', BG_HIGHLIGHT), ('pressed', ACCENT_PRIMARY)])
-    style.configure('TPanedwindow', background=BG_DARK)
-
-    root.configure(bg=BG_DARKEST)
+def get_rarity_color(rarity: str) -> str:
+    return RARITY_COLORS.get(rarity, TEXT_MUTED)
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# CTK WIDGET FACTORIES
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def create_styled_entry(parent, textvariable=None, **kwargs):
-    """Styled CTkEntry with warm focus feel"""
-    kwargs.pop('bg', None); kwargs.pop('fg', None)
-    safe = {k: v for k, v in kwargs.items()
-            if k not in ('bd', 'relief', 'insertbackground', 'selectbackground',
-                         'selectforeground', 'highlightthickness')}
-    return ctk.CTkEntry(
-        parent, textvariable=textvariable,
-        font=FONT_BODY, fg_color=BG_MEDIUM, text_color=TEXT_PRIMARY,
-        border_width=1, border_color=BG_LIGHT, corner_radius=RADIUS_MD,
-        height=38, **safe
-    )
+def get_type_icon(card_type: str) -> str:
+    return TYPE_ICONS.get(card_type, "?")
 
 
-def create_styled_button(parent, text, command=None, style_type='default', **kwargs):
-    """Styled CTkButton with warm variants"""
-    _fg = {
-        'default':   BG_LIGHT,
-        'accent':    ACCENT_PRIMARY,
-        'secondary': ACCENT_SECONDARY,
-        'success':   ACCENT_SUCCESS,
-        'warning':   ACCENT_WARNING,
-        'danger':    ACCENT_ERROR,
-        'ghost':     'transparent',
-    }
-    _hover = {
-        'default':   BG_HIGHLIGHT,
-        'accent':    '#bf6e58',
-        'secondary': '#b4923e',
-        'success':   '#5a9467',
-        'warning':   '#bf7e3c',
-        'danger':    '#b45050',
-        'ghost':     BG_LIGHT,
-    }
-    _text = {
-        'default':   TEXT_PRIMARY,
-        'accent':    TEXT_PRIMARY,
-        'secondary': TEXT_INVERSE,
-        'success':   TEXT_PRIMARY,
-        'warning':   TEXT_INVERSE,
-        'danger':    TEXT_PRIMARY,
-        'ghost':     TEXT_SECONDARY,
-    }
-    safe = {k: v for k, v in kwargs.items()
-            if k not in ('bg', 'bd', 'relief', 'activebackground',
-                         'activeforeground', 'padx', 'pady')}
-    return ctk.CTkButton(
-        parent, text=text, command=command,
-        fg_color=_fg.get(style_type, BG_LIGHT),
-        hover_color=_hover.get(style_type, BG_HIGHLIGHT),
-        text_color=_text.get(style_type, TEXT_PRIMARY),
-        font=FONT_BODY_BOLD if style_type in ('accent', 'secondary') else FONT_BODY,
-        corner_radius=RADIUS_MD, border_width=0, **safe
-    )
+def get_type_color(card_type: str) -> str:
+    return TYPE_COLORS.get(card_type, TEXT_MUTED)
 
 
-def create_sidebar_button(parent, text, command=None, active=False, **kwargs):
-    """Sidebar nav button with warm active indicator"""
-    safe = {k: v for k, v in kwargs.items()
-            if k not in ('bg', 'fg', 'activebackground', 'activeforeground', 'padx', 'pady')}
-    bg_color   = BG_HIGHLIGHT if active else 'transparent'
-    text_color = ACCENT_PRIMARY if active else TEXT_MUTED
-    return ctk.CTkButton(
-        parent, text=text, command=command,
-        fg_color=bg_color, hover_color=BG_LIGHT,
-        text_color=text_color, font=FONT_BODY_BOLD,
-        corner_radius=RADIUS_MD, anchor='w', height=42,
-        border_width=0, **safe
-    )
+# ─── Master QSS Stylesheet ───────────────────────────────────────────────────
+
+STYLESHEET = f"""
+/* ──────────────────────── Global ──────────────────────── */
+QWidget {{
+    background-color: {VOID_1};
+    color: {TEXT_PRIMARY};
+    font-family: "{FONT_FALLBACK}";
+    font-size: 12px;
+    border: none;
+    outline: none;
+}}
+
+QMainWindow, QDialog {{
+    background-color: {VOID_0};
+}}
+
+/* ──────────────────────── Buttons ──────────────────────── */
+QPushButton {{
+    background-color: {BORDER_SUBTLE};
+    color: {TEXT_PRIMARY};
+    border: 1px solid {BORDER_STRONG};
+    border-radius: {RAD_STD}px;
+    padding: 6px 14px;
+    font-size: 12px;
+}}
+QPushButton:hover {{
+    background-color: {BORDER_STRONG};
+    border-color: {SIGNAL_PRIMARY};
+}}
+QPushButton:pressed {{
+    background-color: {VOID_2};
+}}
+QPushButton:disabled {{
+    color: {TEXT_DISABLED};
+    background-color: {VOID_1};
+    border-color: {BORDER_SUBTLE};
+}}
+
+/* Accent */
+QPushButton[styleType="accent"] {{
+    background-color: {SIGNAL_PRIMARY};
+    color: {VOID_0};
+    border-color: {SIGNAL_PRIMARY};
+    font-weight: bold;
+}}
+QPushButton[styleType="accent"]:hover {{
+    background-color: {SIGNAL_PRIMARY_DIM};
+    border-color: {SIGNAL_PRIMARY_DIM};
+}}
+QPushButton[styleType="accent"]:disabled {{
+    background-color: {BORDER_SUBTLE};
+    color: {TEXT_DISABLED};
+    border-color: {BORDER_SUBTLE};
+}}
+
+/* Secondary */
+QPushButton[styleType="secondary"] {{
+    background-color: {VOID_2};
+    color: {SIGNAL_SECONDARY};
+    border-color: {SIGNAL_SECONDARY};
+}}
+QPushButton[styleType="secondary"]:hover {{
+    background-color: {SURFACE};
+}}
+
+/* Success */
+QPushButton[styleType="success"] {{
+    background-color: {SIGNAL_MINT};
+    color: {VOID_0};
+    border-color: {SIGNAL_MINT};
+    font-weight: bold;
+}}
+
+/* Ghost */
+QPushButton[styleType="ghost"] {{
+    background-color: transparent;
+    color: {TEXT_MUTED};
+    border-color: {BORDER_SUBTLE};
+}}
+QPushButton[styleType="ghost"]:hover {{
+    color: {TEXT_PRIMARY};
+    border-color: {BORDER_STRONG};
+    background-color: {VOID_2};
+}}
+
+/* Danger */
+QPushButton[styleType="danger"] {{
+    background-color: {SIGNAL_ROSE};
+    color: {VOID_0};
+    border-color: {SIGNAL_ROSE};
+    font-weight: bold;
+}}
+
+/* Pill / chip buttons */
+QPushButton[styleType="chip"] {{
+    background-color: {VOID_2};
+    color: {TEXT_MUTED};
+    border: 1px solid {BORDER_SUBTLE};
+    border-radius: {RAD_PILL}px;
+    padding: 3px 10px;
+    font-size: 10px;
+}}
+QPushButton[styleType="chip"]:hover {{
+    border-color: {SIGNAL_PRIMARY};
+    color: {TEXT_PRIMARY};
+}}
+QPushButton[styleType="chip"][active="true"] {{
+    background-color: {SIGNAL_PRIMARY};
+    color: {VOID_0};
+    border-color: {SIGNAL_PRIMARY};
+    font-weight: bold;
+}}
+
+/* ──────────────────────── Inputs ──────────────────────── */
+QLineEdit {{
+    background-color: {SURFACE};
+    color: {TEXT_PRIMARY};
+    border: 1px solid {BORDER_SUBTLE};
+    border-radius: {RAD_STD}px;
+    padding: 5px 10px;
+    selection-background-color: {SIGNAL_PRIMARY};
+}}
+QLineEdit:focus {{
+    border-color: {SIGNAL_PRIMARY};
+    background-color: {VOID_2};
+}}
+QLineEdit:disabled {{
+    color: {TEXT_DISABLED};
+    background-color: {VOID_1};
+}}
+QLineEdit::placeholder {{
+    color: {TEXT_DISABLED};
+}}
+
+QTextEdit, QPlainTextEdit {{
+    background-color: {SURFACE};
+    color: {TEXT_SECONDARY};
+    border: 1px solid {BORDER_SUBTLE};
+    border-radius: {RAD_STD}px;
+    padding: 6px;
+    selection-background-color: {SIGNAL_PRIMARY};
+    font-family: "{FONT_MONO_FB}";
+    font-size: 11px;
+}}
+QTextEdit:focus, QPlainTextEdit:focus {{
+    border-color: {SIGNAL_PRIMARY};
+}}
+
+/* ──────────────────────── Labels ──────────────────────── */
+QLabel {{
+    background-color: transparent;
+    color: {TEXT_PRIMARY};
+}}
+
+/* ──────────────────────── ComboBox ──────────────────────── */
+QComboBox {{
+    background-color: {SURFACE};
+    color: {TEXT_PRIMARY};
+    border: 1px solid {BORDER_SUBTLE};
+    border-radius: {RAD_STD}px;
+    padding: 4px 10px;
+    min-height: 26px;
+}}
+QComboBox:focus {{
+    border-color: {SIGNAL_PRIMARY};
+}}
+QComboBox:disabled {{
+    color: {TEXT_DISABLED};
+}}
+QComboBox::drop-down {{
+    border: none;
+    width: 20px;
+    subcontrol-origin: padding;
+    subcontrol-position: right center;
+}}
+QComboBox::down-arrow {{
+    image: none;
+    width: 8px;
+    height: 5px;
+}}
+QComboBox QAbstractItemView {{
+    background-color: {VOID_2};
+    color: {TEXT_PRIMARY};
+    border: 1px solid {BORDER_STRONG};
+    border-radius: {RAD_STD}px;
+    selection-background-color: {SIGNAL_PRIMARY};
+    selection-color: {TEXT_PRIMARY};
+    padding: 4px;
+    outline: none;
+}}
+QComboBox QAbstractItemView::item {{
+    padding: 6px 10px;
+    border-radius: {RAD_TIGHT}px;
+    min-height: 22px;
+}}
+
+/* ──────────────────────── CheckBox ──────────────────────── */
+QCheckBox {{
+    color: {TEXT_PRIMARY};
+    spacing: 6px;
+    font-size: 12px;
+}}
+QCheckBox::indicator {{
+    width: 16px;
+    height: 16px;
+    border: 2px solid {BORDER_STRONG};
+    border-radius: {RAD_TIGHT}px;
+    background-color: {SURFACE};
+}}
+QCheckBox::indicator:checked {{
+    background-color: {SIGNAL_PRIMARY};
+    border-color: {SIGNAL_PRIMARY};
+}}
+QCheckBox::indicator:hover {{
+    border-color: {SIGNAL_PRIMARY};
+}}
+
+/* ──────────────────────── Scroll bars ──────────────────────── */
+QScrollBar:vertical {{
+    background: {VOID_0};
+    width: 8px;
+    margin: 0;
+}}
+QScrollBar::handle:vertical {{
+    background: {BORDER_STRONG};
+    border-radius: 4px;
+    min-height: 20px;
+}}
+QScrollBar::handle:vertical:hover {{
+    background: {SIGNAL_PRIMARY};
+}}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+    height: 0;
+}}
+
+QScrollBar:horizontal {{
+    background: {VOID_0};
+    height: 8px;
+}}
+QScrollBar::handle:horizontal {{
+    background: {BORDER_STRONG};
+    border-radius: 4px;
+    min-width: 20px;
+}}
+QScrollBar::handle:horizontal:hover {{
+    background: {SIGNAL_PRIMARY};
+}}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+    width: 0;
+}}
+
+/* ──────────────────────── Progress bar ──────────────────────── */
+QProgressBar {{
+    background-color: {SURFACE};
+    border: 1px solid {BORDER_SUBTLE};
+    border-radius: {RAD_TIGHT}px;
+    text-align: center;
+    color: {TEXT_PRIMARY};
+    font-size: 10px;
+    min-height: 10px;
+}}
+QProgressBar::chunk {{
+    background-color: {SIGNAL_PRIMARY};
+    border-radius: {RAD_TIGHT}px;
+}}
+
+/* ──────────────────────── Scroll area ──────────────────────── */
+QScrollArea {{
+    background-color: transparent;
+    border: none;
+}}
+QScrollArea > QWidget > QWidget {{
+    background-color: transparent;
+}}
+
+/* ──────────────────────── Frames ──────────────────────── */
+QFrame[frameRole="card"] {{
+    background-color: {VOID_2};
+    border: 1px solid {BORDER_SUBTLE};
+    border-radius: {RAD_STD}px;
+}}
+QFrame[frameRole="glass"] {{
+    background-color: {SURFACE};
+    border: 1px solid {BORDER_STRONG};
+    border-radius: {RAD_LG}px;
+}}
+QFrame[frameRole="elevated"] {{
+    background-color: {SURFACE_ELEVATED};
+    border: 1px solid {BORDER_STRONG};
+    border-radius: {RAD_LG}px;
+}}
+QFrame[frameRole="divider"] {{
+    background-color: {BORDER_SUBTLE};
+    border: none;
+}}
+
+/* ──────────────────────── Tables ──────────────────────── */
+QTableWidget, QTreeWidget, QListWidget {{
+    background-color: {VOID_2};
+    color: {TEXT_PRIMARY};
+    border: 1px solid {BORDER_SUBTLE};
+    border-radius: {RAD_STD}px;
+    gridline-color: {BORDER_SUBTLE};
+    selection-background-color: {SIGNAL_PRIMARY};
+    selection-color: {VOID_0};
+    alternate-background-color: {SURFACE};
+    outline: none;
+}}
+QTableWidget::item, QTreeWidget::item, QListWidget::item {{
+    padding: 5px 8px;
+    border: none;
+}}
+QTableWidget::item:hover, QTreeWidget::item:hover, QListWidget::item:hover {{
+    background-color: {BORDER_SUBTLE};
+}}
+QHeaderView::section {{
+    background-color: {VOID_1};
+    color: {TEXT_MUTED};
+    padding: 6px 8px;
+    border: none;
+    border-bottom: 1px solid {BORDER_SUBTLE};
+    font-size: 11px;
+    font-weight: bold;
+}}
+QHeaderView::section:hover {{
+    color: {TEXT_PRIMARY};
+    background-color: {VOID_2};
+}}
+
+/* ──────────────────────── Tab widget ──────────────────────── */
+QTabWidget::pane {{
+    background-color: {VOID_1};
+    border: 1px solid {BORDER_SUBTLE};
+    border-radius: {RAD_STD}px;
+    top: -1px;
+}}
+QTabBar::tab {{
+    background-color: {VOID_2};
+    color: {TEXT_MUTED};
+    padding: 6px 16px;
+    border: 1px solid {BORDER_SUBTLE};
+    border-bottom: none;
+    border-top-left-radius: {RAD_TIGHT}px;
+    border-top-right-radius: {RAD_TIGHT}px;
+    margin-right: 2px;
+}}
+QTabBar::tab:selected {{
+    background-color: {VOID_1};
+    color: {TEXT_PRIMARY};
+    border-color: {SIGNAL_PRIMARY};
+}}
+QTabBar::tab:hover:!selected {{
+    color: {TEXT_PRIMARY};
+    background-color: {SURFACE};
+}}
+
+/* ──────────────────────── Splitter ──────────────────────── */
+QSplitter::handle {{
+    background-color: {BORDER_SUBTLE};
+}}
+QSplitter::handle:horizontal {{
+    width: 4px;
+}}
+QSplitter::handle:vertical {{
+    height: 4px;
+}}
+QSplitter::handle:hover {{
+    background-color: {SIGNAL_PRIMARY};
+}}
+
+/* ──────────────────────── Tooltip ──────────────────────── */
+QToolTip {{
+    background-color: {SURFACE_ELEVATED};
+    color: {TEXT_PRIMARY};
+    border: 1px solid {BORDER_STRONG};
+    border-radius: {RAD_TIGHT}px;
+    padding: 4px 8px;
+    font-size: 11px;
+}}
+
+/* ──────────────────────── Menu / context menu ──────────────────────── */
+QMenu {{
+    background-color: {VOID_2};
+    color: {TEXT_PRIMARY};
+    border: 1px solid {BORDER_STRONG};
+    border-radius: {RAD_STD}px;
+    padding: 4px;
+}}
+QMenu::item {{
+    padding: 6px 20px 6px 12px;
+    border-radius: {RAD_TIGHT}px;
+}}
+QMenu::item:selected {{
+    background-color: {SIGNAL_PRIMARY};
+    color: {VOID_0};
+}}
+QMenu::separator {{
+    height: 1px;
+    background-color: {BORDER_SUBTLE};
+    margin: 4px 8px;
+}}
+"""
 
 
-def create_styled_text(parent, height=10, **kwargs):
-    """Styled CTkTextbox"""
-    safe = {k: v for k, v in kwargs.items()
-            if k not in ('bg', 'fg', 'selectbackground', 'selectforeground',
-                         'relief', 'insertbackground', 'padx', 'pady', 'wrap')}
-    return ctk.CTkTextbox(
-        parent, height=height * 22,
-        font=FONT_MONO, corner_radius=RADIUS_MD,
-        text_color=TEXT_PRIMARY, fg_color=BG_DARK,
-        border_color=BG_LIGHT, border_width=1, **safe
-    )
+# ─── Widget factory functions (mirrors the old CTk factory functions) ─────────
+
+def _apply_style(widget: QWidget, style_type: str) -> None:
+    """Apply a named style type to a widget via dynamic Qt property."""
+    widget.setProperty("styleType", style_type)
+    widget.style().unpolish(widget)
+    widget.style().polish(widget)
 
 
-def create_card_frame(parent, elevated=False, **kwargs):
-    """Styled card frame with warm surface"""
-    safe = {k: v for k, v in kwargs.items()
-            if k not in ('bg', 'highlightthickness', 'highlightbackground')}
-    return ctk.CTkFrame(
-        parent,
-        corner_radius=RADIUS_LG,
-        fg_color=BG_ELEVATED if elevated else BG_MEDIUM,
-        border_width=1,
-        border_color=BG_LIGHT,
-        **safe,
-    )
+def create_styled_button(
+    parent: QWidget = None,
+    text: str = "",
+    command=None,
+    style_type: str = "default",
+    width: int = 0,
+    height: int = 0,
+    state: str = "normal",
+    **kwargs
+) -> QPushButton:
+    """Create a styled QPushButton matching the old CTk create_styled_button API."""
+    btn = QPushButton(text, parent)
+    if command:
+        btn.clicked.connect(command)
+    _apply_style(btn, style_type)
+    if width > 0:
+        btn.setMinimumWidth(width)
+    if height > 0:
+        btn.setFixedHeight(height)
+    if state == "disabled":
+        btn.setEnabled(False)
+    return btn
 
 
-def create_glass_frame(parent, **kwargs):
-    """Elevated glass-style panel"""
-    safe = {k: v for k, v in kwargs.items()
-            if k not in ('bg', 'highlightthickness', 'highlightbackground')}
-    return ctk.CTkFrame(
-        parent, corner_radius=RADIUS_LG,
-        fg_color=BG_ELEVATED, border_width=1, border_color=BG_LIGHT, **safe,
-    )
+def create_styled_entry(
+    parent: QWidget = None,
+    placeholder_text: str = "",
+    width: int = 0,
+    **kwargs
+) -> QLineEdit:
+    """Create a styled QLineEdit matching the old CTk create_styled_entry API."""
+    entry = QLineEdit(parent)
+    if placeholder_text:
+        entry.setPlaceholderText(placeholder_text)
+    if width > 0:
+        entry.setFixedWidth(width)
+    return entry
 
 
-def create_section_header(parent, title, icon='', action_text=None, action_command=None):
-    """Consistent section header"""
-    frame = ctk.CTkFrame(parent, fg_color='transparent')
-    label_text = f'{icon}  {title}' if icon else title
-    ctk.CTkLabel(
-        frame, text=label_text,
-        font=FONT_SUBHEADER, text_color=TEXT_PRIMARY
-    ).pack(side=tk.LEFT)
-    if action_text and action_command:
-        create_styled_button(
-            frame, text=action_text, command=action_command,
-            style_type='ghost', height=30, width=100
-        ).pack(side=tk.RIGHT)
+def create_card_frame(parent: QWidget = None) -> QFrame:
+    """Create a styled card frame."""
+    frame = QFrame(parent)
+    frame.setProperty("frameRole", "card")
+    frame.style().unpolish(frame)
+    frame.style().polish(frame)
     return frame
 
 
-def create_badge(parent, text, color=ACCENT_PRIMARY, bg=None, font=None):
-    """Small colored badge/pill"""
-    return ctk.CTkLabel(
-        parent, text=f' {text} ',
-        font=font or FONT_TINY,
-        text_color=color,
-        fg_color=bg or BG_LIGHT,
-        corner_radius=RADIUS_FULL,
-        height=22,
-    )
-
-
-def create_stat_bar(parent, value, max_value=100, color=ACCENT_PRIMARY,
-                    width=120, height=8, label=None):
-    """Horizontal stat/progress bar"""
-    container = ctk.CTkFrame(parent, fg_color='transparent')
-    if label:
-        ctk.CTkLabel(
-            container, text=label, font=FONT_TINY,
-            text_color=TEXT_MUTED, anchor='w'
-        ).pack(fill=tk.X)
-    bar_frame = ctk.CTkFrame(
-        container, fg_color=BG_DARK, corner_radius=4,
-        width=width, height=height
-    )
-    bar_frame.pack(fill=tk.X)
-    bar_frame.pack_propagate(False)
-    ratio = min(1.0, max(0.0, value / max_value)) if max_value > 0 else 0
-    fill_width = max(1, int(width * ratio))
-    ctk.CTkFrame(
-        bar_frame, fg_color=color, corner_radius=4,
-        width=fill_width, height=height
-    ).place(x=0, y=0)
-    return container
-
-
-def create_divider(parent, label=None, color=None):
-    """Horizontal divider with optional label"""
-    div_color = color or BG_LIGHT
-    if label:
-        frame = ctk.CTkFrame(parent, fg_color='transparent', height=20)
-        ctk.CTkFrame(frame, fg_color=div_color, height=1).pack(
-            side=tk.LEFT, fill=tk.X, expand=True, pady=10)
-        ctk.CTkLabel(
-            frame, text=f'  {label}  ', font=FONT_TINY,
-            text_color=TEXT_MUTED, fg_color='transparent'
-        ).pack(side=tk.LEFT)
-        ctk.CTkFrame(frame, fg_color=div_color, height=1).pack(
-            side=tk.LEFT, fill=tk.X, expand=True, pady=10)
-        return frame
-    else:
-        return ctk.CTkFrame(parent, fg_color=div_color, height=1)
-
-
-def create_icon_label(parent, icon, text, font=None, color=None, icon_color=None):
-    """Label with icon prefix"""
-    frame = ctk.CTkFrame(parent, fg_color='transparent')
-    if icon:
-        ctk.CTkLabel(
-            frame, text=icon, font=font or FONT_BODY,
-            text_color=icon_color or TEXT_MUTED
-        ).pack(side=tk.LEFT, padx=(0, SPACING_XS))
-    ctk.CTkLabel(
-        frame, text=text, font=font or FONT_BODY,
-        text_color=color or TEXT_SECONDARY
-    ).pack(side=tk.LEFT)
+def create_glass_frame(parent: QWidget = None) -> QFrame:
+    """Create a glass-effect frame."""
+    frame = QFrame(parent)
+    frame.setProperty("frameRole", "glass")
+    frame.style().unpolish(frame)
+    frame.style().polish(frame)
     return frame
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# HELPERS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def get_rarity_color(rarity):
-    return RARITY_COLORS.get(rarity, TEXT_SECONDARY)
-
-def get_type_color(card_type):
-    return TYPE_COLORS.get(card_type, TEXT_SECONDARY)
-
-def get_type_icon(card_type):
-    return TYPE_ICONS.get(card_type, '')
-
-def get_grade_color(grade):
-    return GRADE_COLORS.get(grade, ACCENT_PRIMARY)
+def create_section_header(parent: QWidget = None, text: str = "", icon: str = "") -> QLabel:
+    """Create a section header label."""
+    label = QLabel(f"{icon}  {text}" if icon else text, parent)
+    label.setFont(FONT_SUBHEADER)
+    label.setStyleSheet(f"color: {TEXT_PRIMARY}; background: transparent; padding: 4px 0;")
+    return label
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# TOOLTIPS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-EFFECT_DESCRIPTIONS = {
-    "Friendship Bonus":  "Increases stats gained during Friendship Training (orange aura).",
-    "Motivation Bonus":  "Increases stats gained based on your Uma's motivation level.",
-    "Specialty Rate":    "Increases the chance of this card appearing in its specialty training.",
-    "Training Bonus":    "Flat percentage increase to stats gained in training where this card is present.",
-    "Initial Bond":      "Starting gauge value for this card.",
-    "Race Bonus":        "Increases stats gained from racing.",
-    "Fan Count Bonus":   "Increases fans gained from racing.",
-    "Skill Pt Bonus":    "Bonus skill points gained when training with this card.",
-    "Hint Lv":           "Starting level of skills taught by this card's hints.",
-    "Hint Rate":         "Increases chance of getting a hint event.",
-    "Minigame Fail Rate":"Reduces chance of failing training.",
-    "Energy Usage":      "Reduces energy consumed during training.",
-    "Current Energy":    "Increases starting energy in scenario.",
-    "Vitality":          "Increases vitality gain from events.",
-    "Stamina":           "Increases stamina gain from training.",
-    "Speed":             "Increases speed gain from training.",
-    "Power":             "Increases power gain from training.",
-    "Guts":              "Increases guts gain from training.",
-    "Wisdom":            "Increases wisdom gain from training.",
-    "Logic":             "Custom logic effect.",
-    "Starting Stats":    "Increases initial stats at start of scenario.",
-}
+def create_styled_text(parent: QWidget = None, **kwargs) -> QLabel:
+    """Compatibility stub — returns a plain QLabel."""
+    return QLabel(parent)
 
 
-class Tooltip:
-    """Tooltip popup on hover"""
-
-    def __init__(self, widget, text):
-        self.widget = widget
-        self.text = text
-        self.tip_window = None
-        self.id = None
-        self._id1 = self.widget.bind('<Enter>', self.enter)
-        self._id2 = self.widget.bind('<Leave>', self.leave)
-        self._id3 = self.widget.bind('<ButtonPress>', self.leave)
-
-    def enter(self, event=None):    self.schedule()
-    def leave(self, event=None):    self.unschedule(); self.hidetip()
-
-    def schedule(self):
-        self.unschedule()
-        self.id = self.widget.after(400, self.showtip)
-
-    def unschedule(self):
-        _id = self.id; self.id = None
-        if _id: self.widget.after_cancel(_id)
-
-    def showtip(self, event=None):
-        x = y = 0
-        try:
-            x, y, cx, cy = self.widget.bbox('insert')
-        except Exception:
-            pass
-        x += self.widget.winfo_rootx() + 25
-        y += self.widget.winfo_rooty() + 20
-        self.tip_window = tk.Toplevel(self.widget)
-        self.tip_window.wm_overrideredirect(True)
-        self.tip_window.wm_geometry(f'+{x}+{y}')
-        frame = tk.Frame(
-            self.tip_window, background=BG_ELEVATED,
-            highlightbackground=BG_LIGHT, highlightthickness=1
-        )
-        frame.pack()
-        tk.Label(
-            frame, text=self.text, justify=tk.LEFT,
-            background=BG_ELEVATED, foreground=TEXT_PRIMARY,
-            font=FONT_SMALL, padx=12, pady=8, wraplength=300
-        ).pack()
-
-    def hidetip(self):
-        tw = self.tip_window; self.tip_window = None
-        if tw: tw.destroy()
+def create_divider(parent: QWidget = None, horizontal: bool = True) -> QFrame:
+    """Create a visual divider line."""
+    frame = QFrame(parent)
+    frame.setFrameShape(QFrame.Shape.HLine if horizontal else QFrame.Shape.VLine)
+    frame.setProperty("frameRole", "divider")
+    frame.style().unpolish(frame)
+    frame.style().polish(frame)
+    return frame
 
 
-def create_tooltip(widget, text):
-    return Tooltip(widget, text)
+def create_badge(parent: QWidget, text: str, color: str = None) -> QLabel:
+    """Create a small colored badge label."""
+    label = QLabel(text, parent)
+    label.setFont(FONT_TINY)
+    fg = color or SIGNAL_PRIMARY
+    label.setStyleSheet(
+        f"color: {fg}; background-color: {VOID_2}; border: 1px solid {fg};"
+        f"border-radius: {RAD_TIGHT}px; padding: 1px 6px;"
+    )
+    label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    return label
+
+
+def make_scroll_area(parent: QWidget = None) -> tuple:
+    """
+    Create a QScrollArea with a transparent inner widget+layout.
+    Returns (scroll_area, inner_widget) so callers can add children to inner_widget.
+    """
+    from PySide6.QtWidgets import QScrollArea as _QSA, QVBoxLayout
+    scroll = _QSA(parent)
+    scroll.setWidgetResizable(True)
+    scroll.setFrameShape(QFrame.Shape.NoFrame)
+    inner = QWidget()
+    inner.setStyleSheet("background: transparent;")
+    scroll.setWidget(inner)
+    return scroll, inner

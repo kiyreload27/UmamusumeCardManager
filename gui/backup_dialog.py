@@ -1,144 +1,144 @@
 """
-Backup & Restore Dialog
-Export/import user data (owned cards, decks, notes/tags) as JSON files
+Backup & Restore Dialog — PySide6 edition
+Export/import user data (owned cards, decks) as JSON files.
 """
 
-import tkinter as tk
-from tkinter import filedialog, messagebox
-import customtkinter as ctk
 import json
 import os
 import sys
 from datetime import datetime
+
+from PySide6.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+    QFrame, QFileDialog, QMessageBox
+)
+from PySide6.QtCore import Qt
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from db.db_queries import export_user_data, import_user_data
 from version import VERSION
 from gui.theme import (
-    BG_DARKEST, BG_DARK, BG_MEDIUM, BG_LIGHT, BG_HIGHLIGHT, BG_ELEVATED,
-    ACCENT_PRIMARY, ACCENT_SECONDARY, ACCENT_SUCCESS, ACCENT_ERROR, ACCENT_WARNING, ACCENT_INFO,
-    TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, TEXT_DISABLED,
-    FONT_HEADER, FONT_SUBHEADER, FONT_BODY, FONT_BODY_BOLD, FONT_SMALL, FONT_TINY,
-    SPACING_XS, SPACING_SM, SPACING_MD, SPACING_LG, SPACING_XL,
-    RADIUS_SM, RADIUS_MD, RADIUS_LG, RADIUS_FULL,
-    create_styled_button
+    BG_DARK, BG_MEDIUM, BG_LIGHT, BG_ELEVATED,
+    ACCENT_PRIMARY, ACCENT_SUCCESS, ACCENT_ERROR, ACCENT_WARNING,
+    TEXT_PRIMARY, TEXT_MUTED, TEXT_DISABLED,
+    FONT_HEADER, FONT_BODY, FONT_BODY_BOLD, FONT_SMALL, FONT_TINY,
+    SPACING_XS, SPACING_SM, SPACING_MD, SPACING_LG,
+    RADIUS_MD,
+    create_styled_button,
 )
 
 
-class BackupDialog(ctk.CTkToplevel):
-    """Dialog for exporting and importing user data backups"""
+class BackupDialog(QDialog):
+    """Dialog for exporting and importing user data backups."""
 
-    def __init__(self, parent, on_restore_callback=None):
+    def __init__(self, parent=None, on_restore_callback=None):
         super().__init__(parent)
-        self.title("Backup & Restore")
-        self.geometry("480x500")
-        self.resizable(False, False)
         self.on_restore = on_restore_callback
-
-        self.transient(parent)
-        self.grab_set()
-
+        self.setWindowTitle("Backup & Restore")
+        self.resize(480, 460)
+        self.setFixedSize(480, 460)
+        self.setModal(True)
         self._build_ui()
-        self.after(100, self.lift)
 
     def _build_ui(self):
+        self.setStyleSheet(f".QWidget, .QFrame, .QMainWindow, .QDialog {{ background-color: {BG_DARK}; }}")
+        lay = QVBoxLayout(self)
+        lay.setSpacing(0)
+        lay.setContentsMargins(0, 0, 0, 0)
+
         # Header
-        header = ctk.CTkFrame(self, fg_color=BG_DARK, corner_radius=0)
-        header.pack(fill=tk.X)
+        hdr = QFrame()
+        hdr.setStyleSheet(f"background-color: {BG_DARK}; border: none;")
+        hdr_lay = QVBoxLayout(hdr)
+        hdr_lay.setContentsMargins(SPACING_LG, SPACING_LG, SPACING_LG, SPACING_MD)
 
-        ctk.CTkLabel(
-            header, text="💾  Backup & Restore",
-            font=FONT_HEADER, text_color=TEXT_PRIMARY
-        ).pack(padx=SPACING_LG, pady=SPACING_LG)
+        title = QLabel("💾  Backup & Restore")
+        title.setFont(FONT_HEADER)
+        title.setStyleSheet(f"color: {TEXT_PRIMARY}; background: transparent;")
+        hdr_lay.addWidget(title)
 
-        ctk.CTkLabel(
-            header, text="Export your owned cards, decks, and notes to a file,\nor restore from a previous backup.",
-            font=FONT_SMALL, text_color=TEXT_MUTED, justify="left"
-        ).pack(padx=SPACING_LG, pady=(0, SPACING_LG))
+        sub = QLabel("Export your owned cards, decks, and notes to a file,\nor restore from a previous backup.")
+        sub.setFont(FONT_SMALL)
+        sub.setStyleSheet(f"color: {TEXT_MUTED}; background: transparent;")
+        sub.setWordWrap(True)
+        hdr_lay.addWidget(sub)
+        lay.addWidget(hdr)
 
-        content = ctk.CTkFrame(self, fg_color="transparent")
-        content.pack(fill=tk.BOTH, expand=True, padx=SPACING_LG, pady=SPACING_LG)
+        # Body
+        body_lay = QVBoxLayout()
+        body_lay.setContentsMargins(SPACING_LG, SPACING_SM, SPACING_LG, SPACING_LG)
+        body_lay.setSpacing(SPACING_SM)
 
-        # === Export Section ===
-        export_frame = ctk.CTkFrame(content, fg_color=BG_DARK, corner_radius=RADIUS_MD,
-                                     border_width=1, border_color=BG_LIGHT)
-        export_frame.pack(fill=tk.X, pady=(0, SPACING_MD))
+        # Export card
+        body_lay.addWidget(self._make_section(
+            "📤  Export Backup",
+            "Save your owned cards, decks, and notes to a JSON file.",
+            "Export to File...", self._export, style_type="accent"
+        ))
 
-        export_inner = ctk.CTkFrame(export_frame, fg_color="transparent")
-        export_inner.pack(fill=tk.X, padx=SPACING_LG, pady=SPACING_LG)
+        # Import card
+        body_lay.addWidget(self._make_section(
+            "📥  Restore from Backup",
+            "Load a backup file. This will REPLACE all existing user data.",
+            "📂  Restore from File...", self._import,
+            style_type="danger", warning=True
+        ))
 
-        ctk.CTkLabel(
-            export_inner, text="📤  Export Backup",
-            font=FONT_BODY_BOLD, text_color=TEXT_PRIMARY
-        ).pack(anchor="w")
+        self.status_lbl = QLabel("")
+        self.status_lbl.setFont(FONT_SMALL)
+        self.status_lbl.setStyleSheet(f"color: {TEXT_MUTED}; background: transparent;")
+        self.status_lbl.setWordWrap(True)
+        body_lay.addWidget(self.status_lbl)
 
-        ctk.CTkLabel(
-            export_inner, text="Save your owned cards, decks, and notes to a JSON file.",
-            font=FONT_TINY, text_color=TEXT_MUTED
-        ).pack(anchor="w", pady=(SPACING_XS, SPACING_SM))
+        body_lay.addStretch()
 
-        create_styled_button(
-            export_inner, text="Export to File...",
-            command=self._export, style_type='accent',
-            width=180, height=36
-        ).pack(anchor="w")
+        close_btn = create_styled_button(None, text="Close",
+                                         command=self.accept, style_type="ghost",
+                                         width=100, height=32)
+        close_row = QHBoxLayout()
+        close_row.addStretch()
+        close_row.addWidget(close_btn)
+        body_lay.addLayout(close_row)
 
-        # === Import Section ===
-        import_frame = ctk.CTkFrame(content, fg_color=BG_DARK, corner_radius=RADIUS_MD,
-                                     border_width=1, border_color=BG_LIGHT)
-        import_frame.pack(fill=tk.X, pady=(0, SPACING_MD))
+        lay.addLayout(body_lay)
 
-        import_inner = ctk.CTkFrame(import_frame, fg_color="transparent")
-        import_inner.pack(fill=tk.X, padx=SPACING_LG, pady=SPACING_LG)
-
-        ctk.CTkLabel(
-            import_inner, text="📥  Restore from Backup",
-            font=FONT_BODY_BOLD, text_color=TEXT_PRIMARY
-        ).pack(anchor="w")
-
-        ctk.CTkLabel(
-            import_inner, text="Load a backup file. This will REPLACE all existing user data.",
-            font=FONT_TINY, text_color=ACCENT_WARNING
-        ).pack(anchor="w", pady=(SPACING_XS, SPACING_SM))
-
-        ctk.CTkButton(
-            import_inner, text="📂  Restore from File...",
-            command=self._import,
-            fg_color=BG_ELEVATED, hover_color=BG_HIGHLIGHT,
-            text_color=ACCENT_WARNING, border_color=ACCENT_WARNING,
-            border_width=1, corner_radius=RADIUS_MD,
-            font=FONT_BODY_BOLD, width=200, height=36
-        ).pack(anchor="w")
-
-        # === Status ===
-        self.status_label = ctk.CTkLabel(
-            content, text="", font=FONT_SMALL, text_color=TEXT_MUTED
+    def _make_section(self, title, desc, btn_text, btn_cmd, style_type="default", warning=False):
+        frame = QFrame()
+        frame.setStyleSheet(
+            f".QFrame {{ background-color: {BG_MEDIUM}; border: 1px solid {BG_LIGHT};"
+            f"border-radius: {RADIUS_MD}px; }}"
         )
-        self.status_label.pack(fill=tk.X, pady=(SPACING_SM, 0))
+        inner = QVBoxLayout(frame)
+        inner.setContentsMargins(SPACING_LG, SPACING_MD, SPACING_LG, SPACING_MD)
+        inner.setSpacing(SPACING_XS)
 
-        # Close button
-        create_styled_button(
-            content, text="Close", command=self.destroy,
-            style_type='ghost', width=100, height=32
-        ).pack(anchor="e", pady=(SPACING_SM, 0))
+        t = QLabel(title)
+        t.setFont(FONT_BODY_BOLD)
+        t.setStyleSheet(f"color: {TEXT_PRIMARY}; background: transparent;")
+        inner.addWidget(t)
+
+        d = QLabel(desc)
+        d.setFont(FONT_TINY)
+        color = ACCENT_WARNING if warning else TEXT_MUTED
+        d.setStyleSheet(f"color: {color}; background: transparent;")
+        inner.addWidget(d)
+
+        btn = create_styled_button(None, text=btn_text, command=btn_cmd,
+                                   style_type=style_type, height=36)
+        btn.setFixedWidth(200)
+        inner.addWidget(btn)
+        return frame
 
     def _export(self):
-        """Export user data to a JSON file"""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         default_name = f"uma_backup_{timestamp}.json"
-
-        filepath = filedialog.asksaveasfilename(
-            parent=self,
-            title="Export Backup",
-            defaultextension=".json",
-            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
-            initialfile=default_name
+        filepath, _ = QFileDialog.getSaveFileName(
+            self, "Export Backup", default_name,
+            "JSON files (*.json);;All files (*.*)"
         )
-
         if not filepath:
             return
-
         try:
             data = export_user_data()
             data['_meta'] = {
@@ -146,82 +146,64 @@ class BackupDialog(ctk.CTkToplevel):
                 'exported_at': datetime.now().isoformat(),
                 'version': VERSION
             }
-
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
-
-            owned_count = len(data.get('owned_cards', []))
-            deck_count = len(data.get('decks', []))
-            notes_count = len(data.get('notes', []))
-
-            self.status_label.configure(
-                text=f"✅ Exported: {owned_count} owned cards, {deck_count} decks, {notes_count} notes",
-                text_color=ACCENT_SUCCESS
-            )
+            owned = len(data.get('owned_cards', []))
+            decks = len(data.get('decks', []))
+            notes = len(data.get('notes', []))
+            self._set_status(f"✅ Exported: {owned} owned cards, {decks} decks, {notes} notes", ACCENT_SUCCESS)
         except Exception as e:
-            self.status_label.configure(
-                text=f"❌ Export failed: {str(e)}",
-                text_color=ACCENT_ERROR
-            )
+            self._set_status(f"❌ Export failed: {e}", ACCENT_ERROR)
 
     def _import(self):
-        """Import user data from a JSON file"""
-        filepath = filedialog.askopenfilename(
-            parent=self,
-            title="Import Backup",
-            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+        filepath, _ = QFileDialog.getOpenFileName(
+            self, "Import Backup", "",
+            "JSON files (*.json);;All files (*.*)"
         )
-
         if not filepath:
             return
-
         try:
             with open(filepath, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
-            self.status_label.configure(
-                text=f"❌ Invalid backup file: {str(e)}",
-                text_color=ACCENT_ERROR
-            )
+        except Exception as e:
+            self._set_status(f"❌ Invalid backup file: {e}", ACCENT_ERROR)
             return
 
-        # Confirm overwrite
         owned = len(data.get('owned_cards', []))
         decks = len(data.get('decks', []))
         notes = len(data.get('notes', []))
-        meta = data.get('_meta', {})
-        export_date = meta.get('exported_at', 'Unknown')
+        export_date = data.get('_meta', {}).get('exported_at', 'Unknown')
 
-        confirm = messagebox.askyesno(
-            "Confirm Restore",
+        confirm = QMessageBox.question(
+            self, "Confirm Restore",
             f"This will REPLACE all your current data with:\n\n"
             f"  • {owned} owned cards\n"
             f"  • {decks} decks\n"
             f"  • {notes} notes/tags\n\n"
-            f"Exported: {export_date}\n\n"
-            f"Are you sure? This cannot be undone.",
-            parent=self
+            f"Exported: {export_date}\n\nAre you sure? This cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
-
-        if not confirm:
+        if confirm != QMessageBox.StandardButton.Yes:
             return
 
         try:
             summary = import_user_data(data)
-            self.status_label.configure(
-                text=f"✅ Restored: {summary['owned']} cards, {summary['decks']} decks, "
-                     f"{summary['notes']} notes ({summary['skipped']} skipped)",
-                text_color=ACCENT_SUCCESS
+            self._set_status(
+                f"✅ Restored: {summary['owned']} cards, {summary['decks']} decks, "
+                f"{summary['notes']} notes ({summary['skipped']} skipped)",
+                ACCENT_SUCCESS
             )
             if self.on_restore:
                 self.on_restore()
         except Exception as e:
-            self.status_label.configure(
-                text=f"❌ Restore failed: {str(e)}",
-                text_color=ACCENT_ERROR
-            )
+            self._set_status(f"❌ Restore failed: {e}", ACCENT_ERROR)
+
+    def _set_status(self, text: str, color: str):
+        self.status_lbl.setText(text)
+        self.status_lbl.setStyleSheet(f"color: {color}; background: transparent;")
 
 
-def show_backup_dialog(parent, on_restore_callback=None):
-    """Convenience function to show the backup dialog"""
-    BackupDialog(parent, on_restore_callback)
+def show_backup_dialog(parent=None, on_restore_callback=None):
+    """Convenience function — show backup dialog and exec."""
+    dlg = BackupDialog(parent, on_restore_callback)
+    dlg.exec()

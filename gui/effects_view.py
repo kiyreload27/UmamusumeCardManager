@@ -1,174 +1,216 @@
 """
 Effects Search View - Search for effects across all owned cards
-Premium redesign with quick-filter chips, counts, sort toggle, and visual result cards
+PySide6 edition with quick-filter chips, counts, sort toggle, and visual result cards
 """
 
-import tkinter as tk
-from tkinter import messagebox
-import customtkinter as ctk
-import sys
 import os
+import sys
 import re
-from PIL import Image
+
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QFrame,
+    QScrollArea, QLineEdit, QPushButton, QMessageBox
+)
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QPixmap, QCursor
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from db.db_queries import search_owned_effects
+from utils import resolve_image_path
 from gui.theme import (
-    BG_DARKEST, BG_DARK, BG_MEDIUM, BG_LIGHT, BG_HIGHLIGHT, BG_ELEVATED,
-    ACCENT_PRIMARY, ACCENT_SECONDARY, ACCENT_SUCCESS, ACCENT_TERTIARY, ACCENT_INFO,
-    ACCENT_WARNING,
+    BG_DARKEST, BG_DARK, BG_MEDIUM, BG_LIGHT, BG_ELEVATED, BG_HIGHLIGHT,
+    ACCENT_PRIMARY, ACCENT_SECONDARY, ACCENT_SUCCESS, ACCENT_INFO, ACCENT_WARNING,
     TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, TEXT_DISABLED,
-    FONT_DISPLAY, FONT_HEADER, FONT_SUBHEADER, FONT_BODY, FONT_BODY_BOLD, FONT_SMALL, FONT_TINY,
+    FONT_HEADER, FONT_SUBHEADER, FONT_BODY, FONT_BODY_BOLD, FONT_SMALL, FONT_TINY,
     SPACING_XS, SPACING_SM, SPACING_MD, SPACING_LG, SPACING_XL,
     RADIUS_SM, RADIUS_MD, RADIUS_LG, RADIUS_FULL,
-    create_styled_button, create_styled_entry, create_card_frame
+    create_styled_button, create_styled_entry
 )
-from utils import resolve_image_path
 
-
-# Quick filter presets
 QUICK_FILTERS = [
     "Friendship", "Motivation", "Race Bonus", "Skill Pt",
     "Training", "Specialty", "Hint", "Fan Count"
 ]
 
+def clear_layout(layout):
+    if layout is not None:
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+            else:
+                clear_layout(item.layout())
 
-class EffectsFrame(ctk.CTkFrame):
-    """Frame for searching effects across owned cards"""
+class ClickableLabel(QLabel):
+    def __init__(self, text, callback=None, parent=None):
+        super().__init__(text, parent)
+        self.callback = callback
+        self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+    
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self.callback:
+            self.callback()
+        super().mousePressEvent(event)
 
-    def __init__(self, parent, navigate_to_card_callback=None):
-        super().__init__(parent, fg_color="transparent")
+
+class EffectsFrame(QWidget):
+    """Spectral rail + canvas"""
+
+    def __init__(self, parent=None, navigate_to_card_callback=None):
+        super().__init__(parent)
         self.navigate_to_card = navigate_to_card_callback
         self.icon_cache = {}
-        self.result_widgets = []
         self.sort_high_to_low = True
-        self._chip_buttons = {}  # term -> CTkButton
-        self.create_widgets()
-
-    def create_widgets(self):
-        """Create the effects search interface"""
-        # Header / Search Bar
-        header_frame = ctk.CTkFrame(
-            self, fg_color=BG_DARK, corner_radius=RADIUS_LG,
-            border_width=1, border_color=BG_LIGHT
-        )
-        header_frame.pack(fill=tk.X, padx=SPACING_LG, pady=(SPACING_LG, SPACING_SM))
-
-        # Title row
-        title_row = ctk.CTkFrame(header_frame, fg_color="transparent")
-        title_row.pack(fill=tk.X, padx=SPACING_LG, pady=(SPACING_LG, SPACING_SM))
-
-        ctk.CTkLabel(
-            title_row, text="📊  Search Effects",
-            font=FONT_HEADER, text_color=TEXT_PRIMARY
-        ).pack(side=tk.LEFT)
-
-        ctk.CTkLabel(
-            title_row, text="Search across all owned cards",
-            font=FONT_SMALL, text_color=TEXT_MUTED
-        ).pack(side=tk.RIGHT)
-
-        # Search input row
-        search_container = ctk.CTkFrame(header_frame, fg_color="transparent")
-        search_container.pack(fill=tk.X, padx=SPACING_LG, pady=(0, SPACING_SM))
-
-        self.search_var = tk.StringVar()
-        self.search_entry = create_styled_entry(
-            search_container, textvariable=self.search_var,
-            placeholder_text="Type an effect name..."
-        )
-        self.search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, SPACING_SM))
-        self.search_entry.bind('<Return>', lambda e: self.perform_search())
-
-        # Sort toggle button
-        self.sort_btn = create_styled_button(
-            search_container, text="↓ High",
-            command=self._toggle_sort, style_type='secondary',
-            width=70
-        )
-        self.sort_btn.pack(side=tk.LEFT, padx=(0, SPACING_SM))
-
-        search_btn = create_styled_button(
-            search_container, text="Search",
-            command=self.perform_search, style_type='accent',
-            width=100
-        )
-        search_btn.pack(side=tk.LEFT)
-
-        # Quick filter chips with match counts
-        chips_frame = ctk.CTkFrame(header_frame, fg_color="transparent")
-        chips_frame.pack(fill=tk.X, padx=SPACING_LG, pady=(0, SPACING_LG))
-
         self._chip_buttons = {}
+        self.result_widgets = []
+        
+        self._build_ui()
+        QTimer.singleShot(300, self._load_chip_counts)
+
+    def _build_ui(self):
+        main_lay = QHBoxLayout(self)
+        main_lay.setContentsMargins(SPACING_LG, SPACING_LG, SPACING_LG, SPACING_LG)
+        main_lay.setSpacing(SPACING_LG)
+
+        # ─── Left Rail ───
+        rail = QFrame()
+        rail.setFixedWidth(260)
+        rail.setStyleSheet(f".QFrame {{ background-color: {BG_DARK}; border: 1px solid {BG_LIGHT}; border-radius: {RADIUS_LG}px; }}")
+        rail_lay = QVBoxLayout(rail)
+        rail_lay.setContentsMargins(SPACING_MD, SPACING_LG, SPACING_MD, SPACING_LG)
+        
+        l1 = QLabel("SPECTRUM")
+        l1.setFont(FONT_TINY)
+        l1.setStyleSheet(f"color: {ACCENT_SECONDARY}; border: none;")
+        rail_lay.addWidget(l1)
+        
+        l2 = QLabel("Quick bands")
+        l2.setFont(FONT_HEADER)
+        l2.setStyleSheet(f"color: {TEXT_PRIMARY}; border: none;")
+        rail_lay.addWidget(l2)
+        
+        chips_frame = QFrame()
+        chips_frame.setStyleSheet("background: transparent; border: none;")
+        chips_lay = QVBoxLayout(chips_frame)
+        chips_lay.setContentsMargins(0, SPACING_LG, 0, 0)
+        chips_lay.setSpacing(SPACING_SM)
+
         for term in QUICK_FILTERS:
-            chip = ctk.CTkButton(
-                chips_frame, text=term,
-                font=FONT_TINY, width=80, height=26,
-                fg_color=BG_MEDIUM, hover_color=BG_HIGHLIGHT,
-                text_color=TEXT_MUTED, corner_radius=RADIUS_FULL,
-                command=lambda t=term: self._quick_search(t)
-            )
-            chip.pack(side=tk.LEFT, padx=2)
-            self._chip_buttons[term] = chip
+            btn = QPushButton(term)
+            btn.setFixedHeight(30)
+            btn.setFont(FONT_TINY)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {BG_MEDIUM}; color: {TEXT_MUTED};
+                    border: none; border-radius: 15px;
+                }}
+                QPushButton:hover {{ background-color: {BG_HIGHLIGHT}; }}
+            """)
+            btn.clicked.connect(lambda _, t=term: self._quick_search(t))
+            chips_lay.addWidget(btn)
+            self._chip_buttons[term] = btn
+        
+        rail_lay.addWidget(chips_frame)
+        rail_lay.addStretch()
+        main_lay.addWidget(rail)
 
-        # Load counts asynchronously
-        self.after(300, self._load_chip_counts)
+        # ─── Main Content ───
+        center_w = QWidget()
+        center_lay = QVBoxLayout(center_w)
+        center_lay.setContentsMargins(0, 0, 0, 0)
+        center_lay.setSpacing(SPACING_MD)
 
-        # Results Area
-        results_frame = ctk.CTkFrame(
-            self, fg_color=BG_DARK, corner_radius=RADIUS_LG,
-            border_width=1, border_color=BG_LIGHT
-        )
-        results_frame.pack(fill=tk.BOTH, expand=True, padx=SPACING_LG, pady=(0, SPACING_LG))
+        # Header
+        hdr = QFrame()
+        hdr.setStyleSheet(f".QFrame {{ background-color: {BG_DARK}; border: 1px solid {BG_LIGHT}; border-radius: {RADIUS_LG}px; }}")
+        hdr_lay = QVBoxLayout(hdr)
+        hdr_lay.setContentsMargins(SPACING_LG, SPACING_LG, SPACING_LG, SPACING_LG)
 
-        result_header = ctk.CTkFrame(results_frame, fg_color="transparent")
-        result_header.pack(fill=tk.X, padx=SPACING_LG, pady=(SPACING_MD, SPACING_XS))
+        t_row = QHBoxLayout()
+        t_row.setContentsMargins(0, 0, 0, 0)
+        t1 = QLabel("Effect resonance")
+        t1.setFont(FONT_HEADER)
+        t1.setStyleSheet(f"color: {TEXT_PRIMARY}; border: none;")
+        t_row.addWidget(t1)
+        t_row.addStretch()
+        t2 = QLabel("Owned cards only")
+        t2.setFont(FONT_SMALL)
+        t2.setStyleSheet(f"color: {TEXT_MUTED}; border: none;")
+        t_row.addWidget(t2)
+        hdr_lay.addLayout(t_row)
 
-        ctk.CTkLabel(
-            result_header, text="Results",
-            font=FONT_SUBHEADER, text_color=ACCENT_PRIMARY
-        ).pack(side=tk.LEFT)
+        s_row = QHBoxLayout()
+        s_row.setContentsMargins(0, SPACING_MD, 0, 0)
+        self.search_entry = create_styled_entry(None, placeholder="Type an effect name...")
+        self.search_entry.returnPressed.connect(self.perform_search)
+        s_row.addWidget(self.search_entry, stretch=1)
+        
+        self.sort_btn = create_styled_button(None, text="High", command=self._toggle_sort, style_type="secondary", width=70)
+        s_row.addWidget(self.sort_btn)
+        
+        search_btn = create_styled_button(None, text="Scan", command=self.perform_search, style_type="accent", width=100)
+        s_row.addWidget(search_btn)
+        hdr_lay.addLayout(s_row)
+        
+        center_lay.addWidget(hdr)
 
-        self.status_label = ctk.CTkLabel(
-            result_header, text="",
-            font=FONT_TINY, text_color=TEXT_DISABLED
-        )
-        self.status_label.pack(side=tk.RIGHT)
+        # Results area
+        res_frame = QFrame()
+        res_frame.setStyleSheet(f".QFrame {{ background-color: {BG_DARK}; border: 1px solid {BG_LIGHT}; border-radius: {RADIUS_LG}px; }}")
+        res_lay = QVBoxLayout(res_frame)
+        res_lay.setContentsMargins(SPACING_LG, SPACING_MD, SPACING_LG, SPACING_MD)
 
-        # Scrollable result grid (4 columns for density)
-        self.scroll_area = ctk.CTkScrollableFrame(results_frame, fg_color="transparent")
-        self.scroll_area.pack(fill=tk.BOTH, expand=True, padx=SPACING_SM, pady=(0, SPACING_SM))
-        self.scroll_area.columnconfigure((0,1,2,3), weight=1)
+        r_hdr = QHBoxLayout()
+        rh1 = QLabel("Results")
+        rh1.setFont(FONT_SUBHEADER)
+        rh1.setStyleSheet(f"color: {ACCENT_PRIMARY}; border: none;")
+        r_hdr.addWidget(rh1)
+        r_hdr.addStretch()
+        self.status_label = QLabel("")
+        self.status_label.setFont(FONT_TINY)
+        self.status_label.setStyleSheet(f"color: {TEXT_DISABLED}; border: none;")
+        r_hdr.addWidget(self.status_label)
+        res_lay.addLayout(r_hdr)
+
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setStyleSheet("border: none; background: transparent;")
+        self.grid_w = QWidget()
+        self.grid_w.setStyleSheet("background: transparent;")
+        self.grid_lay = QGridLayout(self.grid_w)
+        self.grid_lay.setContentsMargins(0, 0, 0, 0)
+        self.grid_lay.setSpacing(SPACING_SM)
+        self.grid_lay.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.scroll_area.setWidget(self.grid_w)
+        
+        res_lay.addWidget(self.scroll_area, stretch=1)
+        center_lay.addWidget(res_frame, stretch=1)
+
+        main_lay.addWidget(center_w, stretch=1)
 
     def _load_chip_counts(self):
-        """Load match counts for each quick filter chip"""
         for term, chip in self._chip_buttons.items():
             try:
                 results = search_owned_effects(term)
                 count = len(results)
-                chip.configure(text=f"{term} ({count})" if count else term)
+                chip.setText(f"{term} ({count})" if count else term)
             except Exception:
                 pass
 
     def _toggle_sort(self):
-        """Toggle sort order between high-to-low and low-to-high"""
         self.sort_high_to_low = not self.sort_high_to_low
-        if self.sort_high_to_low:
-            self.sort_btn.configure(text="↓ High")
-        else:
-            self.sort_btn.configure(text="↑ Low")
-        # Re-run current search if there are results showing
-        if self.result_widgets:
+        self.sort_btn.setText("High" if self.sort_high_to_low else "Low")
+        if self.grid_lay.count() > 0:
             self.perform_search()
 
     def _quick_search(self, term):
-        """Fill search and execute"""
-        self.search_var.set(term)
+        self.search_entry.setText(term)
         self.perform_search()
 
     def parse_value(self, value_str):
-        """Parse effect value string to float for sorting"""
         try:
             clean = re.sub(r'[^\d.-]', '', str(value_str))
             return float(clean)
@@ -176,135 +218,109 @@ class EffectsFrame(ctk.CTkFrame):
             return -999999.0
 
     def _get_value_color(self, value_str):
-        """Return accent color based on the value type and magnitude"""
         val_str = str(value_str)
         if '%' in val_str:
             try:
                 num = int(val_str.replace('%', '').replace('+', ''))
-                if num >= 20:
-                    return ACCENT_WARNING   # high % — gold
-                elif num >= 10:
-                    return ACCENT_PRIMARY   # medium % — blue/purple
-                else:
-                    return ACCENT_SECONDARY # low % — softer
-            except:
-                pass
+                if num >= 20: return ACCENT_WARNING
+                elif num >= 10: return ACCENT_PRIMARY
+                else: return ACCENT_SECONDARY
+            except: pass
         elif val_str.lstrip('+-').isdigit():
-            return ACCENT_SUCCESS  # flat number — green
+            return ACCENT_SUCCESS
         return ACCENT_INFO
 
     def perform_search(self):
-        """Execute search and update results"""
-        term = self.search_var.get().strip()
+        term = self.search_entry.text().strip()
         if not term:
-            messagebox.showwarning("Search", "Please enter a search term")
+            QMessageBox.warning(self, "Search", "Please enter a search term")
             return
 
-        for widget in self.result_widgets:
-            widget.destroy()
-        self.result_widgets.clear()
+        clear_layout(self.grid_lay)
 
         results = search_owned_effects(term)
-
         if not results:
-            self.status_label.configure(text="No matching effects found among owned cards.")
+            self.status_label.setText("No matching effects found among owned cards.")
             return
 
-        # Process and sort
         processed = []
         for r in results:
             val_num = self.parse_value(r[4])
             processed.append({'data': r, 'sort_val': val_num})
+        
         processed.sort(key=lambda x: x['sort_val'], reverse=self.sort_high_to_low)
 
-        # Populate grid
         row, col = 0, 0
         count = 0
         for item in processed:
             if count >= 100:
-                self.status_label.configure(
-                    text=f"Showing top 100 of {len(processed)} results"
-                )
+                self.status_label.setText(f"Showing top 100 of {len(processed)} results")
                 break
             count += 1
 
             r = item['data']
             card_id, card_name, image_path, effect_name, effect_value, level = r
 
-            # Use owned level for label — the result already reflects actual owned level
-            level_label = f"Lv{level}"
-            val_color = self._get_value_color(effect_value)
+            f = QFrame()
+            f.setStyleSheet(f".QFrame {{ background-color: {BG_DARK}; border: 1px solid {BG_LIGHT}; border-radius: {RADIUS_MD}px; }}")
+            self.grid_lay.addWidget(f, row, col)
 
-            card_frame = ctk.CTkFrame(
-                self.scroll_area, fg_color=BG_DARK,
-                corner_radius=RADIUS_MD, border_width=1, border_color=BG_LIGHT
-            )
-            card_frame.grid(row=row, column=col, sticky="nsew", padx=SPACING_SM, pady=SPACING_SM)
-            self.result_widgets.append(card_frame)
+            f_lay = QHBoxLayout(f)
+            f_lay.setContentsMargins(SPACING_SM, SPACING_SM, SPACING_SM, SPACING_SM)
+            f_lay.setSpacing(SPACING_SM)
 
-            # Image
-            img = self.icon_cache.get(card_id)
-            if not img:
-                resolved_path = resolve_image_path(image_path)
-                if resolved_path and os.path.exists(resolved_path):
+            img_lbl = QLabel()
+            img_lbl.setFixedSize(48, 48)
+            pix = self.icon_cache.get(card_id)
+            if not pix:
+                rp = resolve_image_path(image_path)
+                if rp and os.path.exists(rp):
                     try:
-                        pil_img = Image.open(resolved_path)
-                        pil_img.thumbnail((60, 60), Image.Resampling.LANCZOS)
-                        img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(60, 60))
-                        self.icon_cache[card_id] = img
-                    except:
-                        pass
+                        pix = QPixmap(rp).scaled(60, 60, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                        self.icon_cache[card_id] = pix
+                    except: pass
+            if pix:
+                img_lbl.setPixmap(pix)
+            f_lay.addWidget(img_lbl)
 
-            img_label = ctk.CTkLabel(
-                card_frame, text="", image=img if img else None,
-                width=48, height=48, corner_radius=RADIUS_SM
-            )
-            img_label.pack(side=tk.LEFT, padx=SPACING_SM, pady=SPACING_SM)
+            info_lay = QVBoxLayout()
+            info_lay.setContentsMargins(0, 0, 0, 0)
+            info_lay.setSpacing(2)
 
-            info_frame = ctk.CTkFrame(card_frame, fg_color="transparent")
-            info_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=SPACING_SM, padx=(0, SPACING_SM))
+            h_row = QHBoxLayout()
+            h_row.setContentsMargins(0, 0, 0, 0)
+            n_lbl = ClickableLabel(card_name, callback=lambda cid=card_id: self.navigate_to_card(cid) if self.navigate_to_card else None)
+            n_lbl.setFont(FONT_SMALL)
+            n_lbl.setStyleSheet(f"color: {ACCENT_PRIMARY}; border: none;")
+            h_row.addWidget(n_lbl, stretch=1)
 
-            # Card name + owned level badge
-            header_box = ctk.CTkFrame(info_frame, fg_color="transparent")
-            header_box.pack(fill=tk.X)
+            l_lbl = QLabel(f"Lv{level}")
+            l_lbl.setFont(FONT_TINY)
+            l_lbl.setStyleSheet(f"color: {ACCENT_SUCCESS}; background-color: {BG_MEDIUM}; border-radius: 4px; padding: 2px 6px;")
+            h_row.addWidget(l_lbl)
+            info_lay.addLayout(h_row)
 
-            name_label = ctk.CTkLabel(
-                header_box, text=card_name,
-                font=FONT_SMALL, text_color=ACCENT_PRIMARY, anchor="w",
-                cursor="hand2"
-            )
-            name_label.pack(side=tk.LEFT)
-            if self.navigate_to_card:
-                name_label.bind("<Button-1>", lambda e, cid=card_id: self.navigate_to_card(cid))
+            e_row = QHBoxLayout()
+            e_row.setContentsMargins(0, 0, 0, 0)
+            e_lbl = QLabel(effect_name)
+            e_lbl.setFont(FONT_TINY)
+            e_lbl.setStyleSheet(f"color: {TEXT_MUTED}; border: none;")
+            e_row.addWidget(e_lbl, stretch=1)
 
-            # Show owned level badge
-            ctk.CTkLabel(
-                header_box, text=level_label,
-                font=FONT_TINY, text_color=ACCENT_SUCCESS,
-                fg_color=BG_MEDIUM, corner_radius=4,
-                height=16, width=32
-            ).pack(side=tk.RIGHT)
+            v_lbl = QLabel(str(effect_value))
+            v_lbl.setFont(FONT_SMALL)
+            v_lbl.setStyleSheet(f"color: {self._get_value_color(effect_value)}; border: none;")
+            e_row.addWidget(v_lbl)
+            info_lay.addLayout(e_row)
 
-            # Effect name + colored value
-            effect_box = ctk.CTkFrame(info_frame, fg_color="transparent")
-            effect_box.pack(fill=tk.X, pady=(SPACING_XS, 0))
-
-            ctk.CTkLabel(
-                effect_box, text=effect_name,
-                font=FONT_TINY, text_color=TEXT_MUTED, anchor="w"
-            ).pack(side=tk.LEFT)
-
-            ctk.CTkLabel(
-                effect_box, text=str(effect_value),
-                font=FONT_SMALL, text_color=val_color
-            ).pack(side=tk.RIGHT)
+            f_lay.addLayout(info_lay, stretch=1)
 
             col += 1
             if col > 3:  # 4 columns
                 col = 0
                 row += 1
 
-        self.status_label.configure(text=f"Found {len(processed)} matches")
+        self.status_label.setText(f"Found {len(processed)} matches")
 
     def set_card(self, card_id):
         pass

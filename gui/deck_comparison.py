@@ -1,195 +1,218 @@
 """
 Deck Comparison Dialog
 Compare the combined effects of two decks side by side
+PySide6 edition
 """
 
-import tkinter as tk
-import customtkinter as ctk
-import sys
 import os
+import sys
+
+from PySide6.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QFrame,
+    QScrollArea, QComboBox, QPushButton, QWidget
+)
+from PySide6.QtCore import Qt
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from db.db_queries import get_all_decks, get_deck_cards, get_effects_at_level, get_deck_combined_effects
+from db.db_queries import get_all_decks, get_deck_combined_effects
 from gui.theme import (
-    BG_DARKEST, BG_DARK, BG_MEDIUM, BG_LIGHT, BG_HIGHLIGHT, BG_ELEVATED,
+    BG_DARKEST, BG_DARK, BG_MEDIUM, BG_LIGHT, BG_ELEVATED, BG_HIGHLIGHT,
     ACCENT_PRIMARY, ACCENT_SECONDARY, ACCENT_SUCCESS, ACCENT_ERROR, ACCENT_WARNING,
     TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, TEXT_DISABLED,
     FONT_HEADER, FONT_SUBHEADER, FONT_BODY, FONT_BODY_BOLD, FONT_SMALL, FONT_TINY,
     SPACING_XS, SPACING_SM, SPACING_MD, SPACING_LG,
-    RADIUS_SM, RADIUS_MD, RADIUS_LG,
-    create_styled_button
+    RADIUS_SM, RADIUS_MD, RADIUS_LG
 )
 
+def clear_layout(layout):
+    if layout is not None:
+        while layout.count():
+            item = layout.takeAt(0)
+            w = item.widget()
+            if w: w.deleteLater()
+            else: clear_layout(item.layout())
 
-class DeckComparisonDialog(ctk.CTkToplevel):
+class DeckComparisonDialog(QDialog):
     """Compare two decks side by side with effect diffs"""
 
-    def __init__(self, parent, current_deck_id=None):
+    def __init__(self, parent=None, current_deck_id=None):
         super().__init__(parent)
-        self.title("Deck Comparison")
-        self.geometry("750x600")
-        self.resizable(True, True)
-        self.minsize(650, 500)
-
-        self.transient(parent)
-        self.grab_set()
+        self.setWindowTitle("Deck Comparison")
+        self.resize(750, 600)
+        self.setMinimumSize(650, 500)
+        self.setStyleSheet(f".QWidget, .QFrame, .QMainWindow, .QDialog {{ background-color: {BG_DARK}; }}")
 
         self.decks = get_all_decks()
         self.current_deck_id = current_deck_id
-        self.comparison_widgets = []
 
         self._build_ui()
-        self.after(100, self.lift)
 
     def _build_ui(self):
+        main_lay = QVBoxLayout(self)
+        main_lay.setContentsMargins(0, 0, 0, 0)
+        main_lay.setSpacing(0)
+
         # Header
-        header = ctk.CTkFrame(self, fg_color=BG_DARK, corner_radius=0)
-        header.pack(fill=tk.X)
+        hdr = QFrame()
+        hdr.setStyleSheet(f"background: {BG_DARK};")
+        hdr_lay = QVBoxLayout(hdr)
+        hdr_lay.setContentsMargins(SPACING_LG, SPACING_LG, SPACING_LG, SPACING_LG)
+        
+        t_lbl = QLabel("⚖️  Deck Comparison")
+        t_lbl.setFont(FONT_HEADER)
+        t_lbl.setStyleSheet(f"color: {TEXT_PRIMARY}; border: none;")
+        hdr_lay.addWidget(t_lbl)
+        main_lay.addWidget(hdr)
 
-        ctk.CTkLabel(
-            header, text="⚖️  Deck Comparison",
-            font=FONT_HEADER, text_color=TEXT_PRIMARY
-        ).pack(padx=SPACING_LG, pady=SPACING_LG)
+        # Selectors
+        sel_f = QFrame()
+        sel_f.setStyleSheet("background: transparent; border: none;")
+        sel_lay = QHBoxLayout(sel_f)
+        sel_lay.setContentsMargins(SPACING_LG, SPACING_MD, SPACING_LG, SPACING_MD)
 
-        # Deck selectors
-        selector = ctk.CTkFrame(self, fg_color="transparent")
-        selector.pack(fill=tk.X, padx=SPACING_LG, pady=SPACING_MD)
+        vals = [f"{d[0]}: {d[1]}" for d in self.decks]
 
-        values = [f"{d[0]}: {d[1]}" for d in self.decks]
+        a_l = QLabel("Deck A:")
+        a_l.setFont(FONT_BODY_BOLD)
+        a_l.setStyleSheet(f"color: {TEXT_PRIMARY}; border: none;")
+        sel_lay.addWidget(a_l)
 
-        # Deck A
-        ctk.CTkLabel(selector, text="Deck A:", font=FONT_BODY_BOLD, text_color=TEXT_PRIMARY).pack(side=tk.LEFT)
-        self.deck_a_combo = ctk.CTkComboBox(selector, width=220, state='readonly', values=values)
-        self.deck_a_combo.pack(side=tk.LEFT, padx=(SPACING_SM, SPACING_LG))
+        self.deck_a_combo = QComboBox()
+        self.deck_a_combo.setFixedWidth(220)
+        self.deck_a_combo.addItems(vals)
+        sel_lay.addWidget(self.deck_a_combo)
 
-        ctk.CTkLabel(selector, text="vs", font=FONT_BODY_BOLD, text_color=TEXT_MUTED).pack(side=tk.LEFT, padx=SPACING_SM)
+        vs_l = QLabel("vs")
+        vs_l.setFont(FONT_BODY_BOLD)
+        vs_l.setStyleSheet(f"color: {TEXT_MUTED}; border: none;")
+        sel_lay.addWidget(vs_l)
 
-        # Deck B
-        ctk.CTkLabel(selector, text="Deck B:", font=FONT_BODY_BOLD, text_color=TEXT_PRIMARY).pack(side=tk.LEFT, padx=(SPACING_LG, 0))
-        self.deck_b_combo = ctk.CTkComboBox(selector, width=220, state='readonly', values=values)
-        self.deck_b_combo.pack(side=tk.LEFT, padx=SPACING_SM)
+        b_l = QLabel("Deck B:")
+        b_l.setFont(FONT_BODY_BOLD)
+        b_l.setStyleSheet(f"color: {TEXT_PRIMARY}; border: none;")
+        sel_lay.addWidget(b_l)
 
-        # Compare button
-        create_styled_button(
-            selector, text="Compare", command=self._compare,
-            style_type='accent', width=90
-        ).pack(side=tk.RIGHT)
+        self.deck_b_combo = QComboBox()
+        self.deck_b_combo.setFixedWidth(220)
+        self.deck_b_combo.addItems(vals)
+        sel_lay.addWidget(self.deck_b_combo)
 
-        # Pre-select current deck
-        if self.current_deck_id and values:
-            for v in values:
+        sel_lay.addStretch()
+
+        cmp_btn = QPushButton("Compare")
+        cmp_btn.setFixedWidth(90)
+        cmp_btn.setFixedHeight(32)
+        cmp_btn.setStyleSheet(f"QPushButton {{ background: {ACCENT_PRIMARY}; color: {BG_DARKEST}; border-radius: {RADIUS_SM}px; font-weight: bold; }}")
+        cmp_btn.clicked.connect(self._compare)
+        sel_lay.addWidget(cmp_btn)
+
+        main_lay.addWidget(sel_f)
+
+        if self.current_deck_id and vals:
+            for v in vals:
                 if v.startswith(f"{self.current_deck_id}:"):
-                    self.deck_a_combo.set(v)
+                    self.deck_a_combo.setCurrentText(v)
                     break
-            if len(values) > 1:
-                self.deck_b_combo.set(values[1] if values[0].startswith(f"{self.current_deck_id}:") else values[0])
+            if len(vals) > 1:
+                if vals[0].startswith(f"{self.current_deck_id}:"):
+                    self.deck_b_combo.setCurrentText(vals[1])
+                else:
+                    self.deck_b_combo.setCurrentText(vals[0])
 
-        # Results scroll
-        self.results_scroll = ctk.CTkScrollableFrame(self, fg_color=BG_DARK, corner_radius=RADIUS_LG)
-        self.results_scroll.pack(fill=tk.BOTH, expand=True, padx=SPACING_LG, pady=(0, SPACING_LG))
-        self.results_scroll.columnconfigure(0, weight=2)
-        self.results_scroll.columnconfigure(1, weight=1)
-        self.results_scroll.columnconfigure(2, weight=1)
-        self.results_scroll.columnconfigure(3, weight=1)
+        # Results
+        res_f = QFrame()
+        res_f.setStyleSheet("background: transparent; border: none;")
+        res_lay = QVBoxLayout(res_f)
+        res_lay.setContentsMargins(SPACING_LG, 0, SPACING_LG, SPACING_LG)
+
+        self.results_scroll = QScrollArea()
+        self.results_scroll.setWidgetResizable(True)
+        self.results_scroll.setStyleSheet(f"QScrollArea {{ background: {BG_DARKEST}; border: 1px solid {BG_LIGHT}; border-radius: {RADIUS_LG}px; }}")
+        
+        self.res_w = QWidget()
+        self.res_w.setStyleSheet("background: transparent;")
+        self.grid_lay = QGridLayout(self.res_w)
+        self.grid_lay.setContentsMargins(SPACING_XS, SPACING_XS, SPACING_XS, SPACING_XS)
+        self.grid_lay.setSpacing(1)
+        self.grid_lay.setAlignment(Qt.AlignmentFlag.AlignTop)
+        
+        self.grid_lay.setColumnStretch(0, 2)
+        self.grid_lay.setColumnStretch(1, 1)
+        self.grid_lay.setColumnStretch(2, 1)
+        self.grid_lay.setColumnStretch(3, 1)
+
+        self.results_scroll.setWidget(self.res_w)
+        res_lay.addWidget(self.results_scroll)
+        main_lay.addWidget(res_f, stretch=1)
 
     def _parse_effect_value(self, value_str):
-        """Parse effect value string to float"""
-        try:
-            return float(str(value_str).replace('%', '').replace('+', ''))
-        except (ValueError, AttributeError):
-            return 0.0
+        try: return float(str(value_str).replace('%', '').replace('+', ''))
+        except: return 0.0
 
     def _compare(self):
-        """Perform the comparison"""
-        for w in self.comparison_widgets:
-            w.destroy()
-        self.comparison_widgets.clear()
+        clear_layout(self.grid_lay)
 
-        val_a = self.deck_a_combo.get()
-        val_b = self.deck_b_combo.get()
+        val_a = self.deck_a_combo.currentText()
+        val_b = self.deck_b_combo.currentText()
 
-        if not val_a or not val_b:
-            return
+        if not val_a or not val_b: return
 
-        deck_a_id = int(val_a.split(':')[0])
-        deck_b_id = int(val_b.split(':')[0])
+        da_id = int(val_a.split(':')[0])
+        db_id = int(val_b.split(':')[0])
 
-        effects_a = get_deck_combined_effects(deck_a_id)
-        effects_b = get_deck_combined_effects(deck_b_id)
+        eff_a = get_deck_combined_effects(da_id)
+        eff_b = get_deck_combined_effects(db_id)
 
-        # Merge all effect names
-        all_effects = sorted(set(list(effects_a.keys()) + list(effects_b.keys())))
+        all_eff = sorted(set(list(eff_a.keys()) + list(eff_b.keys())))
 
-        # Table headers
         hdrs = ["Effect", "Deck A", "Deck B", "Diff"]
-        for col, text in enumerate(hdrs):
-            lbl = ctk.CTkLabel(
-                self.results_scroll, text=text,
-                font=FONT_BODY_BOLD, text_color=TEXT_PRIMARY,
-                fg_color=BG_MEDIUM, corner_radius=RADIUS_SM
-            )
-            lbl.grid(row=0, column=col, sticky="nsew", padx=1, pady=1, ipadx=SPACING_SM, ipady=SPACING_XS)
-            self.comparison_widgets.append(lbl)
+        for c, t in enumerate(hdrs):
+            l = QLabel(t)
+            l.setFont(FONT_BODY_BOLD)
+            l.setStyleSheet(f"color: {TEXT_PRIMARY}; background: {BG_MEDIUM}; padding: {SPACING_XS}px; border-radius: {RADIUS_SM}px;")
+            self.grid_lay.addWidget(l, 0, c)
 
-        for row_idx, effect_name in enumerate(all_effects, start=1):
-            total_a = effects_a.get(effect_name, {}).get('total', 0)
-            total_b = effects_b.get(effect_name, {}).get('total', 0)
-            diff = total_b - total_a
+        for ri, en in enumerate(all_eff, start=1):
+            ta = eff_a.get(en, {}).get('total', 0)
+            tb = eff_b.get(en, {}).get('total', 0)
+            diff = tb - ta
 
-            # Determine format
-            is_pct = any('%' in str(v) for bd in [effects_a.get(effect_name, {}).get('breakdown', []),
-                                                   effects_b.get(effect_name, {}).get('breakdown', [])]
-                         for _, v in bd)
+            bda = eff_a.get(en, {}).get('breakdown', [])
+            bdb = eff_b.get(en, {}).get('breakdown', [])
+            isp = any('%' in str(v) for bd in [bda, bdb] for _, v in bd)
 
-            fmt = lambda v: f"{v:.0f}%" if is_pct else f"{v:+.0f}" if v != 0 else "0"
+            fmt = lambda v: f"{v:.0f}%" if isp else (f"{v:+.0f}" if v != 0 else "0")
 
-            # Diff color
             if diff > 0:
-                diff_color = ACCENT_SUCCESS
-                diff_text = f"+{diff:.0f}{'%' if is_pct else ''}"
+                dc = ACCENT_SUCCESS
+                dt = f"+{diff:.0f}{'%' if isp else ''}"
             elif diff < 0:
-                diff_color = ACCENT_ERROR
-                diff_text = f"{diff:.0f}{'%' if is_pct else ''}"
+                dc = ACCENT_ERROR
+                dt = f"{diff:.0f}{'%' if isp else ''}"
             else:
-                diff_color = TEXT_DISABLED
-                diff_text = "—"
+                dc = TEXT_DISABLED
+                dt = "—"
 
-            row_bg = BG_DARK if row_idx % 2 == 0 else "transparent"
+            l_name = QLabel(en)
+            l_name.setFont(FONT_BODY)
+            l_name.setStyleSheet(f"color: {TEXT_SECONDARY}; border: none;")
+            self.grid_lay.addWidget(l_name, ri, 0)
 
-            # Name
-            lbl_name = ctk.CTkLabel(
-                self.results_scroll, text=effect_name,
-                font=FONT_BODY, text_color=TEXT_SECONDARY, anchor="w"
-            )
-            lbl_name.grid(row=row_idx, column=0, sticky="nsew", padx=SPACING_SM, pady=1)
-            self.comparison_widgets.append(lbl_name)
+            l_a = QLabel(fmt(ta))
+            l_a.setFont(FONT_BODY_BOLD)
+            l_a.setStyleSheet(f"color: {ACCENT_PRIMARY}; border: none;")
+            self.grid_lay.addWidget(l_a, ri, 1)
 
-            # Deck A value
-            lbl_a = ctk.CTkLabel(
-                self.results_scroll, text=fmt(total_a),
-                font=FONT_BODY_BOLD, text_color=ACCENT_PRIMARY
-            )
-            lbl_a.grid(row=row_idx, column=1, sticky="nsew", padx=SPACING_SM, pady=1)
-            self.comparison_widgets.append(lbl_a)
+            l_b = QLabel(fmt(tb))
+            l_b.setFont(FONT_BODY_BOLD)
+            l_b.setStyleSheet(f"color: {ACCENT_SECONDARY}; border: none;")
+            self.grid_lay.addWidget(l_b, ri, 2)
 
-            # Deck B value
-            lbl_b = ctk.CTkLabel(
-                self.results_scroll, text=fmt(total_b),
-                font=FONT_BODY_BOLD, text_color=ACCENT_SECONDARY
-            )
-            lbl_b.grid(row=row_idx, column=2, sticky="nsew", padx=SPACING_SM, pady=1)
-            self.comparison_widgets.append(lbl_b)
-
-            # Diff
-            lbl_diff = ctk.CTkLabel(
-                self.results_scroll, text=diff_text,
-                font=FONT_BODY_BOLD, text_color=diff_color
-            )
-            lbl_diff.grid(row=row_idx, column=3, sticky="nsew", padx=SPACING_SM, pady=1)
-            self.comparison_widgets.append(lbl_diff)
-
+            l_d = QLabel(dt)
+            l_d.setFont(FONT_BODY_BOLD)
+            l_d.setStyleSheet(f"color: {dc}; border: none;")
+            self.grid_lay.addWidget(l_d, ri, 3)
 
 def show_deck_comparison(parent, current_deck_id=None):
-    """Open the deck comparison dialog"""
-    DeckComparisonDialog(parent, current_deck_id)
+    DeckComparisonDialog(parent, current_deck_id).exec()

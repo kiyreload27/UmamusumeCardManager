@@ -1,14 +1,18 @@
 """
 Deck Skills View - Detailed breakdown of all skills in a deck or for a single card
-Premium redesign with compact collapsible skill rows, sticky card headers, and top summary bar
+PySide6 edition with compact collapsible skill rows, sticky card headers, and top summary bar
 """
 
-import tkinter as tk
-import customtkinter as ctk
-import sys
 import os
+import sys
 import logging
-from PIL import Image
+
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
+    QScrollArea, QComboBox, QPushButton
+)
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QPixmap, QCursor
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -18,135 +22,263 @@ from db.db_queries import (
 )
 from utils import resolve_image_path
 from gui.theme import (
-    BG_DARKEST, BG_DARK, BG_MEDIUM, BG_LIGHT, BG_HIGHLIGHT, BG_ELEVATED,
+    BG_DARKEST, BG_DARK, BG_MEDIUM, BG_LIGHT, BG_ELEVATED, BG_HIGHLIGHT,
     ACCENT_PRIMARY, ACCENT_SECONDARY, ACCENT_WARNING, ACCENT_SUCCESS, ACCENT_INFO,
     TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, TEXT_DISABLED,
     FONT_HEADER, FONT_SUBHEADER, FONT_BODY, FONT_BODY_BOLD, FONT_SMALL, FONT_TINY,
     SPACING_XS, SPACING_SM, SPACING_MD, SPACING_LG, SPACING_XL,
     RADIUS_SM, RADIUS_MD, RADIUS_LG, RADIUS_FULL,
-    create_card_frame, get_type_icon, get_rarity_color
+    get_type_icon, get_rarity_color
 )
 
+def clear_layout(layout):
+    if layout is not None:
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+            else:
+                clear_layout(item.layout())
 
-class DeckSkillsFrame(ctk.CTkFrame):
+class ClickableLabel(QLabel):
+    def __init__(self, text, callback=None, parent=None):
+        super().__init__(text, parent)
+        self.callback = callback
+        if callback:
+            self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+    
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self.callback:
+            self.callback()
+        super().mousePressEvent(event)
+
+
+class CollapsibleSkillRow(QFrame):
+    def __init__(self, skill, navigate_to_skill=None, parent=None):
+        super().__init__(parent)
+        self.skill = skill
+        self.navigate_to_skill = navigate_to_skill
+        self.expanded = False
+        self.setStyleSheet("background: transparent;")
+        
+        self.is_golden = skill['golden']
+        self.has_desc = bool(skill.get('desc'))
+        
+        if self.is_golden:
+            self.src_color = ACCENT_WARNING
+            self.prefix = "✨ "
+            self.c_name = ACCENT_WARNING
+            self.bg_normal = "#2a2200"
+            self.bg_hover = "#3d3200"
+        elif 'Event' in skill['source']:
+            self.src_color = ACCENT_SECONDARY
+            self.prefix = "◆ "
+            self.c_name = TEXT_PRIMARY
+            self.bg_normal = BG_MEDIUM
+            self.bg_hover = BG_HIGHLIGHT
+        else:
+            self.src_color = ACCENT_INFO
+            self.prefix = "• "
+            self.c_name = TEXT_SECONDARY
+            self.bg_normal = BG_MEDIUM
+            self.bg_hover = BG_HIGHLIGHT
+
+        self._build_ui()
+
+    def _build_ui(self):
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 1, 0, 1)
+        lay.setSpacing(0)
+
+        self.row_frame = QFrame()
+        self.row_frame.setStyleSheet(f"background: {self.bg_normal}; border-radius: {RADIUS_SM}px;")
+        if self.has_desc:
+            self.row_frame.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+            
+        r_lay = QHBoxLayout(self.row_frame)
+        r_lay.setContentsMargins(SPACING_SM, 4, SPACING_SM, 4)
+
+        n_lbl = ClickableLabel(f"{self.prefix}{self.skill['name']}", callback=self._on_name_click)
+        fnt = FONT_BODY_BOLD if self.is_golden else FONT_SMALL
+        n_lbl.setFont(fnt)
+        n_lbl.setStyleSheet(f"color: {self.c_name}; border: none;")
+        r_lay.addWidget(n_lbl, stretch=1)
+
+        s_lbl = QLabel(self.skill['source'])
+        s_lbl.setFont(FONT_TINY)
+        s_lbl.setStyleSheet(f"color: {self.src_color}; background: {BG_DARK}; border-radius: {RADIUS_SM}px; padding: 0 4px;")
+        r_lay.addWidget(s_lbl)
+        
+        lay.addWidget(self.row_frame)
+
+        if self.has_desc:
+            self.desc_lbl = QLabel(self.skill['desc'])
+            self.desc_lbl.setFont(FONT_TINY)
+            self.desc_lbl.setStyleSheet(f"color: {TEXT_MUTED}; border: none; padding: 2px {SPACING_LG}px 0 {SPACING_LG}px;")
+            self.desc_lbl.setWordWrap(True)
+            self.desc_lbl.hide()
+            lay.addWidget(self.desc_lbl)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self.has_desc:
+            self.toggle_desc()
+        super().mousePressEvent(event)
+
+    def _on_name_click(self):
+        if self.navigate_to_skill and not self.has_desc:
+            self.navigate_to_skill(self.skill['name'])
+        elif self.has_desc:
+            self.toggle_desc()
+
+    def toggle_desc(self):
+        self.expanded = not self.expanded
+        if self.expanded:
+            self.desc_lbl.show()
+            self.row_frame.setStyleSheet(f"background: {self.bg_hover}; border-radius: {RADIUS_SM}px;")
+        else:
+            self.desc_lbl.hide()
+            self.row_frame.setStyleSheet(f"background: {self.bg_normal}; border-radius: {RADIUS_SM}px;")
+
+
+class DeckSkillsFrame(QWidget):
     """Frame for viewing combined skills of a deck or individual cards"""
 
-    def __init__(self, parent, navigate_to_card_callback=None, navigate_to_skill_callback=None):
-        super().__init__(parent, fg_color="transparent")
+    def __init__(self, parent=None, navigate_to_card_callback=None, navigate_to_skill_callback=None):
+        super().__init__(parent)
         self.navigate_to_card = navigate_to_card_callback
         self.navigate_to_skill = navigate_to_skill_callback
         self.icon_cache = {}
         self.current_mode = "Deck"
-        self.card_blocks = []
-
+        
         self._block_render_gen = 0
         self._block_render_queue = []
 
-        self.create_widgets()
+        self._build_ui()
         self.refresh_decks()
 
-    def create_widgets(self):
-        """Create the deck skills interface"""
-        # Controls bar
-        ctrl_frame = ctk.CTkFrame(
-            self, fg_color=BG_DARK, corner_radius=RADIUS_LG,
-            border_width=1, border_color=BG_LIGHT
-        )
-        ctrl_frame.pack(fill=tk.X, padx=SPACING_LG, pady=(SPACING_LG, SPACING_SM))
+    def _build_ui(self):
+        main_lay = QVBoxLayout(self)
+        main_lay.setContentsMargins(SPACING_LG, SPACING_LG, SPACING_LG, SPACING_LG)
+        main_lay.setSpacing(SPACING_LG)
 
-        selection_frame = ctk.CTkFrame(ctrl_frame, fg_color="transparent")
-        selection_frame.pack(side=tk.LEFT, padx=SPACING_LG, pady=SPACING_LG)
+        # ─── Top Control Bar ───
+        ctrl_f = QFrame()
+        ctrl_f.setStyleSheet(f".QFrame {{ background-color: {BG_ELEVATED}; border: 1px solid {BG_LIGHT}; border-radius: {RADIUS_LG}px; }}")
+        ctrl_lay = QHBoxLayout(ctrl_f)
+        ctrl_lay.setContentsMargins(SPACING_LG, SPACING_MD, SPACING_LG, SPACING_MD)
 
-        ctk.CTkLabel(
-            selection_frame, text="📜  Select Deck:",
-            font=FONT_HEADER, text_color=TEXT_PRIMARY
-        ).pack(side=tk.LEFT, padx=(0, SPACING_SM))
+        d_lbl = QLabel("DECK")
+        d_lbl.setFont(FONT_SMALL)
+        d_lbl.setStyleSheet(f"color: {TEXT_MUTED}; border: none;")
+        ctrl_lay.addWidget(d_lbl)
 
-        self.deck_combo = ctk.CTkComboBox(
-            selection_frame, width=250, state='readonly',
-            command=self.on_deck_selected_val
-        )
-        self.deck_combo.pack(side=tk.LEFT)
+        self.deck_combo = QComboBox()
+        self.deck_combo.setFixedWidth(280)
+        self.deck_combo.currentTextChanged.connect(self.on_deck_selected_val)
+        ctrl_lay.addWidget(self.deck_combo)
+        
+        ctrl_lay.addStretch()
 
-        self.mode_label = ctk.CTkLabel(
-            ctrl_frame, text="Showing skills for selected deck",
-            font=FONT_SMALL, text_color=ACCENT_PRIMARY
-        )
-        self.mode_label.pack(side=tk.RIGHT, padx=SPACING_LG)
+        self.mode_label = QLabel("Showing skills for selected deck")
+        self.mode_label.setFont(FONT_SMALL)
+        self.mode_label.setStyleSheet(f"color: {ACCENT_PRIMARY}; border: none;")
+        ctrl_lay.addWidget(self.mode_label)
 
-        # === Summary stats bar — shown prominently at top ===
-        self.summary_frame = ctk.CTkFrame(
-            self, fg_color=BG_MEDIUM, corner_radius=RADIUS_MD,
-            border_width=1, border_color=BG_LIGHT
-        )
-        self.summary_frame.pack(fill=tk.X, padx=SPACING_LG, pady=(0, SPACING_SM))
+        main_lay.addWidget(ctrl_f)
 
-        self.stats_total = ctk.CTkLabel(
-            self.summary_frame, text="—  Skills",
-            font=FONT_BODY_BOLD, text_color=TEXT_PRIMARY
-        )
-        self.stats_total.pack(side=tk.LEFT, padx=SPACING_LG, pady=SPACING_SM)
+        # ─── Split Area ───
+        split_w = QWidget()
+        split_lay = QHBoxLayout(split_w)
+        split_lay.setContentsMargins(0, 0, 0, 0)
+        split_lay.setSpacing(SPACING_MD)
 
-        self.stats_hints = ctk.CTkLabel(
-            self.summary_frame, text="Hints: —",
-            font=FONT_SMALL, text_color=ACCENT_INFO
-        )
-        self.stats_hints.pack(side=tk.LEFT, padx=SPACING_MD)
+        # Summary Left
+        self.summary_frame = QFrame()
+        self.summary_frame.setStyleSheet(f".QFrame {{ background-color: {BG_MEDIUM}; border: 1px solid {BG_LIGHT}; border-radius: {RADIUS_LG}px; }}")
+        sum_lay = QVBoxLayout(self.summary_frame)
+        sum_lay.setContentsMargins(SPACING_LG, SPACING_MD, SPACING_LG, SPACING_LG)
+        
+        t_lbl = QLabel("TELEMETRY")
+        t_lbl.setFont(FONT_SMALL)
+        t_lbl.setStyleSheet(f"color: {TEXT_MUTED}; border: none;")
+        sum_lay.addWidget(t_lbl)
 
-        self.stats_events = ctk.CTkLabel(
-            self.summary_frame, text="Events: —",
-            font=FONT_SMALL, text_color=ACCENT_SECONDARY
-        )
-        self.stats_events.pack(side=tk.LEFT, padx=SPACING_SM)
+        self.stats_total = QLabel("—  Skills")
+        self.stats_total.setFont(FONT_BODY_BOLD)
+        self.stats_total.setStyleSheet(f"color: {TEXT_PRIMARY}; border: none;")
+        sum_lay.addWidget(self.stats_total)
 
-        self.stats_golden = ctk.CTkLabel(
-            self.summary_frame, text="Golden: —",
-            font=FONT_SMALL, text_color=ACCENT_WARNING
-        )
-        self.stats_golden.pack(side=tk.LEFT, padx=SPACING_SM)
+        self.stats_hints = QLabel("Hints: —")
+        self.stats_hints.setFont(FONT_SMALL)
+        self.stats_hints.setStyleSheet(f"color: {ACCENT_INFO}; border: none;")
+        sum_lay.addWidget(self.stats_hints)
 
-        # Results scroll
-        self.results_container = ctk.CTkFrame(
-            self, fg_color=BG_DARK, corner_radius=RADIUS_LG,
-            border_width=1, border_color=BG_LIGHT
-        )
-        self.results_container.pack(fill=tk.BOTH, expand=True, padx=SPACING_LG, pady=(0, SPACING_LG))
+        self.stats_events = QLabel("Events: —")
+        self.stats_events.setFont(FONT_SMALL)
+        self.stats_events.setStyleSheet(f"color: {ACCENT_SECONDARY}; border: none;")
+        sum_lay.addWidget(self.stats_events)
 
-        self.scroll_area = ctk.CTkScrollableFrame(self.results_container, fg_color="transparent")
-        self.scroll_area.pack(fill=tk.BOTH, expand=True, padx=SPACING_SM, pady=SPACING_SM)
+        self.stats_golden = QLabel("Golden: —")
+        self.stats_golden.setFont(FONT_SMALL)
+        self.stats_golden.setStyleSheet(f"color: {ACCENT_WARNING}; border: none;")
+        sum_lay.addWidget(self.stats_golden)
+        sum_lay.addStretch()
+
+        split_lay.addWidget(self.summary_frame, stretch=1)
+
+        # Results Right
+        self.results_container = QFrame()
+        self.results_container.setStyleSheet(f".QFrame {{ background-color: {BG_DARK}; border: 1px solid {BG_LIGHT}; border-radius: {RADIUS_LG}px; }}")
+        res_lay = QVBoxLayout(self.results_container)
+        res_lay.setContentsMargins(SPACING_SM, SPACING_SM, SPACING_SM, SPACING_SM)
+
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setStyleSheet("border: none; background: transparent;")
+        
+        self.cards_w = QWidget()
+        self.cards_w.setStyleSheet("background: transparent;")
+        self.cards_lay = QVBoxLayout(self.cards_w)
+        self.cards_lay.setContentsMargins(0, 0, 0, 0)
+        self.cards_lay.setSpacing(SPACING_SM)
+        self.cards_lay.setAlignment(Qt.AlignmentFlag.AlignTop)
+        
+        self.scroll_area.setWidget(self.cards_w)
+        res_lay.addWidget(self.scroll_area)
+
+        split_lay.addWidget(self.results_container, stretch=2)
+        main_lay.addWidget(split_w, stretch=1)
 
     def refresh_decks(self):
         decks = get_all_decks()
         values = [f"{d[0]}: {d[1]}" for d in decks]
-        self.deck_combo.configure(values=values)
+        self.deck_combo.blockSignals(True)
+        self.deck_combo.clear()
+        self.deck_combo.addItems(values)
+        self.deck_combo.blockSignals(False)
         if values:
-            self.deck_combo.set(values[0])
+            self.deck_combo.setCurrentText(values[0])
             self.on_deck_selected_val(values[0])
 
     def on_deck_selected_val(self, value):
-        if not value:
-            return
+        if not value: return
         deck_id = int(value.split(':')[0])
         deck_name = value.split(': ')[1]
 
         self.current_mode = "Deck"
-        self.mode_label.configure(text=f"Deck: {deck_name}", text_color=ACCENT_PRIMARY)
+        self.mode_label.setText(f"Deck: {deck_name}")
+        self.mode_label.setStyleSheet(f"color: {ACCENT_PRIMARY}; border: none;")
         self.show_deck_skills(deck_id)
 
-    def _clear_blocks(self):
-        for block in self.card_blocks:
-            block.destroy()
-        self.card_blocks.clear()
-
     def _update_summary(self, total_skills, hint_count, event_count, golden_count):
-        """Update the top summary bar with skill counts"""
-        self.stats_total.configure(text=f"{total_skills}  Skills")
-        self.stats_hints.configure(text=f"Hints: {hint_count}")
-        self.stats_events.configure(text=f"Events: {event_count}")
-        self.stats_golden.configure(text=f"✨ Golden: {golden_count}")
+        self.stats_total.setText(f"{total_skills}  Skills")
+        self.stats_hints.setText(f"Hints: {hint_count}")
+        self.stats_events.setText(f"Events: {event_count}")
+        self.stats_golden.setText(f"✨ Golden: {golden_count}")
 
     def show_deck_skills(self, deck_id):
-        self._clear_blocks()
+        clear_layout(self.cards_lay)
         self._block_render_gen += 1
         my_gen = self._block_render_gen
 
@@ -190,7 +322,7 @@ class DeckSkillsFrame(ctk.CTkFrame):
 
         self._update_summary(total_skills, hint_count, event_count, golden_count)
         self._block_render_queue = card_data_list[:]
-        self._process_block_queue(my_gen)
+        QTimer.singleShot(0, lambda: self._process_block_queue(my_gen))
 
     def _process_block_queue(self, gen):
         if gen != self._block_render_gen or not self._block_render_queue:
@@ -200,175 +332,90 @@ class DeckSkillsFrame(ctk.CTkFrame):
         self._render_card_block(card_id, name, rarity, card_type, image_path, is_owned, skills)
 
         if self._block_render_queue and gen == self._block_render_gen:
-            self.after(25, lambda: self._process_block_queue(gen))
+            QTimer.singleShot(25, lambda: self._process_block_queue(gen))
 
     def _render_card_block(self, card_id, name, rarity, card_type, image_path, is_owned, skills):
-        """Render a card block with compact collapsible skill rows"""
-        block_frame = ctk.CTkFrame(
-            self.scroll_area, fg_color=BG_DARK,
-            corner_radius=RADIUS_MD, border_width=1,
-            border_color=ACCENT_SUCCESS if is_owned else BG_LIGHT
-        )
-        block_frame.pack(fill=tk.X, pady=(0, SPACING_SM), padx=0)
-        self.card_blocks.append(block_frame)
+        bc = ACCENT_SUCCESS if is_owned else BG_LIGHT
+        f = QFrame()
+        f.setStyleSheet(f".QFrame {{ background-color: {BG_DARK}; border: 1px solid {bc}; border-radius: {RADIUS_MD}px; }}")
+        self.cards_lay.addWidget(f)
+
+        f_lay = QVBoxLayout(f)
+        f_lay.setContentsMargins(0, 0, 0, 0)
+        f_lay.setSpacing(0)
 
         # Sticky header
-        header = ctk.CTkFrame(block_frame, fg_color=BG_MEDIUM, corner_radius=RADIUS_SM)
-        header.pack(fill=tk.X, padx=SPACING_XS, pady=(SPACING_XS, 0))
-
-        # Image
-        img = self.icon_cache.get(card_id)
-        if not img:
-            resolved = resolve_image_path(image_path)
-            if resolved and os.path.exists(resolved):
+        hdr = QFrame()
+        hdr.setStyleSheet(f"background: {BG_MEDIUM}; border-radius: {RADIUS_SM}px; border: none;")
+        hdr_lay = QHBoxLayout(hdr)
+        hdr_lay.setContentsMargins(SPACING_SM, SPACING_XS, SPACING_SM, SPACING_XS)
+        
+        img_lbl = QLabel()
+        img_lbl.setFixedSize(44, 44)
+        pix = self.icon_cache.get(card_id)
+        if not pix:
+            rp = resolve_image_path(image_path)
+            if rp and os.path.exists(rp):
                 try:
-                    pil_img = Image.open(resolved)
-                    pil_img.thumbnail((44, 44), Image.Resampling.LANCZOS)
-                    img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(44, 44))
-                    self.icon_cache[card_id] = img
-                except (OSError, SyntaxError, ValueError) as e:
-                    logging.debug(f"Failed to load deck skill card icon: {e}")
+                    pix = QPixmap(rp).scaled(44, 44, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                    self.icon_cache[card_id] = pix
+                except: pass
+        if pix:
+            img_lbl.setPixmap(pix)
+        hdr_lay.addWidget(img_lbl)
 
-        ctk.CTkLabel(
-            header, text="", image=img if img else None,
-            width=44, height=44, corner_radius=RADIUS_SM
-        ).pack(side=tk.LEFT, padx=(SPACING_SM, SPACING_SM), pady=SPACING_XS)
+        info_lay = QVBoxLayout()
+        info_lay.setContentsMargins(0, 0, 0, 0)
+        info_lay.setSpacing(2)
 
-        info = ctk.CTkFrame(header, fg_color="transparent")
-        info.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        name_label = ctk.CTkLabel(
-            info, text=name,
-            font=FONT_SUBHEADER, text_color=ACCENT_PRIMARY, anchor="w",
-            cursor="hand2"
-        )
-        name_label.pack(fill=tk.X)
-        if self.navigate_to_card:
-            name_label.bind("<Button-1>", lambda e, cid=card_id: self.navigate_to_card(cid))
+        n_lbl = ClickableLabel(name, callback=lambda cid=card_id: self.navigate_to_card(cid) if self.navigate_to_card else None)
+        n_lbl.setFont(FONT_SUBHEADER)
+        n_lbl.setStyleSheet(f"color: {ACCENT_PRIMARY}; border: none;")
+        info_lay.addWidget(n_lbl)
 
         owned_text = " · Owned ✓" if is_owned else ""
-        ctk.CTkLabel(
-            info, text=f"{get_type_icon(card_type)} {card_type} · {rarity}{owned_text}",
-            font=FONT_TINY, text_color=get_rarity_color(rarity), anchor="w"
-        ).pack(fill=tk.X)
+        meta_lbl = QLabel(f"{get_type_icon(card_type)} {card_type} · {rarity}{owned_text}")
+        meta_lbl.setFont(FONT_TINY)
+        meta_lbl.setStyleSheet(f"color: {get_rarity_color(rarity)}; border: none;")
+        info_lay.addWidget(meta_lbl)
+        hdr_lay.addLayout(info_lay, stretch=1)
 
-        ctk.CTkLabel(
-            header, text=f"{len(skills)} skills",
-            font=FONT_TINY, text_color=TEXT_DISABLED,
-            fg_color=BG_LIGHT, corner_radius=RADIUS_FULL,
-            height=20, width=60
-        ).pack(side=tk.RIGHT, padx=SPACING_MD)
+        sk_cnt = QLabel(f"{len(skills)} skills")
+        sk_cnt.setFont(FONT_TINY)
+        sk_cnt.setStyleSheet(f"color: {TEXT_DISABLED}; background: {BG_LIGHT}; border-radius: 10px; padding: 2px 8px;")
+        hdr_lay.addWidget(sk_cnt)
+
+        f_lay.addWidget(hdr)
 
         if not skills:
-            ctk.CTkLabel(
-                block_frame, text="No notable skills found.",
-                font=FONT_SMALL, text_color=TEXT_MUTED
-            ).pack(pady=SPACING_SM)
+            emp = QLabel("No notable skills found.")
+            emp.setFont(FONT_SMALL)
+            emp.setStyleSheet(f"color: {TEXT_MUTED}; border: none; padding: {SPACING_SM}px;")
+            f_lay.addWidget(emp)
             return
 
-        # Compact skills list — each skill is a single tight row
-        # Clicking on a skill row expands/collapses its description
-        skills_container = ctk.CTkFrame(block_frame, fg_color="transparent")
-        skills_container.pack(fill=tk.X, padx=SPACING_SM, pady=(SPACING_XS, SPACING_SM))
+        sk_cont = QWidget()
+        sk_cont.setStyleSheet("background: transparent;")
+        sk_lay = QVBoxLayout(sk_cont)
+        sk_lay.setContentsMargins(SPACING_SM, SPACING_XS, SPACING_SM, SPACING_SM)
+        sk_lay.setSpacing(1)
 
         for skill in skills:
-            self._render_compact_skill_row(skills_container, skill)
+            row = CollapsibleSkillRow(skill, self.navigate_to_skill)
+            sk_lay.addWidget(row)
 
-    def _render_compact_skill_row(self, parent, skill):
-        """Render a single compact skill row with expand-on-click description"""
-        is_golden = skill['golden']
-        has_desc = bool(skill.get('desc'))
-
-        # Source badge color
-        if is_golden:
-            src_color = ACCENT_WARNING
-            prefix = "✨ "
-            c_name = ACCENT_WARNING
-        elif 'Event' in skill['source']:
-            src_color = ACCENT_SECONDARY
-            prefix = "◆ "
-            c_name = TEXT_PRIMARY
-        else:
-            src_color = ACCENT_INFO
-            prefix = "• "
-            c_name = TEXT_SECONDARY
-
-        # Wrapper for the row + hidden description
-        row_wrapper = ctk.CTkFrame(parent, fg_color="transparent")
-        row_wrapper.pack(fill=tk.X, pady=1)
-
-        skill_row = ctk.CTkFrame(
-            row_wrapper,
-            fg_color="#2a2200" if is_golden else BG_MEDIUM,
-            corner_radius=RADIUS_SM
-        )
-        skill_row.pack(fill=tk.X)
-
-        # Skill name
-        name_label = ctk.CTkLabel(
-            skill_row,
-            text=f"{prefix}{skill['name']}",
-            font=FONT_BODY_BOLD if is_golden else FONT_SMALL,
-            text_color=c_name, anchor="w",
-            cursor="hand2" if (self.navigate_to_skill or has_desc) else ""
-        )
-        name_label.pack(side=tk.LEFT, padx=SPACING_SM, pady=4)
-
-        # Source badge (compact)
-        ctk.CTkLabel(
-            skill_row, text=skill['source'],
-            font=FONT_TINY, text_color=src_color,
-            fg_color=BG_DARK, corner_radius=RADIUS_SM,
-            height=18
-        ).pack(side=tk.RIGHT, padx=SPACING_SM, pady=4)
-
-        # Hidden description label (toggled on click)
-        desc_label = None
-        desc_text = skill.get('desc') or ''
-        expanded = [False]
-
-        if has_desc:
-            desc_label = ctk.CTkLabel(
-                row_wrapper,
-                text=desc_text,
-                font=FONT_TINY, text_color=TEXT_MUTED,
-                anchor="w", justify="left", wraplength=600
-            )
-            # Not packed initially
-
-        def toggle_desc(e):
-            if not desc_label:
-                return
-            expanded[0] = not expanded[0]
-            if expanded[0]:
-                desc_label.pack(fill=tk.X, padx=(SPACING_LG, SPACING_SM), pady=(0, 2))
-                skill_row.configure(fg_color=BG_HIGHLIGHT if not is_golden else "#3d3200")
-            else:
-                desc_label.pack_forget()
-                skill_row.configure(fg_color="#2a2200" if is_golden else BG_MEDIUM)
-
-        if has_desc:
-            skill_row.bind("<Button-1>", toggle_desc)
-            name_label.bind("<Button-1>", toggle_desc if not self.navigate_to_skill else
-                            lambda e, sn=skill['name']: self.navigate_to_skill(sn))
-
-        if self.navigate_to_skill and not has_desc:
-            name_label.bind(
-                "<Button-1>",
-                lambda e, sn=skill['name']: self.navigate_to_skill(sn)
-            )
+        f_lay.addWidget(sk_cont)
 
     def set_card(self, card_id):
-        """Show skills for a single card selection"""
         card = get_card_by_id(card_id)
-        if not card:
-            return
+        if not card: return
         card_id, name, rarity, card_type, max_level, url, image_path, is_owned, owned_level = card
 
         self.current_mode = "Single"
-        self.mode_label.configure(text=f"Card: {name}", text_color=ACCENT_SECONDARY)
+        self.mode_label.setText(f"Card: {name}")
+        self.mode_label.setStyleSheet(f"color: {ACCENT_SECONDARY}; border: none;")
 
-        self._clear_blocks()
+        clear_layout(self.cards_lay)
 
         total_skills = 0
         hint_count = 0

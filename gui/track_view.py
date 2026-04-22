@@ -1,31 +1,34 @@
 """
 Track View - Browse racetracks and their course details
-Premium 3-panel layout: Track Grid | Course List | Course Detail
+PySide6 edition with premium 3-panel layout: Track Grid | Course List | Course Detail
 """
 
-import tkinter as tk
-from tkinter import ttk
-import customtkinter as ctk
-import sys
 import os
+import sys
 import json
-from PIL import Image, ImageTk
+import logging
+
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
+    QScrollArea, QLineEdit, QSizePolicy
+)
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QPixmap, QCursor
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from db.db_queries import get_all_tracks, get_track_courses, get_course_detail
 from gui.theme import (
-    BG_DARKEST, BG_DARK, BG_MEDIUM, BG_LIGHT, BG_HIGHLIGHT, BG_ELEVATED,
+    BG_DARKEST, BG_DARK, BG_MEDIUM, BG_LIGHT, BG_ELEVATED, BG_HIGHLIGHT,
     ACCENT_PRIMARY, ACCENT_SECONDARY, ACCENT_TERTIARY, ACCENT_SUCCESS, ACCENT_WARNING, ACCENT_INFO,
     TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, TEXT_DISABLED,
-    FONT_DISPLAY, FONT_TITLE, FONT_HEADER, FONT_SUBHEADER, FONT_BODY, FONT_BODY_BOLD,
+    FONT_TITLE, FONT_HEADER, FONT_SUBHEADER, FONT_BODY, FONT_BODY_BOLD,
     FONT_SMALL, FONT_TINY, FONT_MONO, FONT_FAMILY,
     SPACING_XS, SPACING_SM, SPACING_MD, SPACING_LG, SPACING_XL,
     RADIUS_SM, RADIUS_MD, RADIUS_LG, RADIUS_FULL,
-    create_styled_button, create_styled_text, create_card_frame
+    create_styled_entry
 )
 
-# Surface/direction colors and icons
 SURFACE_COLORS = {
     'Turf': '#22c55e',
     'Dirt': '#d97706',
@@ -40,573 +43,470 @@ DIRECTION_ICONS = {
     'Straight': '↑',
 }
 
-
 def resolve_track_image(image_path):
-    """Resolve path for track images, supporting both local and bundled assets"""
-    if not image_path:
-        return None
-
-    if os.path.isabs(image_path) and os.path.exists(image_path):
-        return image_path
-
+    if not image_path: return None
+    if os.path.isabs(image_path) and os.path.exists(image_path): return image_path
+    
     filename = os.path.basename(image_path)
     search_dirs = []
-
+    
     if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-        bundle_dir = sys._MEIPASS
+        bd = sys._MEIPASS
         search_dirs.extend([
-            os.path.join(bundle_dir, 'assets', 'tracks', 'maps'),
-            os.path.join(bundle_dir, 'assets', 'tracks'),
-            os.path.join(bundle_dir, 'images'),
+            os.path.join(bd, 'assets', 'tracks', 'maps'),
+            os.path.join(bd, 'assets', 'tracks'),
+            os.path.join(bd, 'images'),
         ])
-
-    source_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        
+    src = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     search_dirs.extend([
-        os.path.join(source_dir, 'assets', 'tracks', 'maps'),
-        os.path.join(source_dir, 'assets', 'tracks'),
-        os.path.join(source_dir, 'assets'),
+        os.path.join(src, 'assets', 'tracks', 'maps'),
+        os.path.join(src, 'assets', 'tracks'),
+        os.path.join(src, 'assets'),
     ])
-
+    
     if getattr(sys, 'frozen', False):
-        exe_dir = os.path.dirname(sys.executable)
+        exe = os.path.dirname(sys.executable)
         search_dirs.extend([
-            os.path.join(exe_dir, 'assets', 'tracks', 'maps'),
-            os.path.join(exe_dir, 'assets', 'tracks'),
+            os.path.join(exe, 'assets', 'tracks', 'maps'),
+            os.path.join(exe, 'assets', 'tracks'),
         ])
-
+        
     for d in search_dirs:
-        test_path = os.path.join(d, filename)
-        if os.path.exists(test_path):
-            return test_path
-
+        tp = os.path.join(d, filename)
+        if os.path.exists(tp):
+            return tp
     return image_path
 
+def clear_layout(layout):
+    if layout is not None:
+        while layout.count():
+            item = layout.takeAt(0)
+            w = item.widget()
+            if w: w.deleteLater()
+            else: clear_layout(item.layout())
 
-class TrackViewFrame(ctk.CTkFrame):
+class ClickableFrame(QFrame):
+    clicked = Signal()
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+    def enterEvent(self, event):
+        self.setProperty("hover", True)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        super().enterEvent(event)
+    def leaveEvent(self, event):
+        self.setProperty("hover", False)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        super().leaveEvent(event)
+
+
+class ResizingMapLabel(QLabel):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.original_pixmap = None
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setMinimumSize(100, 100)
+    
+    def setPixmapOriginal(self, pixmap):
+        self.original_pixmap = pixmap
+        self.update_map()
+        
+    def resizeEvent(self, event):
+        self.update_map()
+        super().resizeEvent(event)
+        
+    def update_map(self):
+        if self.original_pixmap and not self.original_pixmap.isNull():
+            w = self.width() - 10
+            if w < 100: w = 100
+            scaled = self.original_pixmap.scaledToWidth(w, Qt.TransformationMode.SmoothTransformation)
+            self.setPixmap(scaled)
+
+
+class TrackViewFrame(QWidget):
     """Track browser with premium 3-panel layout"""
 
-    def __init__(self, parent):
-        super().__init__(parent, fg_color="transparent")
+    def __init__(self, parent=None):
+        super().__init__(parent)
         self.tracks = []
         self.current_track_id = None
         self.current_course_id = None
-        self.track_image = None
         self.track_thumbnails = {}
+        self._course_cache = {}
 
-        self.current_map_path = None
-        self.map_label = None
-        self.map_frame = None
-        self.resize_after_id = None
-        # Cache of track_id -> list of course tuples for search filtering
-        self._course_cache = {}  # {track_id: [(distance, surface, direction, ...), ...]}
-
-        self.create_widgets()
+        self._build_ui()
         self.load_tracks()
 
-    def create_widgets(self):
-        """Build the 3-panel layout"""
-        # Top bar
-        top_bar = ctk.CTkFrame(self, fg_color="transparent")
-        top_bar.pack(fill=tk.X, padx=SPACING_SM, pady=(SPACING_SM, SPACING_XS))
+    def _build_ui(self):
+        main_lay = QVBoxLayout(self)
+        main_lay.setContentsMargins(SPACING_SM, SPACING_SM, SPACING_SM, SPACING_SM)
+        main_lay.setSpacing(SPACING_SM)
 
-        ctk.CTkLabel(
-            top_bar, text="🏟️  Racetracks",
-            font=FONT_TITLE, text_color=ACCENT_PRIMARY
-        ).pack(side=tk.LEFT)
+        # ─── Top Bar ───
+        top_f = QFrame()
+        top_f.setStyleSheet("background: transparent;")
+        top_lay = QHBoxLayout(top_f)
+        top_lay.setContentsMargins(0, 0, 0, 0)
 
-        self.search_var = tk.StringVar()
-        search = ctk.CTkEntry(
-            top_bar, textvariable=self.search_var,
-            placeholder_text="🔍  Search by name, turf, long, dirt…",
-            width=240, height=34,
-            fg_color=BG_MEDIUM, border_color=BG_LIGHT,
-            corner_radius=RADIUS_MD
-        )
-        search.pack(side=tk.RIGHT, padx=SPACING_XS)
-        search.bind('<KeyRelease>', lambda e: self.filter_tracks())
+        t_lbl = QLabel("🏟️  Racetracks")
+        t_lbl.setFont(FONT_TITLE)
+        t_lbl.setStyleSheet(f"color: {ACCENT_PRIMARY}; border: none;")
+        top_lay.addWidget(t_lbl)
+        
+        top_lay.addStretch()
 
-        self.count_label = ctk.CTkLabel(
-            top_bar, text="", font=FONT_TINY, text_color=TEXT_DISABLED
-        )
-        self.count_label.pack(side=tk.RIGHT, padx=SPACING_SM)
+        self.count_label = QLabel("")
+        self.count_label.setFont(FONT_TINY)
+        self.count_label.setStyleSheet(f"color: {TEXT_DISABLED}; border: none;")
+        top_lay.addWidget(self.count_label)
 
-        # Main 3-panel area
-        panels = ctk.CTkFrame(self, fg_color="transparent")
-        panels.pack(fill=tk.BOTH, expand=True, padx=SPACING_SM, pady=SPACING_XS)
+        self.search_entry = create_styled_entry(None, placeholder="🔍  Search by name, turf, long, dirt…")
+        self.search_entry.setFixedWidth(260)
+        self.search_entry.textChanged.connect(self.filter_tracks)
+        top_lay.addWidget(self.search_entry)
 
-        # Panel 1: Track list
-        self.left_panel = ctk.CTkFrame(
-            panels, width=340, corner_radius=RADIUS_LG,
-            fg_color=BG_DARK, border_width=1, border_color=BG_LIGHT
-        )
-        self.left_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=False, padx=(0, SPACING_XS))
-        self.left_panel.pack_propagate(False)
+        main_lay.addWidget(top_f)
 
-        ctk.CTkLabel(
-            self.left_panel, text="Tracks",
-            font=FONT_HEADER, text_color=TEXT_PRIMARY
-        ).pack(pady=(SPACING_MD, SPACING_XS), padx=SPACING_MD, anchor='w')
+        # ─── 3 Panels ───
+        p_w = QWidget()
+        p_lay = QHBoxLayout(p_w)
+        p_lay.setContentsMargins(0, 0, 0, 0)
+        p_lay.setSpacing(SPACING_XS)
 
-        self.track_scroll = ctk.CTkScrollableFrame(self.left_panel, fg_color="transparent")
-        self.track_scroll.pack(fill=tk.BOTH, expand=True, padx=SPACING_XS, pady=(0, SPACING_XS))
+        # 1. Track Panel
+        self.left_panel = QFrame()
+        self.left_panel.setFixedWidth(340)
+        self.left_panel.setStyleSheet(f".QFrame {{ background-color: {BG_DARK}; border: 1px solid {BG_LIGHT}; border-radius: {RADIUS_LG}px; }}")
+        lp_lay = QVBoxLayout(self.left_panel)
+        lp_lay.setContentsMargins(SPACING_MD, SPACING_MD, SPACING_MD, SPACING_MD)
 
-        # Panel 2: Course list
-        self.mid_panel = ctk.CTkFrame(
-            panels, width=340, corner_radius=RADIUS_LG,
-            fg_color=BG_DARK, border_width=1, border_color=BG_LIGHT
-        )
-        self.mid_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=False, padx=SPACING_XS)
-        self.mid_panel.pack_propagate(False)
+        l_hdr = QLabel("Tracks")
+        l_hdr.setFont(FONT_HEADER)
+        l_hdr.setStyleSheet(f"color: {TEXT_PRIMARY}; border: none;")
+        lp_lay.addWidget(l_hdr)
 
-        self.track_header = ctk.CTkFrame(self.mid_panel, fg_color="transparent")
-        self.track_header.pack(fill=tk.X, padx=SPACING_MD, pady=(SPACING_MD, SPACING_XS))
+        self.track_scroll = QScrollArea()
+        self.track_scroll.setWidgetResizable(True)
+        self.track_scroll.setStyleSheet("border: none; background: transparent;")
+        self.track_w = QWidget()
+        self.track_w.setStyleSheet("background: transparent;")
+        self.track_lay = QVBoxLayout(self.track_w)
+        self.track_lay.setContentsMargins(0, 0, 0, 0)
+        self.track_lay.setSpacing(4)
+        self.track_lay.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.track_scroll.setWidget(self.track_w)
+        lp_lay.addWidget(self.track_scroll)
+        p_lay.addWidget(self.left_panel)
 
-        self.track_name_label = ctk.CTkLabel(
-            self.track_header, text="Select a Track",
-            font=FONT_HEADER, text_color=TEXT_PRIMARY
-        )
-        self.track_name_label.pack(anchor='w')
+        # 2. Course Panel
+        self.mid_panel = QFrame()
+        self.mid_panel.setFixedWidth(340)
+        self.mid_panel.setStyleSheet(f".QFrame {{ background-color: {BG_DARK}; border: 1px solid {BG_LIGHT}; border-radius: {RADIUS_LG}px; }}")
+        mp_lay = QVBoxLayout(self.mid_panel)
+        mp_lay.setContentsMargins(SPACING_MD, SPACING_MD, SPACING_MD, SPACING_MD)
 
-        self.track_info_label = ctk.CTkLabel(
-            self.track_header, text="",
-            font=FONT_TINY, text_color=TEXT_MUTED
-        )
-        self.track_info_label.pack(anchor='w')
+        self.track_name_label = QLabel("Select a Track")
+        self.track_name_label.setFont(FONT_HEADER)
+        self.track_name_label.setStyleSheet(f"color: {TEXT_PRIMARY}; border: none;")
+        mp_lay.addWidget(self.track_name_label)
 
-        # Track image
-        self.track_image_frame = ctk.CTkFrame(
-            self.mid_panel, fg_color=BG_MEDIUM,
-            corner_radius=RADIUS_SM, height=130
-        )
-        self.track_image_frame.pack(fill=tk.X, padx=SPACING_MD, pady=(0, SPACING_XS))
-        self.track_image_frame.pack_propagate(False)
+        self.track_info_label = QLabel("")
+        self.track_info_label.setFont(FONT_TINY)
+        self.track_info_label.setStyleSheet(f"color: {TEXT_MUTED}; border: none;")
+        mp_lay.addWidget(self.track_info_label)
 
-        self.track_image_label = ctk.CTkLabel(
-            self.track_image_frame, text="No image", text_color=TEXT_DISABLED
-        )
-        self.track_image_label.pack(expand=True)
+        self.track_image_label = QLabel("No image")
+        self.track_image_label.setFixedHeight(130)
+        self.track_image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.track_image_label.setStyleSheet(f"background: {BG_MEDIUM}; border-radius: {RADIUS_SM}px; color: {TEXT_DISABLED};")
+        mp_lay.addWidget(self.track_image_label)
 
-        ctk.CTkLabel(
-            self.mid_panel, text="Courses",
-            font=FONT_SUBHEADER, text_color=ACCENT_TERTIARY
-        ).pack(padx=SPACING_MD, pady=(SPACING_XS, SPACING_XS), anchor='w')
+        m_hdr = QLabel("Courses")
+        m_hdr.setFont(FONT_SUBHEADER)
+        m_hdr.setStyleSheet(f"color: {ACCENT_TERTIARY}; border: none; margin-top: {SPACING_MD}px;")
+        mp_lay.addWidget(m_hdr)
 
-        self.course_scroll = ctk.CTkScrollableFrame(self.mid_panel, fg_color="transparent")
-        self.course_scroll.pack(fill=tk.BOTH, expand=True, padx=SPACING_XS, pady=(0, SPACING_XS))
+        self.course_scroll = QScrollArea()
+        self.course_scroll.setWidgetResizable(True)
+        self.course_scroll.setStyleSheet("border: none; background: transparent;")
+        self.course_w = QWidget()
+        self.course_w.setStyleSheet("background: transparent;")
+        self.course_lay = QVBoxLayout(self.course_w)
+        self.course_lay.setContentsMargins(0, 0, 0, 0)
+        self.course_lay.setSpacing(4)
+        self.course_lay.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.course_scroll.setWidget(self.course_w)
+        mp_lay.addWidget(self.course_scroll)
+        p_lay.addWidget(self.mid_panel)
 
-        # Panel 3: Course detail
-        self.right_panel = ctk.CTkFrame(
-            panels, corner_radius=RADIUS_LG,
-            fg_color=BG_DARK, border_width=1, border_color=BG_LIGHT
-        )
-        self.right_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(SPACING_XS, 0))
+        # 3. Detail Panel
+        self.right_panel = QFrame()
+        self.right_panel.setStyleSheet(f".QFrame {{ background-color: {BG_DARK}; border: 1px solid {BG_LIGHT}; border-radius: {RADIUS_LG}px; }}")
+        rp_lay = QVBoxLayout(self.right_panel)
+        rp_lay.setContentsMargins(SPACING_LG, SPACING_LG, SPACING_LG, SPACING_LG)
 
-        self.detail_header = ctk.CTkLabel(
-            self.right_panel, text="Course Details",
-            font=FONT_HEADER, text_color=TEXT_PRIMARY
-        )
-        self.detail_header.pack(padx=SPACING_LG, pady=(SPACING_MD, SPACING_XS), anchor='w')
+        self.detail_header = QLabel("Course Details")
+        self.detail_header.setFont(FONT_HEADER)
+        self.detail_header.setStyleSheet(f"color: {TEXT_PRIMARY}; border: none;")
+        rp_lay.addWidget(self.detail_header)
 
-        self.detail_subtitle = ctk.CTkLabel(
-            self.right_panel, text="Select a course to view details",
-            font=FONT_TINY, text_color=TEXT_MUTED
-        )
-        self.detail_subtitle.pack(padx=SPACING_LG, anchor='w')
+        self.detail_subtitle = QLabel("Select a course to view details")
+        self.detail_subtitle.setFont(FONT_TINY)
+        self.detail_subtitle.setStyleSheet(f"color: {TEXT_MUTED}; border: none;")
+        rp_lay.addWidget(self.detail_subtitle)
 
-        self.detail_scroll = ctk.CTkScrollableFrame(self.right_panel, fg_color="transparent")
-        self.detail_scroll.pack(fill=tk.BOTH, expand=True, padx=SPACING_SM, pady=(SPACING_SM, SPACING_SM))
+        self.detail_scroll = QScrollArea()
+        self.detail_scroll.setWidgetResizable(True)
+        self.detail_scroll.setStyleSheet("border: none; background: transparent;")
+        self.detail_w = QWidget()
+        self.detail_w.setStyleSheet("background: transparent;")
+        self.detail_lay = QVBoxLayout(self.detail_w)
+        self.detail_lay.setContentsMargins(0, SPACING_SM, 0, 0)
+        self.detail_lay.setSpacing(SPACING_SM)
+        self.detail_lay.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.detail_scroll.setWidget(self.detail_w)
+        rp_lay.addWidget(self.detail_scroll)
+        p_lay.addWidget(self.right_panel, stretch=1)
 
-        self.right_panel.bind("<Configure>", self._on_detail_resize, add="+")
+        main_lay.addWidget(p_w, stretch=1)
 
-    # Data loading
     def load_tracks(self):
         self.tracks = get_all_tracks()
-        # Pre-load all course data for search filtering
         self._course_cache.clear()
-        for track in self.tracks:
-            track_id = track[0]
-            self._course_cache[track_id] = get_track_courses(track_id)
+        for t in self.tracks:
+            self._course_cache[t[0]] = get_track_courses(t[0])
         self.render_track_list(self.tracks)
 
     def _get_distance_keywords(self, distance):
-        """Map a numeric distance to distance-category keywords for searching."""
-        if not distance:
-            return []
-        try:
-            d = int(distance)
-        except (ValueError, TypeError):
-            return []
-        if d < 1400:
-            return ['sprint', 'short']
-        elif d < 1800:
-            return ['mile']
-        elif d < 2400:
-            return ['medium']
-        else:
-            return ['long']
+        if not distance: return []
+        try: d = int(distance)
+        except: return []
+        if d < 1400: return ['sprint', 'short']
+        elif d < 1800: return ['mile']
+        elif d < 2400: return ['medium']
+        else: return ['long']
 
     def _track_matches(self, track, term):
-        """Return True if the track or any of its courses matches the search term."""
-        if not term:
-            return True
+        if not term: return True
         term = term.lower()
         track_id, name, location = track[0], track[1], track[2] or ''
-
-        # Match track name or location
-        if term in name.lower() or term in location.lower():
-            return True
-
-        # Match course attributes
-        for course in self._course_cache.get(track_id, []):
-            # course: (course_id, distance, surface, direction, corner_count, final_straight)
-            surface = (course[2] or '').lower()
-            direction = (course[3] or '').lower()
-            dist_keywords = self._get_distance_keywords(course[1])
-
-            if term in surface:
+        if term in name.lower() or term in location.lower(): return True
+        for c in self._course_cache.get(track_id, []):
+            surf = (c[2] or '').lower()
+            dirc = (c[3] or '').lower()
+            dkw = self._get_distance_keywords(c[1])
+            if term in surf or term in dirc or any(term == kw for kw in dkw):
                 return True
-            if term in direction:
-                return True
-            if any(term == kw for kw in dist_keywords):
-                return True
-
         return False
 
     def filter_tracks(self):
-        term = self.search_var.get().strip().lower()
+        term = self.search_entry.text().strip().lower()
         filtered = [t for t in self.tracks if self._track_matches(t, term)]
         self.render_track_list(filtered)
 
     def render_track_list(self, tracks):
-        for w in self.track_scroll.winfo_children():
-            w.destroy()
-
-        self.count_label.configure(text=f"{len(tracks)} tracks")
+        clear_layout(self.track_lay)
+        self.count_label.setText(f"{len(tracks)} tracks")
 
         if not tracks:
-            ctk.CTkLabel(
-                self.track_scroll,
-                text="No tracks found.\nRun: python main.py --scrape-tracks",
-                font=FONT_BODY, text_color=TEXT_MUTED, justify='center'
-            ).pack(pady=SPACING_XL)
+            lbl = QLabel("No tracks found.\nRun: python main.py --scrape-tracks")
+            lbl.setFont(FONT_BODY)
+            lbl.setStyleSheet(f"color: {TEXT_MUTED}; border: none;")
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.track_lay.addWidget(lbl)
             return
 
-        for track in tracks:
-            track_id, name, location, image_path, course_count = track
-            self._create_track_card(track_id, name, location, image_path, course_count)
+        for t in tracks:
+            self._create_track_card(*t)
 
     def _create_track_card(self, track_id, name, location, image_path, course_count):
-        card = ctk.CTkFrame(
-            self.track_scroll, fg_color=BG_MEDIUM,
-            corner_radius=RADIUS_SM, cursor="hand2"
-        )
-        card.pack(fill=tk.X, pady=2, padx=SPACING_XS)
+        f = ClickableFrame()
+        f.setObjectName(f"track_{track_id}")
+        base_css = f".QFrame {{ background: {BG_MEDIUM}; border-radius: {RADIUS_SM}px; }}"
+        hover_css = f"QFrame[hover=true] {{ background: {BG_LIGHT}; }}"
+        sel_css = f"QFrame[selected=true] {{ background: {BG_LIGHT}; border: 1px solid {ACCENT_PRIMARY}; }}"
+        f.setStyleSheet(base_css + hover_css + sel_css)
+        f.clicked.connect(lambda: self.select_track(track_id))
+        self.track_lay.addWidget(f)
 
-        inner = ctk.CTkFrame(card, fg_color="transparent")
-        inner.pack(fill=tk.X, padx=SPACING_SM, pady=SPACING_SM)
+        l = QHBoxLayout(f)
+        l.setContentsMargins(SPACING_SM, SPACING_SM, SPACING_SM, SPACING_SM)
+        l.setSpacing(SPACING_SM)
 
-        # Thumbnail image (cached)
         thumb = self.track_thumbnails.get(track_id)
         if not thumb and image_path:
-            resolved = resolve_track_image(image_path)
-            if resolved and os.path.exists(resolved):
+            rp = resolve_track_image(image_path)
+            if rp and os.path.exists(rp):
                 try:
-                    pil_img = Image.open(resolved)
-                    pil_img.thumbnail((56, 38), Image.Resampling.LANCZOS)
-                    thumb = ctk.CTkImage(
-                        light_image=pil_img, dark_image=pil_img,
-                        size=(56, 38)
-                    )
+                    thumb = QPixmap(rp).scaled(56, 38, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
                     self.track_thumbnails[track_id] = thumb
-                except Exception:
-                    pass
+                except: pass
 
+        t_lbl = QLabel()
+        t_lbl.setFixedSize(56, 38)
         if thumb:
-            lbl = ctk.CTkLabel(
-                inner, text="", image=thumb,
-                width=56, height=38, corner_radius=RADIUS_SM
-            )
-            lbl.pack(side=tk.LEFT, padx=(0, SPACING_SM))
+            t_lbl.setPixmap(thumb)
+            t_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         else:
-            # Placeholder tile with track initials
-            initials = name[:2].upper()
-            ctk.CTkLabel(
-                inner, text=initials, width=56, height=38,
-                fg_color=BG_DARK, corner_radius=RADIUS_SM,
-                font=FONT_BODY_BOLD, text_color=TEXT_MUTED
-            ).pack(side=tk.LEFT, padx=(0, SPACING_SM))
+            t_lbl.setText(name[:2].upper())
+            t_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            t_lbl.setFont(FONT_BODY_BOLD)
+            t_lbl.setStyleSheet(f"background: {BG_DARK}; color: {TEXT_MUTED}; border-radius: {RADIUS_SM}px;")
+        l.addWidget(t_lbl)
 
-        text_col = ctk.CTkFrame(inner, fg_color="transparent")
-        text_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        name_label = ctk.CTkLabel(
-            text_col, text=name,
-            font=FONT_BODY_BOLD, text_color=TEXT_PRIMARY, anchor='w'
-        )
-        name_label.pack(fill=tk.X)
-
-        subtitle_parts = []
-        if location:
-            subtitle_parts.append(location)
-        subtitle_parts.append(f"{course_count} course{'s' if course_count != 1 else ''}")
-
-        ctk.CTkLabel(
-            text_col, text=" · ".join(subtitle_parts),
-            font=FONT_TINY, text_color=TEXT_MUTED, anchor='w'
-        ).pack(fill=tk.X)
-
-        def on_click(e, tid=track_id):
-            self.select_track(tid)
-
-        card.bind('<Button-1>', on_click)
-        inner.bind('<Button-1>', on_click)
-        name_label.bind('<Button-1>', on_click)
-        for child in inner.winfo_children():
-            child.bind('<Button-1>', on_click)
-            for gc in child.winfo_children():
-                gc.bind('<Button-1>', on_click)
-
-        self._bind_scroll_recursive(card, self.track_scroll)
-
-        def on_enter(e):
-            card.configure(fg_color=BG_LIGHT)
-        def on_leave(e):
-            if self.current_track_id != track_id:
-                card.configure(fg_color=BG_MEDIUM)
-
-        card.bind('<Enter>', on_enter)
-        card.bind('<Leave>', on_leave)
-        card._track_id = track_id
-
+        info = QVBoxLayout()
+        info.setContentsMargins(0, 0, 0, 0)
+        info.setSpacing(2)
+        n_lbl = QLabel(name)
+        n_lbl.setFont(FONT_BODY_BOLD)
+        n_lbl.setStyleSheet(f"color: {TEXT_PRIMARY}; border: none;")
+        info.addWidget(n_lbl)
+        
+        subs = []
+        if location: subs.append(location)
+        subs.append(f"{course_count} course{'s' if course_count != 1 else ''}")
+        s_lbl = QLabel(" · ".join(subs))
+        s_lbl.setFont(FONT_TINY)
+        s_lbl.setStyleSheet(f"color: {TEXT_MUTED}; border: none;")
+        info.addWidget(s_lbl)
+        l.addLayout(info, stretch=1)
 
     def _course_matches(self, course, term):
-        """Return True if a single course matches the search term."""
-        if not term:
-            return True
-        surface = (course[2] or '').lower()
-        direction = (course[3] or '').lower()
-        dist_keywords = self._get_distance_keywords(course[1])
-        return (
-            term in surface or
-            term in direction or
-            any(term == kw for kw in dist_keywords)
-        )
+        if not term: return True
+        surf = (course[2] or '').lower()
+        dirc = (course[3] or '').lower()
+        dkw = self._get_distance_keywords(course[1])
+        return (term in surf or term in dirc or any(term == kw for kw in dkw))
 
     def select_track(self, track_id):
         self.current_track_id = track_id
         self.current_course_id = None
 
-        track = None
-        for t in self.tracks:
-            if t[0] == track_id:
-                track = t
-                break
-        if not track:
-            return
+        track = next((t for t in self.tracks if t[0] == track_id), None)
+        if not track: return
 
         track_id, name, location, image_path, course_count = track
 
-        self.track_name_label.configure(text=f"🏟️  {name}")
+        self.track_name_label.setText(f"🏟️  {name}")
         info_text = f"{course_count} course{'s' if course_count != 1 else ''}"
-        if location:
-            info_text = f"{location}  ·  {info_text}"
-        self.track_info_label.configure(text=info_text)
+        if location: info_text = f"{location}  ·  {info_text}"
+        self.track_info_label.setText(info_text)
 
         self._load_track_image(image_path)
 
-        for child in self.track_scroll.winfo_children():
-            if hasattr(child, '_track_id'):
-                child.configure(fg_color=BG_LIGHT if child._track_id == track_id else BG_MEDIUM)
+        for i in range(self.track_lay.count()):
+            w = self.track_lay.itemAt(i).widget()
+            if w:
+                if w.objectName() == f"track_{track_id}":
+                    w.setProperty("selected", True)
+                else:
+                    w.setProperty("selected", False)
+                w.style().unpolish(w)
+                w.style().polish(w)
 
         courses = get_track_courses(track_id)
-        # Filter courses by the active search term
-        term = self.search_var.get().strip().lower()
-        if term:
-            filtered_courses = [c for c in courses if self._course_matches(c, term)]
-        else:
-            filtered_courses = courses
-        self.render_course_list(filtered_courses)
+        term = self.search_entry.text().strip().lower()
+        fc = [c for c in courses if self._course_matches(c, term)] if term else courses
+        self.render_course_list(fc)
 
-        self.detail_header.configure(text="Course Details")
-        self.detail_subtitle.configure(text="Select a course to view details")
-        for w in self.detail_scroll.winfo_children():
-            w.destroy()
-
+        self.detail_header.setText("Course Details")
+        self.detail_subtitle.setText("Select a course to view details")
+        clear_layout(self.detail_lay)
 
     def _load_track_image(self, image_path):
-        resolved = resolve_track_image(image_path)
-        if resolved and os.path.exists(resolved):
-            try:
-                img = ctk.CTkImage(
-                    light_image=Image.open(resolved),
-                    dark_image=Image.open(resolved),
-                    size=(276, 125)
-                )
-                self.track_image_label.configure(image=img, text="")
-                self.track_image = img
-            except Exception:
-                self.track_image_label.configure(image=None, text="[Image Error]")
+        rp = resolve_track_image(image_path)
+        if rp and os.path.exists(rp):
+            pix = QPixmap(rp).scaled(276, 125, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            self.track_image_label.setPixmap(pix)
+            self.track_image_label.setText("")
         else:
-            self.track_image_label.configure(image=None, text="No image available")
-
-    def _on_detail_resize(self, event):
-        if not self.current_map_path:
-            return
-        if self.resize_after_id:
-            self.after_cancel(self.resize_after_id)
-        self.resize_after_id = self.after(100, self._perform_map_resize)
-
-    def _perform_map_resize(self):
-        if self.current_map_path:
-            self._load_course_map(self.current_map_path, is_resize=True)
-
-    def _load_course_map(self, image_path, is_resize=False):
-        self.current_map_path = image_path
-        resolved = resolve_track_image(image_path)
-
-        if resolved and os.path.exists(resolved):
-            try:
-                scroll_width = self.detail_scroll.winfo_width()
-                if scroll_width <= 1:
-                    display_width = 850 if self.winfo_width() > 1200 else 400
-                else:
-                    display_width = max(300, scroll_width - 40)
-
-                orig = Image.open(resolved)
-                w, h = orig.size
-                display_height = int(h * (display_width / w))
-
-                img = ctk.CTkImage(
-                    light_image=orig, dark_image=orig,
-                    size=(display_width, display_height)
-                )
-
-                if is_resize and self.map_label:
-                    self.map_label.configure(image=img)
-                    self.map_label._image = img
-                    return
-
-                if self.map_frame:
-                    self.map_frame.destroy()
-
-                self.map_frame = create_card_frame(self.detail_scroll)
-                self.map_frame.pack(pady=SPACING_XS, padx=SPACING_XS, anchor="w")
-
-                self.map_label = ctk.CTkLabel(self.map_frame, image=img, text="")
-                self.map_label.pack(padx=2, pady=2)
-                self.map_label._image = img
-
-                self._bind_scroll_recursive(self.map_frame, self.detail_scroll)
-
-            except Exception as e:
-                import logging
-                logging.getLogger(__name__).warning(f"Error loading course map: {e}")
-
-    def _propagate_scroll(self, event, scroll_frame):
-        scroll_frame._parent_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-
-    def _bind_scroll_recursive(self, widget, scroll_frame):
-        widget.bind("<MouseWheel>", lambda e: self._propagate_scroll(e, scroll_frame), add="+")
-        for child in widget.winfo_children():
-            self._bind_scroll_recursive(child, scroll_frame)
+            self.track_image_label.setPixmap(QPixmap())
+            self.track_image_label.setText("No image available")
 
     def render_course_list(self, courses):
-        for w in self.course_scroll.winfo_children():
-            w.destroy()
+        clear_layout(self.course_lay)
 
         if not courses:
-            ctk.CTkLabel(
-                self.course_scroll, text="No courses found",
-                font=FONT_BODY, text_color=TEXT_MUTED
-            ).pack(pady=SPACING_LG)
+            lbl = QLabel("No courses found")
+            lbl.setFont(FONT_BODY)
+            lbl.setStyleSheet(f"color: {TEXT_MUTED}; border: none;")
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.course_lay.addWidget(lbl)
             return
 
-        for course in courses:
-            course_id, distance, surface, direction, corner_count, final_straight = course
-            self._create_course_card(course_id, distance, surface, direction, corner_count, final_straight)
+        for c in courses:
+            self._create_course_card(*c)
 
     def _create_course_card(self, course_id, distance, surface, direction, corner_count, final_straight):
-        card = ctk.CTkFrame(
-            self.course_scroll, fg_color=BG_MEDIUM,
-            corner_radius=RADIUS_SM, cursor="hand2"
-        )
-        card.pack(fill=tk.X, pady=2, padx=SPACING_XS)
+        f = ClickableFrame()
+        f.setObjectName(f"course_{course_id}")
+        base_css = f".QFrame {{ background: {BG_MEDIUM}; border-radius: {RADIUS_SM}px; }}"
+        hover_css = f"QFrame[hover=true] {{ background: {BG_LIGHT}; }}"
+        sel_css = f"QFrame[selected=true] {{ background: {BG_LIGHT}; border: 1px solid {ACCENT_TERTIARY}; }}"
+        f.setStyleSheet(base_css + hover_css + sel_css)
+        f.clicked.connect(lambda: self.select_course(course_id))
+        self.course_lay.addWidget(f)
 
-        inner = ctk.CTkFrame(card, fg_color="transparent")
-        inner.pack(fill=tk.X, padx=SPACING_SM, pady=SPACING_XS)
+        l = QVBoxLayout(f)
+        l.setContentsMargins(SPACING_SM, SPACING_XS, SPACING_SM, SPACING_XS)
+        l.setSpacing(SPACING_XS)
 
-        # Top row: distance + surface badge
-        top_row = ctk.CTkFrame(inner, fg_color="transparent")
-        top_row.pack(fill=tk.X)
+        t_row = QHBoxLayout()
+        t_row.setContentsMargins(0, 0, 0, 0)
+        
+        d_lbl = QLabel(f"{distance}m")
+        d_lbl.setFont(FONT_BODY_BOLD)
+        d_lbl.setStyleSheet(f"color: {TEXT_PRIMARY}; border: none;")
+        t_row.addWidget(d_lbl)
 
-        surf_icon = SURFACE_ICONS.get(surface, '')
-        surf_color = SURFACE_COLORS.get(surface, TEXT_SECONDARY)
-
-        ctk.CTkLabel(
-            top_row, text=f"{distance}m",
-            font=FONT_BODY_BOLD, text_color=TEXT_PRIMARY
-        ).pack(side=tk.LEFT)
-
-        # Surface badge
-        ctk.CTkLabel(
-            top_row, text=f" {surf_icon} {surface or '?'} ",
-            font=FONT_TINY, text_color=surf_color,
-            fg_color=BG_DARK, corner_radius=RADIUS_SM,
-            height=20
-        ).pack(side=tk.LEFT, padx=(SPACING_XS, 0))
+        s_icon = SURFACE_ICONS.get(surface, '')
+        s_col = SURFACE_COLORS.get(surface, TEXT_SECONDARY)
+        s_lbl = QLabel(f" {s_icon} {surface or '?'} ")
+        s_lbl.setFont(FONT_TINY)
+        s_lbl.setStyleSheet(f"color: {s_col}; background: {BG_DARK}; border-radius: {RADIUS_SM}px;")
+        t_row.addWidget(s_lbl)
 
         if direction:
-            dir_icon = DIRECTION_ICONS.get(direction, '')
-            ctk.CTkLabel(
-                top_row, text=f" {dir_icon} {direction} ",
-                font=FONT_TINY, text_color=TEXT_MUTED
-            ).pack(side=tk.LEFT, padx=(SPACING_XS, 0))
+            d_icon = DIRECTION_ICONS.get(direction, '')
+            dir_lbl = QLabel(f" {d_icon} {direction} ")
+            dir_lbl.setFont(FONT_TINY)
+            dir_lbl.setStyleSheet(f"color: {TEXT_MUTED}; border: none;")
+            t_row.addWidget(dir_lbl)
 
-        # Detail badges row
-        details = []
-        if corner_count:
-            details.append(f"🔄 {corner_count}")
-        if final_straight:
-            details.append(f"📏 {final_straight}")
+        t_row.addStretch()
+        l.addLayout(t_row)
 
-        if details:
-            ctk.CTkLabel(
-                inner, text="   ·   ".join(details),
-                font=FONT_TINY, text_color=TEXT_DISABLED, anchor='w'
-            ).pack(fill=tk.X)
-
-        def on_click(e, cid=course_id):
-            self.select_course(cid)
-
-        card.bind('<Button-1>', on_click)
-        inner.bind('<Button-1>', on_click)
-        for child in inner.winfo_children():
-            child.bind('<Button-1>', on_click)
-            for gc in child.winfo_children():
-                gc.bind('<Button-1>', on_click)
-
-        def on_enter(e):
-            card.configure(fg_color=BG_LIGHT)
-        def on_leave(e):
-            if self.current_course_id != course_id:
-                card.configure(fg_color=BG_MEDIUM)
-
-        card.bind('<Enter>', on_enter)
-        card.bind('<Leave>', on_leave)
-        card._course_id = course_id
-
-        self._bind_scroll_recursive(card, self.course_scroll)
+        dets = []
+        if corner_count: dets.append(f"🔄 {corner_count}")
+        if final_straight: dets.append(f"📏 {final_straight}")
+        if dets:
+            det_lbl = QLabel("   ·   ".join(dets))
+            det_lbl.setFont(FONT_TINY)
+            det_lbl.setStyleSheet(f"color: {TEXT_DISABLED}; border: none;")
+            l.addWidget(det_lbl)
 
     def select_course(self, course_id):
         self.current_course_id = course_id
 
-        for child in self.course_scroll.winfo_children():
-            if hasattr(child, '_course_id'):
-                child.configure(fg_color=BG_LIGHT if child._course_id == course_id else BG_MEDIUM)
+        for i in range(self.course_lay.count()):
+            w = self.course_lay.itemAt(i).widget()
+            if w:
+                if w.objectName() == f"course_{course_id}":
+                    w.setProperty("selected", True)
+                else:
+                    w.setProperty("selected", False)
+                w.style().unpolish(w)
+                w.style().polish(w)
 
         detail = get_course_detail(course_id)
-        if not detail:
-            return
+        if not detail: return
 
         (cid, distance, surface, direction, corner_count,
          final_straight, slope_info, weather_data,
@@ -614,28 +514,27 @@ class TrackViewFrame(ctk.CTkFrame):
          raw_json, map_image_path, track_name) = detail
 
         surf_icon = SURFACE_ICONS.get(surface, '')
-        self.detail_header.configure(
-            text=f"{track_name} — {distance}m {surf_icon} {surface or ''}"
-        )
-        subtitle_parts = []
-        if direction:
-            subtitle_parts.append(f"Direction: {direction}")
-        if corner_count:
-            subtitle_parts.append(f"Corners: {corner_count}")
-        if final_straight:
-            subtitle_parts.append(f"Final: {final_straight}")
-        self.detail_subtitle.configure(
-            text="  ·  ".join(subtitle_parts) if subtitle_parts else ""
-        )
+        self.detail_header.setText(f"{track_name} — {distance}m {surf_icon} {surface or ''}")
+        subs = []
+        if direction: subs.append(f"Direction: {direction}")
+        if corner_count: subs.append(f"Corners: {corner_count}")
+        if final_straight: subs.append(f"Final: {final_straight}")
+        self.detail_subtitle.setText("  ·  ".join(subs) if subs else "")
 
-        for w in self.detail_scroll.winfo_children():
-            w.destroy()
+        clear_layout(self.detail_lay)
 
-        # Course map
         if map_image_path:
-            self._load_course_map(map_image_path)
+            rp = resolve_track_image(map_image_path)
+            if rp and os.path.exists(rp):
+                mf = QFrame()
+                mf.setStyleSheet(f"background: {BG_MEDIUM}; border-radius: {RADIUS_MD}px; padding: {SPACING_XS}px;")
+                ml = QVBoxLayout(mf)
+                ml.setContentsMargins(0, 0, 0, 0)
+                mlab = ResizingMapLabel()
+                mlab.setPixmapOriginal(QPixmap(rp))
+                ml.addWidget(mlab)
+                self.detail_lay.addWidget(mf)
 
-        # Overview
         self._add_detail_section("📋  Overview", [
             ("Distance", f"{distance} m"),
             ("Surface", f"{surf_icon} {surface}" if surface else "N/A"),
@@ -645,115 +544,90 @@ class TrackViewFrame(ctk.CTkFrame):
             ("Slope", slope_info or "—"),
         ])
 
-        # Phases
         if phases_json:
             try:
                 phases = json.loads(phases_json)
                 if phases:
                     rows = []
-                    for phase_name, data in phases.items():
-                        if isinstance(data, dict):
-                            start = data.get('start', '?')
-                            end = data.get('end', '?')
-                            rows.append((phase_name, f"{start} m → {end} m"))
+                    for pn, d in phases.items():
+                        if isinstance(d, dict):
+                            rows.append((pn, f"{d.get('start', '?')} m → {d.get('end', '?')} m"))
                         else:
-                            rows.append((phase_name, str(data)))
+                            rows.append((pn, str(d)))
                     self._add_detail_section("🏁  Phases", rows)
-            except (json.JSONDecodeError, TypeError):
-                pass
+            except: pass
 
-        # Corners
         if corners_json:
             try:
                 corners = json.loads(corners_json)
                 if corners:
-                    rows = []
-                    for c in corners:
-                        name = c.get('name', 'Corner')
-                        start = c.get('start', '?')
-                        end = c.get('end', '?')
-                        rows.append((name, f"{start} m → {end} m"))
+                    rows = [(c.get('name', 'Corner'), f"{c.get('start', '?')} m → {c.get('end', '?')} m") for c in corners]
                     self._add_detail_section("🔄  Corners", rows)
-            except (json.JSONDecodeError, TypeError):
-                pass
+            except: pass
 
-        # Straights
         if straights_json:
             try:
-                straights = json.loads(straights_json)
-                if straights:
-                    rows = []
-                    for s in straights:
-                        name = s.get('name', 'Straight')
-                        start = s.get('start', '?')
-                        end = s.get('end', '?')
-                        rows.append((name, f"{start} m → {end} m"))
+                strs = json.loads(straights_json)
+                if strs:
+                    rows = [(s.get('name', 'Straight'), f"{s.get('start', '?')} m → {s.get('end', '?')} m") for s in strs]
                     self._add_detail_section("📏  Straights", rows)
-            except (json.JSONDecodeError, TypeError):
-                pass
+            except: pass
 
-        # Other
         if other_json:
             try:
-                other = json.loads(other_json)
-                if other:
+                oth = json.loads(other_json)
+                if oth:
                     rows = []
-                    for key, val in other.items():
-                        label = key.replace('_', ' ').title()
-                        if isinstance(val, dict):
-                            parts = []
-                            if 'start' in val:
-                                parts.append(f"Start: {val['start']} m")
-                            if 'end' in val:
-                                parts.append(f"End: {val['end']} m")
-                            if 'note' in val and val['note']:
-                                parts.append(val['note'])
-                            rows.append((label, "  ·  ".join(parts) if parts else str(val)))
+                    for k, v in oth.items():
+                        lbl = k.replace('_', ' ').title()
+                        if isinstance(v, dict):
+                            pts = []
+                            if 'start' in v: pts.append(f"Start: {v['start']} m")
+                            if 'end' in v: pts.append(f"End: {v['end']} m")
+                            if 'note' in v and v['note']: pts.append(v['note'])
+                            rows.append((lbl, "  ·  ".join(pts) if pts else str(v)))
                         else:
-                            rows.append((label, str(val)))
+                            rows.append((lbl, str(v)))
                     self._add_detail_section("📊  Other", rows)
-            except (json.JSONDecodeError, TypeError):
-                pass
+            except: pass
 
-        # Conditions
-        extra_rows = []
-        if weather_data:
-            extra_rows.append(("Weather", weather_data))
-        if slope_info:
-            extra_rows.append(("Slope Info", slope_info))
-        if extra_rows:
-            self._add_detail_section("🌤️  Conditions", extra_rows)
+        extra = []
+        if weather_data: extra.append(("Weather", weather_data))
+        if slope_info: extra.append(("Slope Info", slope_info))
+        if extra: self._add_detail_section("🌤️  Conditions", extra)
 
     def _add_detail_section(self, title, rows):
-        section = ctk.CTkFrame(
-            self.detail_scroll, fg_color=BG_MEDIUM,
-            corner_radius=RADIUS_MD, border_width=1, border_color=BG_LIGHT
-        )
-        section.pack(fill=tk.X, pady=SPACING_XS, padx=SPACING_XS)
+        f = QFrame()
+        f.setStyleSheet(f".QFrame {{ background: {BG_MEDIUM}; border: 1px solid {BG_LIGHT}; border-radius: {RADIUS_MD}px; }}")
+        self.detail_lay.addWidget(f)
 
-        ctk.CTkLabel(
-            section, text=title,
-            font=FONT_SUBHEADER, text_color=ACCENT_TERTIARY
-        ).pack(padx=SPACING_MD, pady=(SPACING_SM, SPACING_XS), anchor='w')
+        lay = QVBoxLayout(f)
+        lay.setContentsMargins(SPACING_MD, SPACING_SM, SPACING_MD, SPACING_SM)
+        lay.setSpacing(0)
 
-        sep = ctk.CTkFrame(section, height=1, fg_color=BG_LIGHT)
-        sep.pack(fill=tk.X, padx=SPACING_MD, pady=(0, SPACING_XS))
+        hdr = QLabel(title)
+        hdr.setFont(FONT_SUBHEADER)
+        hdr.setStyleSheet(f"color: {ACCENT_TERTIARY}; border: none;")
+        lay.addWidget(hdr)
 
-        for label, value in rows:
-            row = ctk.CTkFrame(section, fg_color="transparent")
-            row.pack(fill=tk.X, padx=SPACING_MD, pady=1)
+        sep = QFrame()
+        sep.setFixedHeight(1)
+        sep.setStyleSheet(f"background: {BG_LIGHT}; border: none;")
+        lay.addWidget(sep)
+        lay.addSpacing(SPACING_XS)
 
-            ctk.CTkLabel(
-                row, text=label,
-                font=FONT_BODY, text_color=TEXT_MUTED,
-                width=140, anchor='w'
-            ).pack(side=tk.LEFT)
+        for l, v in rows:
+            r = QHBoxLayout()
+            lbl = QLabel(l)
+            lbl.setFont(FONT_BODY)
+            lbl.setStyleSheet(f"color: {TEXT_MUTED}; border: none;")
+            lbl.setFixedWidth(140)
+            r.addWidget(lbl)
 
-            ctk.CTkLabel(
-                row, text=value,
-                font=FONT_BODY_BOLD, text_color=TEXT_PRIMARY, anchor='w'
-            ).pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-        self._bind_scroll_recursive(section, self.detail_scroll)
-
-        ctk.CTkFrame(section, fg_color="transparent", height=SPACING_XS).pack()
+            v_lbl = QLabel(v)
+            v_lbl.setFont(FONT_BODY_BOLD)
+            v_lbl.setStyleSheet(f"color: {TEXT_PRIMARY}; border: none;")
+            v_lbl.setWordWrap(True)
+            r.addWidget(v_lbl, stretch=1)
+            lay.addLayout(r)
+            lay.addSpacing(2)

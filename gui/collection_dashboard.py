@@ -1,265 +1,303 @@
 """
-Collection Progress Dashboard
-Visual overview of card collection with progress bars, stats, and quick actions
+Collection Progress Dashboard — PySide6 edition.
+Visual overview of card collection with stats, ring charts (QPainter),
+and type breakdown progress bars.
 """
 
-import tkinter as tk
-import customtkinter as ctk
 import sys
 import os
+import math
+
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
+    QLabel, QFrame, QScrollArea, QSizePolicy
+)
+from PySide6.QtCore import Qt, QRect
+from PySide6.QtGui import QFont, QPainter, QColor, QPen, QBrush
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from db.db_queries import get_database_stats, get_owned_count, get_collection_stats
 from gui.theme import (
-    BG_DARKEST, BG_DARK, BG_MEDIUM, BG_LIGHT, BG_HIGHLIGHT, BG_ELEVATED,
-    ACCENT_PRIMARY, ACCENT_SECONDARY, ACCENT_SUCCESS, ACCENT_ERROR, ACCENT_WARNING,
+    BG_DARKEST, BG_DARK, BG_MEDIUM, BG_LIGHT, BG_ELEVATED,
+    ACCENT_PRIMARY, ACCENT_SUCCESS, ACCENT_ERROR,
     TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, TEXT_DISABLED,
     FONT_DISPLAY, FONT_TITLE, FONT_HEADER, FONT_SUBHEADER,
     FONT_BODY, FONT_BODY_BOLD, FONT_SMALL, FONT_TINY,
     SPACING_XS, SPACING_SM, SPACING_MD, SPACING_LG, SPACING_XL,
-    RADIUS_SM, RADIUS_MD, RADIUS_LG, RADIUS_FULL,
+    RADIUS_SM, RADIUS_MD, RADIUS_LG,
     RARITY_COLORS, TYPE_COLORS, get_type_icon,
-    create_styled_button
+    create_styled_button,
 )
 
 
-class CollectionDashboard(ctk.CTkFrame):
-    """Collection progress dashboard with visual stats and progress bars"""
+# ─── Ring Chart Widget ────────────────────────────────────────────────────────
 
-    def __init__(self, parent, navigate_to_cards_callback=None):
-        super().__init__(parent, fg_color="transparent")
+class RingChart(QWidget):
+    """Custom QPainter ring/donut chart."""
+
+    def __init__(self, pct: float, color: str, label: str, owned: int, total: int, parent=None):
+        super().__init__(parent)
+        self.pct = pct
+        self.color = QColor(color)
+        self.label = label
+        self.owned = owned
+        self.total = total
+        self.setFixedSize(130, 150)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        size = 110
+        thickness = 14
+        margin = (self.width() - size) // 2
+        rect = QRect(margin, 4, size, size)
+
+        # Background ring
+        bg_pen = QPen(QColor(BG_MEDIUM))
+        bg_pen.setWidth(thickness)
+        bg_pen.setCapStyle(Qt.PenCapStyle.FlatCap)
+        p.setPen(bg_pen)
+        p.drawArc(rect, 0, 360 * 16)
+
+        # Foreground ring
+        if self.pct > 0:
+            fg_pen = QPen(self.color)
+            fg_pen.setWidth(thickness)
+            fg_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            p.setPen(fg_pen)
+            span = int(self.pct / 100 * 360 * 16)
+            p.drawArc(rect, 90 * 16, -span)
+
+        # Center text: rarity label
+        p.setPen(self.color)
+        lbl_font = QFont(FONT_TITLE)
+        lbl_font.setPointSize(13)
+        lbl_font.setBold(True)
+        p.setFont(lbl_font)
+        p.drawText(rect.adjusted(0, -6, 0, -6), Qt.AlignmentFlag.AlignCenter, self.label)
+
+        # Percent below label
+        p.setPen(QColor(TEXT_MUTED))
+        pct_font = QFont(FONT_TINY)
+        pct_font.setPointSize(9)
+        p.setFont(pct_font)
+        p.drawText(rect.adjusted(0, 16, 0, 16), Qt.AlignmentFlag.AlignCenter, f"{self.pct:.0f}%")
+
+        # Count below ring
+        p.setPen(QColor(TEXT_SECONDARY))
+        count_font = QFont(FONT_SMALL)
+        count_font.setPointSize(10)
+        p.setFont(count_font)
+        count_rect = QRect(0, size + 10, self.width(), 20)
+        p.drawText(count_rect, Qt.AlignmentFlag.AlignCenter, f"{self.owned} / {self.total}")
+
+        p.end()
+
+
+# ─── Stat card helper ─────────────────────────────────────────────────────────
+
+def _stat_card(icon, label, value, color, parent=None):
+    card = QFrame(parent)
+    card.setStyleSheet(
+        f".QFrame {{ background-color: {BG_DARK}; border: 1px solid {BG_LIGHT};"
+        f"border-radius: {RADIUS_LG}px; }}"
+    )
+    inner = QVBoxLayout(card)
+    inner.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    inner.setSpacing(SPACING_XS)
+    inner.setContentsMargins(SPACING_LG, SPACING_LG, SPACING_LG, SPACING_LG)
+
+    i_lbl = QLabel(icon)
+    i_lbl.setFont(FONT_DISPLAY)
+    i_lbl.setStyleSheet(f"color: {color}; background: transparent;")
+    i_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    inner.addWidget(i_lbl)
+
+    v_lbl = QLabel(str(value))
+    v_lbl.setFont(FONT_DISPLAY)
+    v_lbl.setStyleSheet(f"color: {TEXT_PRIMARY}; background: transparent;")
+    v_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    inner.addWidget(v_lbl)
+
+    l_lbl = QLabel(label)
+    l_lbl.setFont(FONT_SMALL)
+    l_lbl.setStyleSheet(f"color: {TEXT_MUTED}; background: transparent;")
+    l_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    inner.addWidget(l_lbl)
+
+    return card
+
+
+# ─── Main Dashboard ───────────────────────────────────────────────────────────
+
+class CollectionDashboard(QWidget):
+    """Bento-grid collection overview."""
+
+    def __init__(self, parent=None, navigate_to_cards_callback=None):
+        super().__init__(parent)
         self.navigate_to_cards = navigate_to_cards_callback
         self._build_ui()
         self.refresh()
 
     def _build_ui(self):
-        # Scrollable content
-        self.scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
-        self.scroll.pack(fill=tk.BOTH, expand=True)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("border: none; background: transparent;")
+
+        self._body = QWidget()
+        self._body.setStyleSheet(f".QWidget, .QFrame, .QMainWindow, .QDialog {{ background-color: {BG_DARKEST}; }}")
+        self._body_lay = QVBoxLayout(self._body)
+        self._body_lay.setContentsMargins(SPACING_LG, SPACING_LG, SPACING_LG, SPACING_LG)
+        self._body_lay.setSpacing(SPACING_LG)
+
+        scroll.setWidget(self._body)
+        outer.addWidget(scroll)
 
         # Header
-        header = ctk.CTkFrame(self.scroll, fg_color="transparent")
-        header.pack(fill=tk.X, pady=(0, SPACING_LG), padx=SPACING_MD)
-
-        ctk.CTkLabel(
-            header, text="📊  Collection Dashboard",
-            font=FONT_DISPLAY, text_color=TEXT_PRIMARY
-        ).pack(side=tk.LEFT)
-
+        hdr = QHBoxLayout()
+        hdr.setSpacing(SPACING_SM)
+        title = QLabel("PULSE DECK")
+        title.setFont(FONT_DISPLAY)
+        title.setStyleSheet(f"color: {ACCENT_PRIMARY}; background: transparent;")
+        hdr.addWidget(title)
+        hdr.addStretch()
         if self.navigate_to_cards:
-            create_styled_button(
-                header, text="📋 Browse Cards",
-                command=self.navigate_to_cards,
-                style_type='accent', height=36, width=140
-            ).pack(side=tk.RIGHT)
+            btn = create_styled_button(None, text="Open Library",
+                                       command=self.navigate_to_cards,
+                                       style_type="accent", height=36, width=140)
+            hdr.addWidget(btn)
+        self._body_lay.addLayout(hdr)
 
-        # === Top Stats Row ===
-        self.top_stats_frame = ctk.CTkFrame(self.scroll, fg_color="transparent")
-        self.top_stats_frame.pack(fill=tk.X, pady=(0, SPACING_XL), padx=SPACING_MD)
+        # Top stats row (placeholder — populated in refresh)
+        self._stats_row = QHBoxLayout()
+        self._stats_row.setSpacing(SPACING_MD)
+        self._body_lay.addLayout(self._stats_row)
 
-        # === Two Column Layout below top stats ===
-        self.columns_frame = ctk.CTkFrame(self.scroll, fg_color="transparent")
-        self.columns_frame.pack(fill=tk.BOTH, expand=True, padx=SPACING_MD)
-        self.columns_frame.columnconfigure(0, weight=1)
-        self.columns_frame.columnconfigure(1, weight=1)
+        # Bottom bento: rarity | types
+        bento = QHBoxLayout()
+        bento.setSpacing(SPACING_MD)
 
-        # Left Column: Rarity Breakdown
-        self.rarity_section = ctk.CTkFrame(
-            self.columns_frame, fg_color=BG_DARK,
-            corner_radius=RADIUS_LG, border_width=1, border_color=BG_LIGHT
+        self._rarity_frame = QFrame()
+        self._rarity_frame.setStyleSheet(
+            f".QFrame {{ background-color: {BG_DARK}; border: 1px solid {BG_LIGHT};"
+            f"border-radius: {RADIUS_LG}px; }}"
         )
-        self.rarity_section.grid(row=0, column=0, sticky="nsew", padx=(0, SPACING_MD))
+        self._rarity_frame.setMinimumWidth(280)
+        bento.addWidget(self._rarity_frame, stretch=1)
 
-        # Right Column: Type Breakdown
-        self.type_section = ctk.CTkFrame(
-            self.columns_frame, fg_color=BG_DARK,
-            corner_radius=RADIUS_LG, border_width=1, border_color=BG_LIGHT
+        self._type_frame = QFrame()
+        self._type_frame.setStyleSheet(
+            f".QFrame {{ background-color: {BG_DARK}; border: 1px solid {BG_LIGHT};"
+            f"border-radius: {RADIUS_LG}px; }}"
         )
-        self.type_section.grid(row=0, column=1, sticky="nsew")
+        bento.addWidget(self._type_frame, stretch=2)
+
+        self._body_lay.addLayout(bento, stretch=1)
 
     def refresh(self):
-        """Refresh all dashboard data"""
         try:
             stats = get_collection_stats()
         except Exception:
             stats = self._fallback_stats()
 
-        total = stats.get('total', 0)
-
-        # ── Empty state — no data scraped yet ──
-        if total == 0:
+        if stats.get('total', 0) == 0:
             self._render_empty_state()
             return
 
         self._render_top_stats(stats)
-        self._render_rarity_bars(stats)
+        self._render_rarity_rings(stats)
         self._render_type_bars(stats)
 
     def _render_empty_state(self):
-        """Show a friendly empty state when the database has no card data."""
-        # Clear existing top stats and sections
-        for w in self.top_stats_frame.winfo_children():
-            w.destroy()
-        for w in self.rarity_section.winfo_children():
-            w.destroy()
-        for w in self.type_section.winfo_children():
-            w.destroy()
+        self._clear_layout(self._stats_row)
+        self._clear_widget(self._rarity_frame)
+        self._clear_widget(self._type_frame)
 
-        # Central empty state message in top_stats_frame
-        ctk.CTkLabel(
-            self.top_stats_frame,
-            text="📭",
-            font=("Segoe UI", 52),
-            text_color=TEXT_DISABLED
-        ).pack(pady=(SPACING_XL, SPACING_SM))
+        empty_lay = QVBoxLayout()
+        empty_lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        ctk.CTkLabel(
-            self.top_stats_frame,
-            text="No card data yet",
-            font=FONT_TITLE, text_color=TEXT_MUTED
-        ).pack()
+        icon = QLabel("📭")
+        icon.setFont(QFont("Segoe UI", 48))
+        icon.setStyleSheet(f"color: {TEXT_DISABLED}; background: transparent;")
+        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_lay.addWidget(icon)
 
-        ctk.CTkLabel(
-            self.top_stats_frame,
-            text="Your database is empty. You need to run the scraper\n"
-                 "to fetch card data from GameTora before you can use the app.",
-            font=FONT_BODY, text_color=TEXT_DISABLED,
-            justify="center", wraplength=500
-        ).pack(pady=(SPACING_SM, SPACING_LG))
+        t = QLabel("No card data yet")
+        t.setFont(FONT_TITLE)
+        t.setStyleSheet(f"color: {TEXT_MUTED}; background: transparent;")
+        t.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_lay.addWidget(t)
+
+        d = QLabel("Your database is empty. Run the scraper to fetch card data from GameTora.")
+        d.setFont(FONT_BODY)
+        d.setStyleSheet(f"color: {TEXT_DISABLED}; background: transparent;")
+        d.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        d.setWordWrap(True)
+        empty_lay.addWidget(d)
 
         if self.navigate_to_cards:
-            create_styled_button(
-                self.top_stats_frame,
-                text="📋 Go to Card Library",
-                command=self.navigate_to_cards,
-                style_type='accent', height=40, width=200
-            ).pack()
+            btn = create_styled_button(None, text="📋 Go to Card Library",
+                                       command=self.navigate_to_cards,
+                                       style_type="accent", height=40, width=200)
+            empty_lay.addWidget(btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
-
-    def _fallback_stats(self):
-        """Build stats from basic queries when get_collection_stats isn't available"""
-        db_stats = get_database_stats()
-        owned = get_owned_count()
-        total = db_stats.get('total_cards', 0)
-        by_rarity = db_stats.get('by_rarity', {})
-
-        return {
-            'total': total,
-            'owned': owned,
-            'by_rarity': {r: {'total': c, 'owned': 0} for r, c in by_rarity.items()},
-            'by_type': {}
-        }
+        wrapper = QFrame()
+        wrapper.setStyleSheet("background: transparent; border: none;")
+        wrapper.setLayout(empty_lay)
+        self._stats_row.addWidget(wrapper)
 
     def _render_top_stats(self, stats):
-        """Render the top stats cards using large metrics"""
-        for w in self.top_stats_frame.winfo_children():
-            w.destroy()
-
-        self.top_stats_frame.columnconfigure((0,1,2,3), weight=1)
-
+        self._clear_layout(self._stats_row)
         total = stats.get('total', 0)
         owned = stats.get('owned', 0)
         pct = (owned / total * 100) if total > 0 else 0
 
-        stat_data = [
-            ("📋", "Total Cards", str(total), TEXT_PRIMARY),
-            ("✅", "Owned", str(owned), ACCENT_SUCCESS),
-            ("📈", "Completion", f"{pct:.1f}%", ACCENT_PRIMARY),
-            ("❌", "Missing", str(total - owned), ACCENT_ERROR),
-        ]
+        for icon, label, value, color in [
+            ("📋", "Total Cards",  str(total),          TEXT_PRIMARY),
+            ("✅", "Owned",        str(owned),           ACCENT_SUCCESS),
+            ("📈", "Completion",   f"{pct:.1f}%",        ACCENT_PRIMARY),
+            ("❌", "Missing",      str(total - owned),   ACCENT_ERROR),
+        ]:
+            self._stats_row.addWidget(_stat_card(icon, label, value, color))
 
-        for i, (icon, label, value, color) in enumerate(stat_data):
-            card = ctk.CTkFrame(
-                self.top_stats_frame, fg_color=BG_DARK,
-                corner_radius=RADIUS_LG, border_width=1, border_color=BG_LIGHT
-            )
-            card.grid(row=0, column=i, sticky="nsew", padx=SPACING_SM)
+    def _render_rarity_rings(self, stats):
+        self._clear_widget(self._rarity_frame)
+        lay = QVBoxLayout(self._rarity_frame)
+        lay.setContentsMargins(SPACING_LG, SPACING_MD, SPACING_LG, SPACING_MD)
 
-            inner = ctk.CTkFrame(card, fg_color="transparent")
-            inner.pack(padx=SPACING_LG, pady=SPACING_LG, expand=True)
+        hdr = QLabel("⭐  By Rarity")
+        hdr.setFont(FONT_SUBHEADER)
+        hdr.setStyleSheet(f"color: {TEXT_PRIMARY}; background: transparent;")
+        lay.addWidget(hdr)
 
-            ctk.CTkLabel(
-                inner, text=icon, font=FONT_DISPLAY, text_color=color
-            ).pack(anchor="center", pady=(0, SPACING_XS))
-
-            ctk.CTkLabel(
-                inner, text=value, font=FONT_DISPLAY, text_color=TEXT_PRIMARY
-            ).pack(anchor="center")
-
-            ctk.CTkLabel(
-                inner, text=label, font=FONT_SMALL, text_color=TEXT_MUTED
-            ).pack(anchor="center", pady=(SPACING_XS, 0))
-
-    def _render_rarity_bars(self, stats):
-        """Render rarity breakdown using circular progress rings"""
-        for w in self.rarity_section.winfo_children():
-            w.destroy()
-
-        ctk.CTkLabel(
-            self.rarity_section, text="  ⭐  By Rarity",
-            font=FONT_SUBHEADER, text_color=TEXT_PRIMARY
-        ).pack(anchor="w", padx=SPACING_LG, pady=(SPACING_LG, SPACING_SM))
-
-        rings_container = ctk.CTkFrame(self.rarity_section, fg_color="transparent")
-        rings_container.pack(fill=tk.BOTH, expand=True, pady=SPACING_MD)
-        rings_container.columnconfigure((0,1,2), weight=1)
-
+        rings_row = QHBoxLayout()
+        rings_row.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         by_rarity = stats.get('by_rarity', {})
-        for i, rarity in enumerate(['SSR', 'SR', 'R']):
+        for rarity in ['SSR', 'SR', 'R']:
             data = by_rarity.get(rarity, {'total': 0, 'owned': 0})
             total = data.get('total', 0)
             owned = data.get('owned', 0)
             pct = (owned / total * 100) if total > 0 else 0
             color = RARITY_COLORS.get(rarity, TEXT_MUTED)
-
-            ring_frame = ctk.CTkFrame(rings_container, fg_color="transparent")
-            ring_frame.grid(row=0, column=i, sticky="nsew")
-
-            canvas_size = 120
-            thickness = 12
-            canvas = tk.Canvas(
-                ring_frame, width=canvas_size, height=canvas_size,
-                bg=BG_DARK, highlightthickness=0
-            )
-            canvas.pack()
-
-            # Background ring
-            canvas.create_oval(
-                thickness, thickness, canvas_size-thickness, canvas_size-thickness,
-                outline=BG_MEDIUM, width=thickness
-            )
-
-            # Foreground ring
-            extent = -(pct / 100) * 360
-            if extent != 0:
-                canvas.create_arc(
-                    thickness, thickness, canvas_size-thickness, canvas_size-thickness,
-                    start=90, extent=extent, outline=color, style=tk.ARC, width=thickness
-                )
-
-            # Center text
-            ctk.CTkLabel(ring_frame, text=rarity, font=FONT_TITLE, text_color=color).place(relx=0.5, rely=0.42, anchor="center")
-            ctk.CTkLabel(ring_frame, text=f"{pct:.0f}%", font=FONT_TINY, text_color=TEXT_MUTED).place(relx=0.5, rely=0.6, anchor="center")
-
-            # Footnote
-            ctk.CTkLabel(
-                ring_frame, text=f"{owned} / {total}",
-                font=FONT_SMALL, text_color=TEXT_SECONDARY
-            ).pack(pady=(SPACING_SM, 0))
-
-        # Bottom padding
-        ctk.CTkFrame(self.rarity_section, fg_color="transparent", height=SPACING_MD).pack()
+            ring = RingChart(pct, color, rarity, owned, total)
+            rings_row.addWidget(ring)
+        lay.addLayout(rings_row)
+        lay.addStretch()
 
     def _render_type_bars(self, stats):
-        """Render type breakdown progress bars"""
-        for w in self.type_section.winfo_children():
-            w.destroy()
+        self._clear_widget(self._type_frame)
+        lay = QVBoxLayout(self._type_frame)
+        lay.setContentsMargins(SPACING_LG, SPACING_MD, SPACING_LG, SPACING_MD)
 
-        ctk.CTkLabel(
-            self.type_section, text="  🎯  By Type",
-            font=FONT_SUBHEADER, text_color=TEXT_PRIMARY
-        ).pack(anchor="w", padx=SPACING_LG, pady=(SPACING_LG, SPACING_SM))
+        hdr = QLabel("🎯  By Type")
+        hdr.setFont(FONT_SUBHEADER)
+        hdr.setStyleSheet(f"color: {TEXT_PRIMARY}; background: transparent;")
+        lay.addWidget(hdr)
 
         by_type = stats.get('by_type', {})
         for card_type in ['Speed', 'Stamina', 'Power', 'Guts', 'Wisdom', 'Friend', 'Group']:
@@ -272,31 +310,84 @@ class CollectionDashboard(ctk.CTkFrame):
             color = TYPE_COLORS.get(card_type, TEXT_MUTED)
             icon = get_type_icon(card_type)
 
-            row = ctk.CTkFrame(self.type_section, fg_color="transparent")
-            row.pack(fill=tk.X, padx=SPACING_LG, pady=SPACING_XS)
+            row = QHBoxLayout()
+            row.setSpacing(SPACING_SM)
 
-            ctk.CTkLabel(
-                row, text=f"{icon} {card_type}", font=FONT_BODY,
-                text_color=TEXT_SECONDARY, width=90, anchor="w"
-            ).pack(side=tk.LEFT)
+            type_lbl = QLabel(f"{icon}  {card_type}")
+            type_lbl.setFont(FONT_BODY)
+            type_lbl.setStyleSheet(f"color: {TEXT_SECONDARY}; background: transparent; min-width: 90px;")
+            row.addWidget(type_lbl)
 
-            ctk.CTkLabel(
-                row, text=f"{owned}/{total}",
-                font=FONT_SMALL, text_color=TEXT_MUTED, width=60
-            ).pack(side=tk.RIGHT)
+            # Progress track
+            track = QFrame()
+            track.setFixedHeight(10)
+            track.setStyleSheet(
+                f".QFrame {{ background-color: {BG_MEDIUM}; border-radius: 5px; border: none; }}"
+            )
+            track.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            row.addWidget(track, stretch=1)
 
-            ctk.CTkLabel(
-                row, text=f"{pct:.0f}%",
-                font=FONT_TINY, text_color=TEXT_DISABLED, width=40
-            ).pack(side=tk.RIGHT)
+            # Fill overlay via child widget
+            fill = QFrame(track)
+            fill_w = max(0, int(track.width() * pct / 100)) if pct > 0 else 0
+            fill.setFixedHeight(10)
+            fill.setStyleSheet(f"background-color: {color}; border-radius: 5px; border: none;")
+            # Use resizeEvent trick: set relwidth via stylesheet after show
+            fill._pct = pct / 100
+            fill._color = color
+            def make_resize(f=fill):
+                def _resize(ev):
+                    f.setFixedWidth(max(4, int(f.parent().width() * f._pct)))
+                return _resize
+            track.resizeEvent = make_resize()
 
-            track = ctk.CTkFrame(row, fg_color=BG_MEDIUM, corner_radius=4, height=10)
-            track.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=SPACING_SM)
-            track.pack_propagate(False)
+            pct_lbl = QLabel(f"{pct:.0f}%")
+            pct_lbl.setFont(FONT_TINY)
+            pct_lbl.setStyleSheet(f"color: {TEXT_DISABLED}; background: transparent; min-width: 36px;")
+            pct_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
+            row.addWidget(pct_lbl)
 
-            fill_w = max(1, int(pct)) if total > 0 else 0
-            if fill_w > 0:
-                fill = ctk.CTkFrame(track, fg_color=color, corner_radius=4)
-                fill.place(relwidth=fill_w / 100, relheight=1.0)
+            count_lbl = QLabel(f"{owned}/{total}")
+            count_lbl.setFont(FONT_SMALL)
+            count_lbl.setStyleSheet(f"color: {TEXT_MUTED}; background: transparent; min-width: 56px;")
+            count_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
+            row.addWidget(count_lbl)
 
-        ctk.CTkFrame(self.type_section, fg_color="transparent", height=SPACING_MD).pack()
+            lay.addLayout(row)
+
+        lay.addStretch()
+
+    def _fallback_stats(self):
+        db_stats = get_database_stats()
+        owned = get_owned_count()
+        total = db_stats.get('total_cards', 0)
+        by_rarity = db_stats.get('by_rarity', {})
+        return {
+            'total': total,
+            'owned': owned,
+            'by_rarity': {r: {'total': c, 'owned': 0} for r, c in by_rarity.items()},
+            'by_type': {}
+        }
+
+    @staticmethod
+    def _clear_layout(layout):
+        while layout.count():
+            item = layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+    @staticmethod
+    def _clear_widget(frame: QFrame):
+        if frame.layout():
+            while frame.layout().count():
+                item = frame.layout().takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
+            # Remove old layout so new one can be set
+            import shiboken6
+            try:
+                old = frame.layout()
+                if old:
+                    QWidget().setLayout(old)
+            except Exception:
+                pass
