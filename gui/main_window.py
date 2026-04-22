@@ -79,7 +79,7 @@ class MainWindow(QMainWindow):
 
         # Window icon
         try:
-            icon_path = resolve_image_path("1_Special Week.png")
+            icon_path = resolve_image_path("umaappicon.png")
             if icon_path and os.path.exists(icon_path):
                 self.setWindowIcon(QIcon(icon_path))
         except Exception:

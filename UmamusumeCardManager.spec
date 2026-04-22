@@ -24,6 +24,7 @@ datas_list = [
     ('assets',                     'assets'),
     ('database/umamusume_seed.db', 'database'),
     ('version.py',                 '.'),
+    ('umaappicon.png',             '.'),
     ('updater',                    'updater'),
 ]
 
@@ -73,6 +74,7 @@ exe = EXE(
     a.datas,
     [],
     name='UmamusumeCardManager',
+    icon='umaappicon.ico',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
