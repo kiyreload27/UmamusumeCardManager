@@ -8,6 +8,7 @@ import threading
 import subprocess
 import sys
 import os
+import logging
 from datetime import datetime
 
 from PySide6.QtWidgets import (
@@ -101,6 +102,19 @@ class _Signals(QObject):
     log_line = Signal(str)
     status   = Signal(str)
     done     = Signal(list)
+
+
+class UILogHandler(logging.Handler):
+    def __init__(self, sig):
+        super().__init__()
+        self.sig = sig
+        self.setFormatter(logging.Formatter('%(message)s'))
+        
+    def emit(self, record):
+        try:
+            self.sig.log_line.emit(f"    {self.format(record)}")
+        except Exception:
+            pass
 
 
 class DataUpdateDialog(QDialog):
@@ -382,20 +396,28 @@ class DataUpdateDialog(QDialog):
 
     def _run_scrapers(self, scrapers: list):
         errors = []
-        for s in scrapers:
-            if self._cancelled:
-                break
-            self._sig.status.emit(f"Scraping {s['label']}…")
-            self._sig.log_line.emit(f"\n► {s['label']} scraper starting…")
-            try:
-                import importlib
-                mod = importlib.import_module(s["module"])
-                getattr(mod, s["fn"])()
-                self._sig.log_line.emit(f"  ✅ {s['label']} complete")
-            except Exception as exc:
-                self._sig.log_line.emit(f"  ❌ {s['label']} failed: {exc}")
-                errors.append(f"{s['label']}: {exc}")
-        self._sig.done.emit(errors)
+        
+        ui_handler = UILogHandler(self._sig)
+        root_logger = logging.getLogger()
+        root_logger.addHandler(ui_handler)
+        
+        try:
+            for s in scrapers:
+                if self._cancelled:
+                    break
+                self._sig.status.emit(f"Scraping {s['label']}…")
+                self._sig.log_line.emit(f"\n► {s['label']} scraper starting…")
+                try:
+                    import importlib
+                    mod = importlib.import_module(s["module"])
+                    getattr(mod, s["fn"])()
+                    self._sig.log_line.emit(f"  ✅ {s['label']} complete")
+                except Exception as exc:
+                    self._sig.log_line.emit(f"  ❌ {s['label']} failed: {exc}")
+                    errors.append(f"{s['label']}: {exc}")
+        finally:
+            root_logger.removeHandler(ui_handler)
+            self._sig.done.emit(errors)
 
     def _append_log(self, line: str):
         self._log_box.appendPlainText(line)
