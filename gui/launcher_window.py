@@ -39,6 +39,8 @@ try:
 except ImportError:
     VERSION = "?"
 
+from utils import resolve_image_path
+
 
 def _styled_btn(parent, text, style_type="default", h=40) -> QPushButton:
     btn = create_styled_button(parent, text=text, style_type=style_type, height=h)
@@ -54,6 +56,13 @@ class LauncherWindow(QMainWindow):
 
         self.setWindowTitle("Umamusume Support Card Manager")
         self.setFixedSize(520, 560)
+        
+        try:
+            icon_path = resolve_image_path("umaappicon.png")
+            if icon_path and os.path.exists(icon_path):
+                self.setWindowIcon(QIcon(icon_path))
+        except Exception:
+            pass
         self.setWindowFlags(
             Qt.WindowType.Window |
             Qt.WindowType.WindowCloseButtonHint |
