@@ -258,7 +258,7 @@ class SkillSearchFrame(QWidget):
         clear_layout(self.skill_list_lay)
         self.skill_widgets.clear()
 
-        display_items = items[:120]
+        display_items = items  # No cap — chunked renderer handles performance
         self.skill_count_label.setText(f"{len(items)} skills")
         self._skill_render_queue = display_items[:]
         QTimer.singleShot(0, lambda: self._process_skill_queue(my_gen))

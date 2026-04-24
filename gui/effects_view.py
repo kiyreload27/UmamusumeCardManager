@@ -28,9 +28,12 @@ from gui.theme import (
     create_styled_button, create_styled_entry
 )
 
+# These must match (or be substrings of) the effect_name values stored in the DB:
+# Fan Bonus, Friendship Bonus, Mood Effect, Race Bonus, Hint Lv Up, Hint Rate,
+# Training Effectiveness, Specialty Rate, Starting Bond, Wisdom Friendship Recovery
 QUICK_FILTERS = [
-    "Friendship", "Motivation", "Race Bonus", "Skill Pt",
-    "Training", "Specialty", "Hint", "Fan Count"
+    "Friendship Bonus", "Mood Effect", "Race Bonus", "Fan Bonus",
+    "Training Effectiveness", "Specialty Rate", "Hint Rate", "Hint Lv Up"
 ]
 
 def clear_layout(layout):
