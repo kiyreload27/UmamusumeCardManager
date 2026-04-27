@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QLineEdit, QComboBox, QCheckBox, QPushButton,
     QPlainTextEdit, QApplication, QSizePolicy
 )
-from PySide6.QtCore import Qt, QTimer, QEvent, QObject
+from PySide6.QtCore import Qt, QTimer, QEvent, QObject, QSize
 from PySide6.QtGui import QPixmap, QIcon, QShortcut, QKeySequence, QFont
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -22,7 +22,7 @@ from db.db_queries import (
     get_all_cards, get_card_by_id, get_effects_at_level,
     set_card_owned, update_owned_card_level,
     set_cards_owned_bulk, get_card_notes, set_card_notes,
-    get_all_tags, get_all_effect_names
+    get_all_tags, get_all_effect_names, get_card_deck_usage
 )
 from utils import resolve_image_path
 from gui.theme import (
@@ -44,6 +44,15 @@ MAX_RECENT = 10
 _ICON_CACHE_MAX = 400
 _FILTER_DEBOUNCE_MS = 260
 _POPULATE_CHUNK = 12
+
+_CARD_FILTER_STATE = {
+    'rarity': 'All',
+    'type': 'All',
+    'search': '',
+    'ownership': 'All',
+    'effect': 'All Effects',
+    'tag': 'All Tags'
+}
 
 
 def clear_layout(layout):
@@ -123,6 +132,7 @@ class CardListFrame(QWidget):
         self.details_visible = True
 
         self._build_ui()
+        self._restore_filter_state()
         self.load_cards()
         self._bind_keyboard()
 
@@ -364,9 +374,11 @@ class CardListFrame(QWidget):
 
         self._refresh_filter_dropdowns()
 
-        self.owned_only_cb = QCheckBox("Owned only")
-        self.owned_only_cb.toggled.connect(lambda _: self.filter_cards())
-        layout.addWidget(self.owned_only_cb)
+        layout.addWidget(QLabel("Ownership"))
+        self.ownership_combo = QComboBox()
+        self.ownership_combo.addItems(["All", "Owned", "Missing"])
+        self.ownership_combo.currentTextChanged.connect(lambda _: self.filter_cards())
+        layout.addWidget(self.ownership_combo)
 
         self.bulk_toggle_btn = create_styled_button(None, text="☐ Batch select",
                                                     command=self._toggle_bulk_mode, style_type="ghost")
@@ -378,7 +390,7 @@ class CardListFrame(QWidget):
         # Style labels uniformly
         for i in range(layout.count()):
             w = layout.itemAt(i).widget()
-            if isinstance(w, QLabel) and w.text() in ("Type", "Effect", "Tag"):
+            if isinstance(w, QLabel) and w.text() in ("Type", "Effect", "Tag", "Ownership"):
                 w.setFont(FONT_TINY)
                 w.setStyleSheet(f"color: {TEXT_MUTED}; border: none;")
 
@@ -419,6 +431,12 @@ class CardListFrame(QWidget):
         self.detail_info.setStyleSheet(f"color: {TEXT_MUTED};")
         self.detail_info.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(self.detail_info)
+
+        self.deck_usage_frame = QFrame()
+        self.deck_usage_lay = QHBoxLayout(self.deck_usage_frame)
+        self.deck_usage_lay.setContentsMargins(0, 0, 0, 0)
+        self.deck_usage_lay.setSpacing(SPACING_XS)
+        lay.addWidget(self.deck_usage_frame)
 
         # Owned Checkbox
         self.owned_cb = QCheckBox("I Own This Card")
@@ -496,11 +514,30 @@ class CardListFrame(QWidget):
 
     # ─── DATA LOADING & FILTERING ─────────────────────────────────────────────
 
+    def _restore_filter_state(self):
+        self.search_entry.blockSignals(True)
+        self.type_combo.blockSignals(True)
+        self.effect_combo.blockSignals(True)
+        self.tag_combo.blockSignals(True)
+        self.ownership_combo.blockSignals(True)
+
+        self.search_entry.setText(_CARD_FILTER_STATE['search'])
+        self._rarity_var = _CARD_FILTER_STATE['rarity']
+        self.type_combo.setCurrentText(_CARD_FILTER_STATE['type'])
+        self.effect_combo.setCurrentText(_CARD_FILTER_STATE['effect'])
+        self.tag_combo.setCurrentText(_CARD_FILTER_STATE['tag'])
+        self.ownership_combo.setCurrentText(_CARD_FILTER_STATE['ownership'])
+
+        self._sync_rarity_dock()
+
+        self.search_entry.blockSignals(False)
+        self.type_combo.blockSignals(False)
+        self.effect_combo.blockSignals(False)
+        self.tag_combo.blockSignals(False)
+        self.ownership_combo.blockSignals(False)
+
     def load_cards(self):
-        self.cards = get_all_cards()
-        self.filtered_cards = self.cards
-        self.current_page = 0
-        self.populate_tree()
+        self.filter_cards()
 
     def reset_filters(self):
         self.search_entry.clear()
@@ -508,7 +545,7 @@ class CardListFrame(QWidget):
         self.type_combo.setCurrentText("All")
         self.effect_combo.setCurrentText("All Effects")
         self.tag_combo.setCurrentText("All Tags")
-        self.owned_only_cb.setChecked(False)
+        self.ownership_combo.setCurrentText("All")
         self._sync_rarity_dock()
         self.filter_cards()
 
@@ -516,9 +553,24 @@ class CardListFrame(QWidget):
         r = self._rarity_var if self._rarity_var != "All" else None
         t = self.type_combo.currentText() if self.type_combo.currentText() != "All" else None
         s = self.search_entry.text().strip() or None
-        o = self.owned_only_cb.isChecked()
+        
+        o_val = self.ownership_combo.currentText()
+        if o_val == "Owned":
+            o = True
+        elif o_val == "Missing":
+            o = "Missing"
+        else:
+            o = False
+
         e = self.effect_combo.currentText() if self.effect_combo.currentText() != "All Effects" else None
         tag = self.tag_combo.currentText() if self.tag_combo.currentText() != "All Tags" else None
+
+        _CARD_FILTER_STATE['rarity'] = self._rarity_var
+        _CARD_FILTER_STATE['type'] = self.type_combo.currentText()
+        _CARD_FILTER_STATE['search'] = self.search_entry.text()
+        _CARD_FILTER_STATE['ownership'] = o_val
+        _CARD_FILTER_STATE['effect'] = self.effect_combo.currentText()
+        _CARD_FILTER_STATE['tag'] = self.tag_combo.currentText()
 
         self.cards = get_all_cards(rarity_filter=r, type_filter=t, search_term=s, owned_only=o, effect_filter=e, tag_filter=tag)
         self.filtered_cards = self.cards
@@ -714,6 +766,7 @@ class CardListFrame(QWidget):
         self.current_card_id = card_id
         self.update_effects_display()
         self._load_notes(card_id)
+        self._load_deck_usage(card_id)
         self._add_to_recent(card_id)
 
         if self.on_card_selected:
@@ -847,6 +900,58 @@ class CardListFrame(QWidget):
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.clicked.connect(lambda _, t=tag: self._filter_by_tag(t))
             self.tag_chips_lay.addWidget(btn)
+
+    def _load_deck_usage(self, card_id):
+        clear_layout(self.deck_usage_lay)
+        usages = get_card_deck_usage(card_id)
+        if usages:
+            lbl = QLabel("In Decks:")
+            lbl.setFont(FONT_TINY)
+            lbl.setStyleSheet(f"color: {TEXT_MUTED};")
+            self.deck_usage_lay.addWidget(lbl)
+            for d in usages:
+                chip = QLabel(d)
+                chip.setFont(FONT_TINY)
+                chip.setStyleSheet(f"background: {BG_DARK}; color: {ACCENT_PRIMARY}; border-radius: 4px; padding: 2px 6px;")
+                self.deck_usage_lay.addWidget(chip)
+            self.deck_usage_lay.addStretch()
+
+    def _add_to_recent(self, card_id):
+        global _recent_cards
+        if card_id in _recent_cards:
+            _recent_cards.remove(card_id)
+        _recent_cards.insert(0, card_id)
+        _recent_cards = _recent_cards[:10]
+        self._render_recent_strip()
+
+    def _render_recent_strip(self):
+        clear_layout(self.recent_lay)
+        if not _recent_cards:
+            self.recent_frame.hide()
+            return
+            
+        self.recent_frame.show()
+        lbl = QLabel("Recent:")
+        lbl.setFont(FONT_TINY)
+        lbl.setStyleSheet(f"color: {TEXT_MUTED};")
+        self.recent_lay.addWidget(lbl)
+        
+        for cid in _recent_cards:
+            card = get_card_by_id(cid)
+            if not card: continue
+            img = self._get_list_icon(cid, card[6])
+            btn = QPushButton()
+            btn.setFixedSize(32, 32)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            if img:
+                btn.setIcon(img)
+                btn.setIconSize(QSize(30, 30))
+            btn.setStyleSheet(f"QPushButton {{ background: {BG_DARK}; border: 1px solid {BG_LIGHT}; border-radius: {RADIUS_SM}px; }} QPushButton:hover {{ border-color: {ACCENT_PRIMARY}; }}")
+            btn.clicked.connect(lambda _, c=cid: self.on_select(c))
+            self.recent_lay.addWidget(btn)
+        self.recent_lay.addStretch()
+
+
 
     def _filter_by_tag(self, tag):
         self.tag_combo.setCurrentText(tag)

@@ -98,8 +98,20 @@ class RingChart(QWidget):
 
 # ─── Stat card helper ─────────────────────────────────────────────────────────
 
-def _stat_card(icon, label, value, color, parent=None):
-    card = QFrame(parent)
+class ClickableStatCard(QFrame):
+    def __init__(self, parent=None, on_click=None):
+        super().__init__(parent)
+        self.on_click = on_click
+        if on_click:
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def mousePressEvent(self, event):
+        if self.on_click and event.button() == Qt.MouseButton.LeftButton:
+            self.on_click()
+        super().mousePressEvent(event)
+
+def _stat_card(icon, label, value, color, parent=None, on_click=None):
+    card = ClickableStatCard(parent, on_click)
     card.setStyleSheet(
         f".QFrame {{ background-color: {BG_DARK}; border: 1px solid {BG_LIGHT};"
         f"border-radius: {RADIUS_LG}px; }}"
@@ -199,6 +211,10 @@ class CollectionDashboard(QWidget):
 
         self._body_lay.addLayout(bento, stretch=1)
 
+        self._recent_lay = QHBoxLayout()
+        self._recent_lay.setSpacing(SPACING_SM)
+        self._body_lay.addLayout(self._recent_lay)
+
     def refresh(self):
         try:
             stats = get_collection_stats()
@@ -212,6 +228,45 @@ class CollectionDashboard(QWidget):
         self._render_top_stats(stats)
         self._render_rarity_rings(stats)
         self._render_type_bars(stats)
+        self._render_recent_cards()
+
+    def _render_recent_cards(self):
+        self._clear_layout(self._recent_lay)
+        import gui.card_view
+        if not gui.card_view._recent_cards: return
+
+        lbl = QLabel("Recent:")
+        lbl.setFont(FONT_TINY)
+        lbl.setStyleSheet(f"color: {TEXT_MUTED};")
+        self._recent_lay.addWidget(lbl)
+
+        from PySide6.QtCore import QSize
+        from db.db_queries import get_card_by_id
+        from utils import resolve_image_path
+        from PySide6.QtGui import QPixmap
+
+        for cid in gui.card_view._recent_cards:
+            card = get_card_by_id(cid)
+            if not card: continue
+            
+            btn = QPushButton()
+            btn.setFixedSize(40, 40)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            
+            rp = resolve_image_path(card[6])
+            if rp and os.path.exists(rp):
+                try:
+                    pix = QPixmap(rp).scaled(38, 38, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                    from PySide6.QtGui import QIcon
+                    btn.setIcon(QIcon(pix))
+                    btn.setIconSize(QSize(36, 36))
+                except: pass
+
+            btn.setStyleSheet(f"QPushButton {{ background: {BG_DARK}; border: 1px solid {BG_LIGHT}; border-radius: {RADIUS_SM}px; }} QPushButton:hover {{ border-color: {ACCENT_PRIMARY}; }}")
+            # Navigate to card via main window
+            btn.clicked.connect(lambda _, c=cid: self.window().navigate_to_card(c) if hasattr(self.window(), 'navigate_to_card') else None)
+            self._recent_lay.addWidget(btn)
+        self._recent_lay.addStretch()
 
     def _render_empty_state(self):
         self._clear_layout(self._stats_row)
@@ -257,13 +312,22 @@ class CollectionDashboard(QWidget):
         owned = stats.get('owned', 0)
         pct = (owned / total * 100) if total > 0 else 0
 
-        for icon, label, value, color in [
-            ("📋", "Total Cards",  str(total),          TEXT_PRIMARY),
-            ("✅", "Owned",        str(owned),           ACCENT_SUCCESS),
-            ("📈", "Completion",   f"{pct:.1f}%",        ACCENT_PRIMARY),
-            ("❌", "Missing",      str(total - owned),   ACCENT_ERROR),
+        for icon, label, value, color, on_click in [
+            ("📋", "Total Cards",  str(total),          TEXT_PRIMARY, None),
+            ("✅", "Owned",        str(owned),           ACCENT_SUCCESS, None),
+            ("📈", "Completion",   f"{pct:.1f}%",        ACCENT_PRIMARY, None),
+            ("❌", "Missing",      str(total - owned),   ACCENT_ERROR, self._on_missing_clicked),
         ]:
-            self._stats_row.addWidget(_stat_card(icon, label, value, color))
+            self._stats_row.addWidget(_stat_card(icon, label, value, color, on_click=on_click))
+
+    def _on_missing_clicked(self):
+        if self.navigate_to_cards:
+            # We need to tell the main window to pre-filter to Missing.
+            # We can use a hack by setting the global _CARD_FILTER_STATE before navigating
+            import gui.card_view
+            gui.card_view._CARD_FILTER_STATE['owned'] = False # Note: 'owned' False means All in the current logic. Wait, no. 'owned' only shows owned. We don't have an "unowned only" checkbox natively, we only have 'Owned Only'. So we might have to add support for "Missing" or just navigate. Wait, the user asked for #6 Clickable "Missing" stat -> pre-filtered cards view.
+            # To do this correctly, we might need a signal to the card view. If we pass 'missing' to navigate_to_cards, main_window can handle it.
+            self.navigate_to_cards("missing")
 
     def _render_rarity_rings(self, stats):
         self._clear_widget(self._rarity_frame)

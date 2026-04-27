@@ -14,6 +14,12 @@ import os
 import hashlib
 from datetime import datetime, timezone
 
+# Force UTF-8 output so emoji don't crash on Windows cp1252 consoles
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 
 _VERSION_FILE = os.path.join(os.path.dirname(__file__), "version.py")
 _BUILD_DATE_PLACEHOLDER = 'BUILD_DATE: str = "dev"'

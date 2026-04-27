@@ -247,8 +247,11 @@ class SkillSearchFrame(QWidget):
 
     def _select_skill_widget(self, skill_name, widget):
         for w in self.skill_widgets:
-            w.setStyleSheet("background: transparent; border: none; text-align: left; padding-left: 8px;")
-        widget.setStyleSheet(f"background: {BG_HIGHLIGHT}; border: none; border-radius: {RADIUS_SM}px; text-align: left; padding-left: 8px;")
+            c = getattr(w, '_text_color', TEXT_PRIMARY)
+            w.setStyleSheet(f"background: transparent; border: none; text-align: left; padding-left: 8px; color: {c};")
+        
+        c_act = getattr(widget, '_text_color', TEXT_PRIMARY)
+        widget.setStyleSheet(f"background: {BG_HIGHLIGHT}; border: none; border-radius: {RADIUS_SM}px; text-align: left; padding-left: 8px; color: {c_act};")
         self.on_skill_selected(skill_name)
 
     def update_skill_list(self, items):
@@ -292,6 +295,7 @@ class SkillSearchFrame(QWidget):
             
             # Since QPushButton text color via stylesheet might override dynamic selection, 
             # we embed color in HTML or apply it to the stylesheet
+            btn._text_color = color
             btn.setStyleSheet(f"background: transparent; border: none; text-align: left; padding-left: 8px; color: {color};")
             
             btn.clicked.connect(lambda _, n=skill_name, b=btn: self._select_skill_widget(n, b))

@@ -277,6 +277,18 @@ def run_migrations():
     except sqlite3.OperationalError:
         pass
 
+    # 13. Create user_wishlist table
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS user_wishlist (
+                card_id INTEGER PRIMARY KEY,
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (card_id) REFERENCES support_cards(card_id)
+            )
+        """)
+    except sqlite3.OperationalError:
+        pass
+
     conn.commit()
     repair_image_paths(conn)
     conn.close()
@@ -673,6 +685,15 @@ def init_database():
         )
     """)
     
+    # ── User wishlist table ──
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS user_wishlist (
+            card_id INTEGER PRIMARY KEY,
+            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (card_id) REFERENCES support_cards(card_id)
+        )
+    """)
+    
     # ── Track tables (additive only — no existing tables modified) ──
     cur.execute("""
         CREATE TABLE IF NOT EXISTS tracks (
@@ -808,8 +829,10 @@ def get_all_cards(rarity_filter=None, type_filter=None, search_term=None, owned_
         query += " AND sc.name LIKE ?"
         params.append(f"%{search_term}%")
     
-    if owned_only:
+    if owned_only is True:
         query += " AND oc.card_id IS NOT NULL"
+    elif owned_only == "Missing":
+        query += " AND oc.card_id IS NULL"
     
     if effect_filter:
         query += " AND sc.card_id IN (SELECT DISTINCT card_id FROM support_effects WHERE effect_name = ?)"
@@ -1186,6 +1209,38 @@ def search_cards_by_tag(tag):
     return ids
 
 # ============================================
+# Wishlist Queries
+# ============================================
+
+def set_card_wishlist(card_id, wanted=True):
+    """Add or remove a card from the wishlist"""
+    conn = get_conn()
+    cur = conn.cursor()
+    if wanted:
+        cur.execute("INSERT OR IGNORE INTO user_wishlist (card_id) VALUES (?)", (card_id,))
+    else:
+        cur.execute("DELETE FROM user_wishlist WHERE card_id = ?", (card_id,))
+    conn.commit()
+    conn.close()
+
+def get_wishlist_cards():
+    """Get all cards on the wishlist"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT sc.card_id, sc.name, sc.rarity, sc.card_type, sc.image_path,
+               CASE WHEN oc.card_id IS NOT NULL THEN 1 ELSE 0 END as is_owned,
+               oc.level as owned_level
+        FROM user_wishlist uw
+        JOIN support_cards sc ON uw.card_id = sc.card_id
+        LEFT JOIN owned_cards oc ON uw.card_id = oc.card_id
+        ORDER BY uw.added_at DESC
+    """)
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+# ============================================
 # Effect Names Query
 # ============================================
 
@@ -1240,6 +1295,14 @@ def export_user_data():
     """)
     data['notes'] = [{'url': r[0], 'note': r[1], 'tags': r[2]} for r in cur.fetchall()]
     
+    # Wishlist
+    cur.execute("""
+        SELECT sc.gametora_url
+        FROM user_wishlist uw
+        JOIN support_cards sc ON uw.card_id = sc.card_id
+    """)
+    data['wishlist'] = [{'url': r[0]} for r in cur.fetchall()]
+    
     conn.close()
     return data
 
@@ -1263,6 +1326,7 @@ def import_user_data(data):
     cur.execute("DELETE FROM deck_slots")
     cur.execute("DELETE FROM user_decks")
     cur.execute("DELETE FROM user_notes")
+    cur.execute("DELETE FROM user_wishlist")
     
     # Import owned cards
     for item in data.get('owned_cards', []):
@@ -1292,6 +1356,13 @@ def import_user_data(data):
             cur.execute("INSERT OR REPLACE INTO user_notes (card_id, note, tags) VALUES (?, ?, ?)",
                         (card_id, item.get('note', ''), item.get('tags', '')))
             summary['notes'] += 1
+            
+    # Import wishlist
+    for item in data.get('wishlist', []):
+        card_id = url_to_id.get(item.get('url'))
+        if card_id:
+            cur.execute("INSERT OR REPLACE INTO user_wishlist (card_id) VALUES (?)",
+                        (card_id,))
     
     conn.commit()
     conn.close()
@@ -1377,6 +1448,14 @@ def create_deck(name):
     conn.close()
     return deck_id
 
+def rename_deck(deck_id, new_name):
+    """Rename an existing deck"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE user_decks SET deck_name = ? WHERE deck_id = ?", (new_name, deck_id))
+    conn.commit()
+    conn.close()
+
 def get_all_decks():
     """Get all saved decks"""
     conn = get_conn()
@@ -1429,6 +1508,21 @@ def get_deck_cards(deck_id):
         ORDER BY ds.slot_position
     """, (deck_id,))
     rows = cur.fetchall()
+    conn.close()
+    return rows
+
+def get_card_deck_usage(card_id):
+    """Get a list of deck names that contain this card"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT DISTINCT ud.deck_name
+        FROM deck_slots ds
+        JOIN user_decks ud ON ds.deck_id = ud.deck_id
+        WHERE ds.card_id = ?
+        ORDER BY ud.deck_name
+    """, (card_id,))
+    rows = [r[0] for r in cur.fetchall()]
     conn.close()
     return rows
 
@@ -1508,6 +1602,22 @@ def get_database_stats():
     
     cur.execute("SELECT COUNT(*) FROM user_decks")
     stats['saved_decks'] = cur.fetchone()[0]
+    
+    conn.close()
+    return stats
+
+def get_scraper_last_run():
+    """Get last run timestamps for scrapers"""
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    stats = {}
+    try:
+        cur.execute("SELECT scraper_name, last_run FROM scraper_meta")
+        for row in cur.fetchall():
+            stats[row[0]] = row[1]
+    except sqlite3.OperationalError:
+        pass
     
     conn.close()
     return stats
@@ -2059,3 +2169,16 @@ def clear_race_schedule(character_id, year_type):
     except sqlite3.OperationalError:
         pass
     conn.close()
+
+def get_scraper_last_run():
+    """Get the most recent last_run_timestamp from scraper_meta"""
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT MAX(last_run_timestamp) FROM scraper_meta")
+        row = cur.fetchone()
+        timestamp = row[0] if row else None
+    except sqlite3.OperationalError:
+        timestamp = None
+    conn.close()
+    return timestamp

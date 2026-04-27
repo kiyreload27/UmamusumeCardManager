@@ -92,7 +92,7 @@ def check_for_updates() -> Optional[dict]:
         remote_version = release_data.get('tag_name', '')
         
         # Compare versions
-        if compare_versions(VERSION, remote_version) < 0:
+        if parse_version(VERSION) != parse_version(remote_version):
             # Pick the right asset for the current OS
             download_url = None
             is_windows = sys.platform == "win32"

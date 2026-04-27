@@ -110,7 +110,18 @@ class CardSlot(QFrame):
         self._is_occupied = False
         
         self.setAcceptDrops(True)
+        
+        self.pulse_timer = QTimer(self)
+        self.pulse_timer.timeout.connect(self._toggle_pulse)
+        self._pulse_state = False
+
         self._build_ui()
+
+    def _toggle_pulse(self):
+        if self._is_occupied: return
+        self._pulse_state = not self._pulse_state
+        c = BG_LIGHT if self._pulse_state else BG_DARK
+        self.setStyleSheet(f"CardSlot {{ background: {BG_DARK}; border: 1px solid {c}; border-radius: {RADIUS_MD}px; }}")
 
     def _build_ui(self):
         self.setStyleSheet(f"CardSlot {{ background: {BG_DARK}; border: 1px solid {BG_LIGHT}; border-radius: {RADIUS_MD}px; }}")
@@ -184,6 +195,7 @@ class CardSlot(QFrame):
             event.acceptProposedAction()
 
     def set_card(self, card_data):
+        self.pulse_timer.stop()
         if not card_data:
             self.reset()
             return
@@ -239,6 +251,7 @@ class CardSlot(QFrame):
         self.image_label.setStyleSheet(f"color: {TEXT_DISABLED}; border: none;")
         self.setStyleSheet(f"CardSlot {{ background: {BG_DARK}; border: 1px solid {BG_LIGHT}; border-radius: {RADIUS_MD}px; }}")
         self.ctrl_w.hide()
+        self.pulse_timer.start(800)
 
     def _on_level_change(self, value):
         if value:
@@ -247,6 +260,8 @@ class CardSlot(QFrame):
 
 class DeckBuilderFrame(QWidget):
     """Deck builder with combined effects breakdown, drag-and-drop, export/import, and comparison"""
+
+    navigate_to_card = Signal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -259,6 +274,7 @@ class DeckBuilderFrame(QWidget):
         self._card_render_queue = []
         self._all_rendered_cards = {}
         self._search_after_id = None
+        self.effects_sort_desc = True
 
         self._build_ui()
         self.refresh_decks()
@@ -285,6 +301,12 @@ class DeckBuilderFrame(QWidget):
         self.deck_combo.currentTextChanged.connect(self.on_deck_selected_val)
         d_row1.addWidget(self.deck_combo)
 
+        ren_btn = QPushButton("✏️")
+        ren_btn.setFixedSize(28, 28)
+        ren_btn.setStyleSheet(f"QPushButton {{ background: transparent; color: {TEXT_MUTED}; border: none; padding: 0; }} QPushButton:hover {{ color: {ACCENT_PRIMARY}; }}")
+        ren_btn.clicked.connect(self.rename_current_deck)
+        d_row1.addWidget(ren_btn)
+
         n_btn = QPushButton("➕ New")
         n_btn.setFixedWidth(80)
         n_btn.clicked.connect(self.create_new_deck)
@@ -305,7 +327,7 @@ class DeckBuilderFrame(QWidget):
         dc_lay.addLayout(d_row1)
 
         d_row2 = QHBoxLayout()
-        for t, c in [("⚖️ Compare", self._show_comparison), ("📤 Export", self._export_deck), ("📥 Import", self._import_deck)]:
+        for t, c in [("⚖️ Compare", self._show_comparison), ("📤 Export", self._export_deck), ("📥 Import", self._import_deck), ("📋 Copy", self._copy_deck)]:
             btn = QPushButton(t)
             btn.setFont(FONT_TINY)
             btn.setFixedHeight(28)
@@ -325,6 +347,7 @@ class DeckBuilderFrame(QWidget):
         for i in range(6):
             r, c = i // 3, i % 3
             slot = CardSlot(i, self.remove_from_slot, self.on_slot_level_changed, on_drop_callback=self._on_card_dropped)
+            slot.name_label.callback = lambda idx=i: self._slot_name_clicked(idx)
             s_lay.addWidget(slot, r, c)
             self.card_slots.append(slot)
             s_lay.setColumnStretch(c, 1)
@@ -416,7 +439,7 @@ class DeckBuilderFrame(QWidget):
         eh_l.setStyleSheet(f"color: {TEXT_PRIMARY}; border: none;")
         eh_row.addWidget(eh_l)
 
-        self.score_badge = QLabel("Score: —")
+        self.score_badge = ClickableLabel("Score: —", callback=self._show_score_breakdown)
         self.score_badge.setFont(FONT_BODY_BOLD)
         self.score_badge.setStyleSheet(f"color: {ACCENT_WARNING}; background: {BG_MEDIUM}; border-radius: 14px; padding: 0 12px;")
         self.score_badge.setFixedHeight(28)
@@ -475,7 +498,7 @@ class DeckBuilderFrame(QWidget):
         sf = sv if sv else None
 
         cards = get_all_cards(rarity_filter=rf, type_filter=tf, search_term=sf, owned_only=ov)
-        self._card_render_queue = list(cards[:40])
+        self._card_render_queue = list(cards)
         QTimer.singleShot(0, lambda: self._process_card_queue(my_gen))
 
     def _process_card_queue(self, gen):
@@ -586,6 +609,20 @@ class DeckBuilderFrame(QWidget):
         self.deck_combo.setCurrentText(f"{did}: {dd.get('name', 'Imported')}")
         self.load_deck()
 
+    def _copy_deck(self):
+        if not self.current_deck_id: return
+        from PySide6.QtGui import QClipboard
+        from PySide6.QtWidgets import QApplication
+        cb = QApplication.clipboard()
+        text = [f"Deck: {self.deck_combo.currentText().split(': ', 1)[-1]}"]
+        for i in range(6):
+            if self.deck_slots[i]:
+                name = self.card_slots[i].name_label.text()
+                lvl = self.card_slots[i].level_combo.currentText()
+                text.append(f"#{i+1}: {name} (Lv{lvl})")
+        cb.setText("\n".join(text))
+        QMessageBox.information(self, "Copied", "Deck text copied to clipboard!")
+
     def _show_comparison(self):
         show_deck_comparison(self.window(), current_deck_id=self.current_deck_id)
 
@@ -635,6 +672,17 @@ class DeckBuilderFrame(QWidget):
             self.refresh_decks()
             self.deck_combo.setCurrentText(f"{did}: {n}")
             self.load_deck()
+
+    def rename_current_deck(self):
+        if not self.current_deck_id: return
+        from PySide6.QtWidgets import QInputDialog
+        from db.db_queries import rename_deck
+        current_name = self.deck_combo.currentText().split(': ', 1)[-1]
+        n, ok = QInputDialog.getText(self, "Rename Deck", "Enter new deck name:", text=current_name)
+        if ok and n:
+            rename_deck(self.current_deck_id, n)
+            self.refresh_decks()
+            self.deck_combo.setCurrentText(f"{self.current_deck_id}: {n}")
 
     def delete_current_deck(self):
         if self.current_deck_id:
@@ -690,6 +738,10 @@ class DeckBuilderFrame(QWidget):
             self.update_deck_count()
             self.update_effects_breakdown()
 
+    def _slot_name_clicked(self, index):
+        if self.deck_slots[index]:
+            self.navigate_to_card.emit(self.deck_slots[index])
+
     def update_deck_count(self):
         c = sum(1 for s in self.deck_slots if s is not None)
         self.deck_count_label.setText(f"{c} / 6")
@@ -737,27 +789,44 @@ class DeckBuilderFrame(QWidget):
         else: self.unique_text.setText("\nNo unique effects in this deck.")
 
         hdrs = ["Effect", "Total"] + [f"#{i+1}" for i in range(6)]
+        
+        def toggle_sort():
+            self.effects_sort_desc = not self.effects_sort_desc
+            self.update_effects_breakdown()
+
         for c, t in enumerate(hdrs):
-            l = QLabel(t)
+            if t == "Total":
+                l = ClickableLabel(t + (" ▼" if self.effects_sort_desc else " ▲"), callback=toggle_sort)
+            else:
+                l = QLabel(t)
             l.setFont(FONT_BODY_BOLD)
             l.setStyleSheet(f"color: {TEXT_PRIMARY}; background: {BG_MEDIUM}; padding: {SPACING_XS}px; border-radius: {RADIUS_SM}px;")
             self.table_lay.addWidget(l, 0, c)
 
-        ri = 1
-        for en, vs in sorted(ae.items()):
+        # Collect rows
+        rows = []
+        for en, vs in ae.items():
             tot = 0
             ip = False
             for v in vs:
-                if v and v != '-':
+                if v and str(v).strip() != '-':
                     if '%' in str(v): ip = True
                     try: tot += float(str(v).replace('%', '').replace('+', ''))
                     except: pass
+            rows.append((en, vs, tot, ip))
             
+        # Sort
+        if not hasattr(self, 'effects_sort_desc'): self.effects_sort_desc = True
+        rows.sort(key=lambda x: x[2], reverse=self.effects_sort_desc)
+
+        ri = 1
+        for en, vs, tot, ip in rows:
             ts = f"{tot:.0f}%" if ip else (f"+{tot:.0f}" if tot > 0 else str(int(tot)))
 
             l_en = QLabel(en)
             l_en.setFont(FONT_BODY)
             l_en.setStyleSheet(f"color: {TEXT_SECONDARY}; border: none;")
+            l_en.setToolTip("Effect: " + en)
             self.table_lay.addWidget(l_en, ri, 0)
 
             l_ts = QLabel(ts)
@@ -786,11 +855,20 @@ class DeckBuilderFrame(QWidget):
         hr = gt('Hint Rate')
         rb = gt('Race Bonus')
         sc = int(fr * 2 + tr + hr + rb)
+        self.last_score_breakdown = (fr, tr, hr, rb, sc)
 
         if sc > 0:
             c = ACCENT_SUCCESS if sc >= 300 else (ACCENT_WARNING if sc >= 150 else TEXT_MUTED)
-            self.score_badge.setText(f"⭐ Score: {sc}")
-            self.score_badge.setStyleSheet(f"color: {c}; background: {BG_MEDIUM}; border-radius: 14px; padding: 0 12px;")
+            self.score_badge.setText(f"Score: {sc}")
+            self.score_badge.setStyleSheet(f"color: {c}; background: {BG_DARK}; border: 1px solid {c}; border-radius: 14px; padding: 0 12px;")
+            self.score_badge.mousePressEvent = lambda e: self._show_score_breakdown()
         else:
             self.score_badge.setText("Score: —")
             self.score_badge.setStyleSheet(f"color: {TEXT_MUTED}; background: {BG_MEDIUM}; border-radius: 14px; padding: 0 12px;")
+            self.score_badge.mousePressEvent = None
+
+    def _show_score_breakdown(self):
+        if not hasattr(self, 'last_score_breakdown') or self.last_score_breakdown[4] == 0: return
+        fr, tr, hr, rb, sc = self.last_score_breakdown
+        msg = f"Friendship ×2: {fr*2}\nTraining: {tr}\nHint Rate: {hr}\nRace Bonus: {rb}\n\nTotal Score: {sc}"
+        QMessageBox.information(self, "Score Breakdown", msg)

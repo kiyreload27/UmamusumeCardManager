@@ -45,6 +45,7 @@ NAV_GROUPS = {
         ("DeckSkills", "📜", "Deck Skills"),
     ],
     "REFERENCE": [
+        ("Characters", "🏃", "Characters"),
         ("Tracks", "🏟", "Racetracks"),
         ("Calendar", "🗓️", "Race Calendar"),
     ]
@@ -158,6 +159,11 @@ class MainWindow(QMainWindow):
         mark_lay.addWidget(logo)
         mark_lay.addLayout(texts)
         mark_lay.addStretch()
+        
+        help_btn = create_styled_button(sidebar, text="?", command=self.show_shortcuts_dialog, style_type="ghost")
+        help_btn.setFixedSize(28, 28)
+        mark_lay.addWidget(help_btn)
+        
         lay.addLayout(mark_lay)
 
         # Navigation Groups
@@ -202,6 +208,12 @@ class MainWindow(QMainWindow):
         self._stats_label.setStyleSheet(f"color: {TEXT_DISABLED}; background: transparent;")
         self._stats_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         act_lay.addWidget(self._stats_label)
+
+        self._timestamp_label = QLabel("")
+        self._timestamp_label.setFont(FONT_TINY)
+        self._timestamp_label.setStyleSheet(f"color: {TEXT_DISABLED}; background: transparent;")
+        self._timestamp_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        act_lay.addWidget(self._timestamp_label)
         
         # Grid layout for bottom action buttons (2x2)
         btn_grid_lay = QGridLayout()
@@ -258,7 +270,7 @@ class MainWindow(QMainWindow):
         if view_id == "Dashboard":
             from gui.collection_dashboard import CollectionDashboard
             return CollectionDashboard(
-                parent, navigate_to_cards_callback=lambda: self._navigate("Cards")
+                parent, navigate_to_cards_callback=self.navigate_to_cards_filter
             )
         if view_id == "Cards":
             from gui.card_view import CardListFrame
@@ -274,6 +286,12 @@ class MainWindow(QMainWindow):
         if view_id == "Deck":
             from gui.deck_builder import DeckBuilderFrame
             return DeckBuilderFrame(parent)
+        if view_id == "Characters":
+            from PySide6.QtWidgets import QLabel
+            lbl = QLabel("Character View (Under Construction)")
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 24px;")
+            return lbl
         if view_id == "Skills":
             from gui.hints_skills_view import SkillSearchFrame
             return SkillSearchFrame(parent, navigate_to_card_callback=self.navigate_to_card)
@@ -293,6 +311,14 @@ class MainWindow(QMainWindow):
         return None
 
     # ─── Cross-view navigation callbacks ─────────────────────────────────────
+
+    def navigate_to_cards_filter(self, filter_type=None):
+        self._navigate("Cards")
+        if "Cards" in self.views and filter_type == "missing":
+            import gui.card_view
+            gui.card_view._CARD_FILTER_STATE['ownership'] = "Missing"
+            self.views["Cards"]._restore_filter_state()
+            self.views["Cards"].filter_cards()
 
     def navigate_to_card(self, card_id):
         self._navigate("Cards")
@@ -333,10 +359,30 @@ class MainWindow(QMainWindow):
             )
         except Exception:
             text = ""
-        self._stats_signal.emit(text)
+            
+        try:
+            from db.db_queries import get_scraper_last_run
+            last_run = get_scraper_last_run()
+            if last_run:
+                # Assuming format "YYYY-MM-DD HH:MM:SS..."
+                from datetime import datetime
+                dt = datetime.fromisoformat(last_run.split('.')[0])
+                ts_text = f"Last updated: {dt.strftime('%b %d, %Y')}"
+            else:
+                ts_text = "No data yet"
+        except Exception:
+            ts_text = ""
+
+        self._stats_signal.emit(f"{text}|{ts_text}")
 
     def _set_stats_label(self, text: str):
-        self._stats_label.setText(text)
+        if "|" in text:
+            st, ts = text.split("|", 1)
+            self._stats_label.setText(st)
+            if hasattr(self, '_timestamp_label'):
+                self._timestamp_label.setText(ts)
+        else:
+            self._stats_label.setText(text)
 
     # ─── Dialog launchers ────────────────────────────────────────────────────
 
@@ -360,6 +406,11 @@ class MainWindow(QMainWindow):
     def show_debug_panel(self):
         from gui.debug_panel import DebugPanel
         dlg = DebugPanel(self)
+        dlg.exec()
+
+    def show_shortcuts_dialog(self):
+        from gui.shortcuts_dialog import ShortcutsDialog
+        dlg = ShortcutsDialog(self)
         dlg.exec()
 
     def show_data_update_dialog(self):
